@@ -516,6 +516,18 @@ async function exportarShapefile() {
       throw new Error('shpwrite.zip retornou dados vazios');
     }
     
+    // Verificar primeiros caracteres/bytes
+    if (typeof zipData === 'string') {
+      console.log('Primeiros 10 chars:', zipData.substring(0, 10));
+      console.log('Primeiros 4 charCodes:', [
+        zipData.charCodeAt(0),
+        zipData.charCodeAt(1),
+        zipData.charCodeAt(2),
+        zipData.charCodeAt(3)
+      ]);
+      // Assinatura ZIP deve ser "PK" = [0x50, 0x4B, 0x03, 0x04]
+    }
+    
     // shpwrite retorna uma string binária, precisamos converter para Uint8Array
     let zipBuffer;
     if (typeof zipData === 'string') {
@@ -527,6 +539,8 @@ async function exportarShapefile() {
         zipBuffer[i] = zipData.charCodeAt(i) & 0xff;
       }
       console.log('Conversão concluída, bytes:', zipBuffer.byteLength);
+      console.log('Primeiros 4 bytes:', [zipBuffer[0], zipBuffer[1], zipBuffer[2], zipBuffer[3]]);
+      console.log('Esperado para ZIP: [80, 75, 3, 4] (PK header)');
     } else if (zipData instanceof ArrayBuffer) {
       zipBuffer = zipData;
     } else if (zipData.buffer instanceof ArrayBuffer) {
