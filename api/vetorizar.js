@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import process from "process";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 dotenv.config();
-import { execFile } from "child_process";
 
 export default async function handler(req, res) {
   // --- INÍCIO DA CORREÇÃO DE CORS ---
@@ -91,22 +91,21 @@ export default async function handler(req, res) {
 
     const imagePart = {
       inlineData: {
-        // Chama o script Python para segmentação com SAM/Hugging Face
-        const pythonScript = "./api/segment_anything.py";
-        const { imageBase64 } = req.body;
-        if (!imageBase64) {
-          return res.status(400).json({ error: 'Imagem não fornecida' });
-        }
-        execFile("python", [pythonScript, imageBase64], (error, stdout, stderr) => {
-          if (error) {
-            return res.status(500).json({ error: 'Erro ao executar segmentação', details: stderr });
-          }
-          try {
-            const result = JSON.parse(stdout);
-            // Aqui você pode converter a máscara para SVG conforme necessário
-            // Exemplo: return res.status(200).json({ svg: svgString });
-            return res.status(200).json({ mask: result });
-          } catch (e) {
-            return res.status(500).json({ error: 'Erro ao processar resultado da segmentação', details: stdout });
-          }
-        });
+        mimeType: imageBase64.split(';')[0].split(':')[1],
+        data: imageBase64.split(',')[1]
+      }
+    };
+
+    const result = await model.generateContent([prompt, imagePart]);
+    const response = await result.response;
+    const svgText = response.text();
+
+    return res.status(200).json({ svg: svgText });
+  } catch (error) {
+    console.error('Erro ao processar imagem:', error);
+    return res.status(500).json({ 
+      error: 'Erro ao processar imagem', 
+      details: error.message 
+    });
+  }
+}
