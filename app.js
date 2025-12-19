@@ -236,18 +236,28 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       const maskCtx = maskCanvas.getContext('2d');
 
       try {
-        // Verifica se canvg está disponível no escopo global
-        if (typeof window.canvg === 'undefined') {
-          throw new Error('Biblioteca Canvg não foi carregada. Verifique se umd.js está incluído no HTML.');
+        // Tenta usar Canvg de diferentes formas
+        let Canvg = null;
+        
+        // Verifica window.canvg primeiro
+        if (window.canvg) {
+          if (typeof window.canvg.Canvg !== 'undefined') {
+            Canvg = window.canvg.Canvg;
+          } else if (typeof window.canvg.from === 'function') {
+            Canvg = window.canvg;
+          } else if (typeof window.canvg === 'function') {
+            Canvg = window.canvg;
+          }
         }
-
-        let canvgLib = window.canvg;
-
-        // Tenta diferentes formas de acessar o Canvg
-        let Canvg = canvgLib.Canvg || canvgLib;
-
+        
+        // Tenta window.Canvg
+        if (!Canvg && window.Canvg) {
+          Canvg = window.Canvg;
+        }
+        
         if (!Canvg || typeof Canvg.from !== 'function') {
           console.error('window.canvg:', window.canvg);
+          console.error('window.Canvg:', window.Canvg);
           throw new Error('Canvg.from não está disponível. Estrutura do objeto canvg: ' + JSON.stringify(Object.keys(canvgLib)));
         }
 
