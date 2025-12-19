@@ -440,9 +440,12 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   const MIN_AREA_METERS = 1.0; // Área mínima para considerar um edifício (reduzido para permitir mais polígonos)
   const TOLERANCIA_SIMPLIFICACAO = 0.000005;
 
+  console.log(`Convertendo pixels para LatLng: ${geojson.features.length} features recebidas do WASM`);
+  console.log('Bounds do mapa:', mapBounds);
+
   if (!geojson || !geojson.features) return turf.featureCollection([]);
 
-  geojson.features.forEach(feature => {
+  geojson.features.forEach((feature, idx) => {
     // Garante que é polígono
     if (!feature.geometry || feature.geometry.type !== 'Polygon') return;
 
@@ -467,19 +470,28 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
       // Simplifica para ficar com cara de "Building Footprint" (menos vértices)
       const simplified = turf.simplify(poly, { tolerance: TOLERANCIA_SIMPLIFICACAO, highQuality: true });
 
+      const area = turf.area(simplified);
+      if (idx < 5) {
+        console.log(`Feature ${idx}: ${coords.length} pontos originais, área ${area.toFixed(2)}m²`);
+      }
+
       // AQUI é onde o filtro é aplicado.
-      if (turf.area(simplified) > MIN_AREA_METERS) { // Agora verifica se é maior que 1.0 m²
+      if (area > MIN_AREA_METERS) { // Agora verifica se é maior que 1.0 m²
         simplified.properties = {
           id: `imovel_${geojsonFeatures.length + featuresFinais.length + 1}`,
-          area_m2: turf.area(simplified).toFixed(2)
+          area_m2: area.toFixed(2)
         };
         featuresFinais.push(simplified);
+      } else {
+        if (idx < 5) console.log(`Feature ${idx} rejeitada: área ${area.toFixed(2)}m² < ${MIN_AREA_METERS}m²`);
       }
-    } catch {
+    } catch (err) {
+      if (idx < 5) console.log(`Feature ${idx} erro:`, err.message);
       // Ignora polígonos inválidos gerados pelo trace
     }
   });
 
+  console.log(`Total de features após filtro: ${featuresFinais.length}`);
   return turf.featureCollection(featuresFinais);
 }
 
