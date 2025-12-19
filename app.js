@@ -11,78 +11,156 @@ const geojsonFeatures = [];
 
 // --- PARÂMETROS AJUSTÁVEIS ---
 let CONFIG = {
-  edgeThreshold: 100,        // Threshold para Sobel edge detection
-  morphologySize: 3,          // Tamanho do kernel morfológico
-  minArea: 1.0,               // Área mínima em m²
+  edgeThreshold: 90,          // Threshold para Sobel edge detection
+  morphologySize: 5,          // Tamanho do kernel morfológico
+  minArea: 15.0,              // Área mínima em m² (edificação residencial mínima)
   simplification: 0.00001,    // Tolerância de simplificação
-  contrastBoost: 1.2          // Multiplicador de contraste
+  contrastBoost: 1.3,         // Multiplicador de contraste
+  minQualityScore: 35         // Score mínimo para aceitar polígono (0-100)
 };
+
+// Função para sincronizar slider e input numérico
+function sincronizarControle(sliderId, inputId, configKey, formatter = (v) => v.toFixed(0)) {
+  const slider = document.getElementById(sliderId);
+  const input = document.getElementById(inputId);
+  
+  if (!slider || !input) return;
+  
+  slider.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    CONFIG[configKey] = value;
+    input.value = formatter(value);
+  });
+  
+  input.addEventListener('input', (e) => {
+    let value = parseFloat(e.target.value) || 0;
+    const min = parseFloat(slider.min);
+    const max = parseFloat(slider.max);
+    
+    if (value < min) value = min;
+    if (value > max) value = max;
+    
+    CONFIG[configKey] = value;
+    slider.value = value;
+  });
+  
+  input.addEventListener('blur', (e) => {
+    input.value = formatter(CONFIG[configKey]);
+  });
+}
 
 // Inicializa listeners dos controles
 window.addEventListener('DOMContentLoaded', () => {
-  // Edge Threshold
-  const edgeThreshold = document.getElementById('edgeThreshold');
-  const edgeThresholdValue = document.getElementById('edgeThresholdValue');
-  edgeThreshold.addEventListener('input', (e) => {
-    CONFIG.edgeThreshold = parseInt(e.target.value);
-    edgeThresholdValue.textContent = CONFIG.edgeThreshold;
-  });
+  sincronizarControle('edgeThreshold', 'edgeThresholdInput', 'edgeThreshold', v => v.toFixed(0));
+  sincronizarControle('morphologySize', 'morphologySizeInput', 'morphologySize', v => v.toFixed(0));
+  sincronizarControle('minArea', 'minAreaInput', 'minArea', v => v.toFixed(0));
+  sincronizarControle('minQualityScore', 'minQualityScoreInput', 'minQualityScore', v => v.toFixed(0));
+  sincronizarControle('simplification', 'simplificationInput', 'simplification', v => v.toFixed(6));
+  sincronizarControle('contrastBoost', 'contrastBoostInput', 'contrastBoost', v => v.toFixed(1));
   
-  // Morphology Size
-  const morphologySize = document.getElementById('morphologySize');
-  const morphologySizeValue = document.getElementById('morphologySizeValue');
-  morphologySize.addEventListener('input', (e) => {
-    CONFIG.morphologySize = parseInt(e.target.value);
-    morphologySizeValue.textContent = CONFIG.morphologySize;
-  });
-  
-  // Min Area
-  const minArea = document.getElementById('minArea');
-  const minAreaValue = document.getElementById('minAreaValue');
-  minArea.addEventListener('input', (e) => {
-    CONFIG.minArea = parseFloat(e.target.value);
-    minAreaValue.textContent = CONFIG.minArea.toFixed(1);
-  });
-  
-  // Simplification
-  const simplification = document.getElementById('simplification');
-  const simplificationValue = document.getElementById('simplificationValue');
-  simplification.addEventListener('input', (e) => {
-    CONFIG.simplification = parseFloat(e.target.value);
-    simplificationValue.textContent = CONFIG.simplification.toFixed(6);
-  });
-  
-  // Contrast Boost
-  const contrastBoost = document.getElementById('contrastBoost');
-  const contrastBoostValue = document.getElementById('contrastBoostValue');
-  contrastBoost.addEventListener('input', (e) => {
-    CONFIG.contrastBoost = parseFloat(e.target.value);
-    contrastBoostValue.textContent = CONFIG.contrastBoost.toFixed(1);
-  });
+  // Ativa colorir por qualidade por padrão
+  const colorByQuality = document.getElementById('colorByQuality');
+  if (colorByQuality) {
+    colorByQuality.checked = true;
+  }
 });
+
+// Função para aplicar pré-configurações
+function aplicarPreset(tipo) {
+  let preset;
+  
+  switch(tipo) {
+    case 'urbano':
+      preset = {
+        edgeThreshold: 85,
+        morphologySize: 5,
+        minArea: 15.0,
+        simplification: 0.00001,
+        contrastBoost: 1.4,
+        minQualityScore: 40,
+        nome: 'Área Urbana Densa'
+      };
+      break;
+      
+    case 'rural':
+      preset = {
+        edgeThreshold: 70,
+        morphologySize: 7,
+        minArea: 30.0,
+        simplification: 0.00002,
+        contrastBoost: 1.5,
+        minQualityScore: 35,
+        nome: 'Área Rural'
+      };
+      break;
+      
+    case 'industrial':
+      preset = {
+        edgeThreshold: 80,
+        morphologySize: 5,
+        minArea: 100.0,
+        simplification: 0.00003,
+        contrastBoost: 1.3,
+        minQualityScore: 40,
+        nome: 'Galpões Industriais'
+      };
+      break;
+      
+    default:
+      return;
+  }
+  
+  // Aplicar configurações
+  CONFIG.edgeThreshold = preset.edgeThreshold;
+  CONFIG.morphologySize = preset.morphologySize;
+  CONFIG.minArea = preset.minArea;
+  CONFIG.simplification = preset.simplification;
+  CONFIG.contrastBoost = preset.contrastBoost;
+  CONFIG.minQualityScore = preset.minQualityScore;
+  
+  // Atualizar controles UI (sliders e inputs)
+  document.getElementById('edgeThreshold').value = preset.edgeThreshold;
+  document.getElementById('edgeThresholdInput').value = preset.edgeThreshold;
+  document.getElementById('morphologySize').value = preset.morphologySize;
+  document.getElementById('morphologySizeInput').value = preset.morphologySize;
+  document.getElementById('minArea').value = preset.minArea;
+  document.getElementById('minAreaInput').value = preset.minArea.toFixed(0);
+  document.getElementById('minQualityScore').value = preset.minQualityScore;
+  document.getElementById('minQualityScoreInput').value = preset.minQualityScore;
+  document.getElementById('simplification').value = preset.simplification;
+  document.getElementById('simplificationInput').value = preset.simplification.toFixed(6);
+  document.getElementById('contrastBoost').value = preset.contrastBoost;
+  document.getElementById('contrastBoostInput').value = preset.contrastBoost.toFixed(1);
+  
+  alert(`✅ Preset "${preset.nome}" aplicado!\n\n🎯 Otimizado para este tipo de área.`);
+}
 
 // Função para resetar parâmetros
 function resetarParametros() {
   CONFIG = {
-    edgeThreshold: 100,
-    morphologySize: 3,
-    minArea: 1.0,
+    edgeThreshold: 90,
+    morphologySize: 5,
+    minArea: 15.0,
     simplification: 0.00001,
-    contrastBoost: 1.2
+    contrastBoost: 1.3,
+    minQualityScore: 35
   };
   
-  document.getElementById('edgeThreshold').value = 100;
-  document.getElementById('edgeThresholdValue').textContent = '100';
-  document.getElementById('morphologySize').value = 3;
-  document.getElementById('morphologySizeValue').textContent = '3';
-  document.getElementById('minArea').value = 1.0;
-  document.getElementById('minAreaValue').textContent = '1.0';
+  // Atualizar controles UI (sliders e inputs)
+  document.getElementById('edgeThreshold').value = 90;
+  document.getElementById('edgeThresholdInput').value = 90;
+  document.getElementById('morphologySize').value = 5;
+  document.getElementById('morphologySizeInput').value = 5;
+  document.getElementById('minArea').value = 15.0;
+  document.getElementById('minAreaInput').value = 15;
+  document.getElementById('minQualityScore').value = 35;
+  document.getElementById('minQualityScoreInput').value = 35;
   document.getElementById('simplification').value = 0.00001;
-  document.getElementById('simplificationValue').textContent = '0.00001';
-  document.getElementById('contrastBoost').value = 1.2;
-  document.getElementById('contrastBoostValue').textContent = '1.2';
+  document.getElementById('simplificationInput').value = 0.00001;
+  document.getElementById('contrastBoost').value = 1.3;
+  document.getElementById('contrastBoostInput').value = 1.3;
   
-  alert('Parâmetros restaurados aos valores padrão!');
+  alert('Parâmetros restaurados aos valores padrão profissionais!');
 }
 
 // Função para limpar resultados
@@ -241,35 +319,48 @@ function calcularScoreConfianca(polygon) {
     // Score baseado em múltiplos fatores:
     let score = 0;
     
-    // 1. Área razoável (edificações típicas: 20-500m²)
-    if (area >= 20 && area <= 500) {
-      score += 30;
-    } else if (area >= 10 && area <= 1000) {
-      score += 15;
+    // 1. Área razoável (edificações típicas: 20-500m²) - PESO MAIOR
+    if (area >= 25 && area <= 400) {
+      score += 35; // Aumentado de 30
+    } else if (area >= 15 && area <= 800) {
+      score += 20; // Aumentado de 15
+    } else if (area >= 10) {
+      score += 5; // Penalidade menor para áreas muito pequenas
     }
     
-    // 2. Compacidade (edificações são geralmente compactas)
-    if (compactness > 0.6) {
-      score += 30;
-    } else if (compactness > 0.4) {
-      score += 15;
+    // 2. Compacidade (edificações são geralmente compactas) - PESO MAIOR
+    if (compactness > 0.65) {
+      score += 35; // Aumentado de 30
+    } else if (compactness > 0.5) {
+      score += 20; // Aumentado de 15
+    } else if (compactness > 0.3) {
+      score += 5; // Penalidade para formas muito alongadas
+    } else {
+      score -= 10; // PENALIZA formas lineares (sombras, ruas)
     }
     
     // 3. Número de vértices (edificações têm 4-20 vértices tipicamente)
-    if (numVertices >= 4 && numVertices <= 20) {
-      score += 25;
-    } else if (numVertices <= 30) {
+    if (numVertices >= 4 && numVertices <= 15) {
+      score += 20;
+    } else if (numVertices <= 25) {
       score += 10;
+    } else if (numVertices > 40) {
+      score -= 5; // Penaliza polígonos muito complexos (ruído)
     }
     
     // 4. Razão perímetro/área (edificações têm razão moderada)
     const perimeterAreaRatio = perimeter / Math.sqrt(area);
-    if (perimeterAreaRatio >= 3 && perimeterAreaRatio <= 6) {
-      score += 15;
+    if (perimeterAreaRatio >= 3.5 && perimeterAreaRatio <= 5.5) {
+      score += 10;
+    } else if (perimeterAreaRatio > 8) {
+      score -= 10; // Penaliza formas muito irregulares
     }
     
+    // Garante que score não seja negativo
+    score = Math.max(0, Math.min(100, score));
+    
     return {
-      score: Math.min(100, score),
+      score: score,
       compactness: compactness.toFixed(3),
       vertices: numVertices
     };
@@ -791,7 +882,7 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
         console.log(`Feature ${idx}: área calculada = ${area.toFixed(6)}m² (original ${coords.length} pontos)`);
       }
 
-      // AQUI é onde o filtro é aplicado.
+      // AQUI é onde os filtros são aplicados.
       if (area >= MIN_AREA_METERS) {
         // Limpar geometria: remove buracos e corrige auto-interseções
         let cleaned = limparGeometria(simplified);
@@ -799,21 +890,28 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
         // Calcular score de confiança
         const qualityScore = calcularScoreConfianca(cleaned);
         
-        cleaned.properties = {
-          id: `imovel_${geojsonFeatures.length + featuresFinais.length + 1}`,
-          area_m2: area.toFixed(2),
-          confidence_score: qualityScore.score,
-          compactness: qualityScore.compactness,
-          vertices: qualityScore.vertices,
-          quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa'
-        };
-        
-        featuresFinais.push(cleaned);
-        if (idx < 3) {
-          console.log(`Feature ${idx}: APROVADA! Área: ${area.toFixed(2)}m² | Score: ${qualityScore.score} | Qualidade: ${cleaned.properties.quality}`);
+        // Filtro de qualidade mínima (remove falsos positivos)
+        if (qualityScore.score >= CONFIG.minQualityScore) {
+          cleaned.properties = {
+            id: `imovel_${geojsonFeatures.length + featuresFinais.length + 1}`,
+            area_m2: area.toFixed(2),
+            confidence_score: qualityScore.score,
+            compactness: qualityScore.compactness,
+            vertices: qualityScore.vertices,
+            quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa'
+          };
+          
+          featuresFinais.push(cleaned);
+          if (idx < 3) {
+            console.log(`Feature ${idx}: ✅ APROVADA! Área: ${area.toFixed(2)}m² | Score: ${qualityScore.score} | Qualidade: ${cleaned.properties.quality}`);
+          }
+        } else {
+          if (idx < 3) {
+            console.log(`Feature ${idx}: ⚠️ REJEITADA POR QUALIDADE - Score ${qualityScore.score} < ${CONFIG.minQualityScore}`);
+          }
         }
       } else {
-        if (idx < 3) console.log(`Feature ${idx}: REJEITADA - área ${area.toFixed(2)}m² < ${MIN_AREA_METERS.toFixed(1)}m²`);
+        if (idx < 3) console.log(`Feature ${idx}: ❌ REJEITADA POR ÁREA - ${area.toFixed(2)}m² < ${MIN_AREA_METERS.toFixed(1)}m²`);
       }
     } catch (err) {
       console.error(`Feature ${idx} ERRO:`, err.message, err);
