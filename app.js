@@ -1,7 +1,7 @@
-// Importação do WASM via window.vetoriza
+// Importação do WASM via wasm_bindgen (no-modules target)
 let vetorizar_imagem;
 
-/* global L, leafletImage, turf */
+/* global L, leafletImage, turf, wasm_bindgen */
 
 // --- CONFIGURAÇÃO INICIAL ---
 const loader = document.getElementById('loader-overlay');
@@ -12,21 +12,23 @@ const geojsonFeatures = [];
 // Inicializa o WASM (Vetorizador)
 async function inicializarWasm() {
   try {
-    await window.vetoriza();
-    vetorizar_imagem = window.vetoriza.vetorizar_imagem;
+    // Com --target no-modules, o namespace é wasm_bindgen
+    await wasm_bindgen('vetoriza/pkg/vetoriza_bg.wasm');
+    vetorizar_imagem = wasm_bindgen.vetorizar_imagem;
     console.log("Módulo WASM carregado com sucesso.");
+    console.log("Função vetorizar_imagem:", vetorizar_imagem);
   } catch (e) {
     console.error("Falha ao carregar WASM:", e);
-    alert("Erro crítico: O módulo de vetorização não carregou.");
+    alert("Erro crítico: O módulo de vetorização não carregou. Detalhes: " + e.message);
   }
 }
 
 function testarObjetoGlobalWasm() {
-  if (window.vetoriza) {
-    console.log('vetoriza está disponível:', window.vetoriza);
+  if (typeof wasm_bindgen !== 'undefined') {
+    console.log('wasm_bindgen está disponível:', wasm_bindgen);
     inicializarWasm();
   } else {
-    console.error('Nenhum objeto global WASM encontrado (vetoriza). Verifique o build e a ordem dos scripts.');
+    console.error('Nenhum objeto global WASM encontrado (wasm_bindgen). Verifique o build e a ordem dos scripts.');
   }
 }
 
