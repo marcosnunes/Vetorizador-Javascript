@@ -9,6 +9,318 @@ const loaderText = document.getElementById('loader-text');
 let debugMaskLayer = null;
 const geojsonFeatures = [];
 
+// --- PARÂMETROS AJUSTÁVEIS ---
+let CONFIG = {
+  edgeThreshold: 100,        // Threshold para Sobel edge detection
+  morphologySize: 3,          // Tamanho do kernel morfológico
+  minArea: 1.0,               // Área mínima em m²
+  simplification: 0.00001,    // Tolerância de simplificação
+  contrastBoost: 1.2          // Multiplicador de contraste
+};
+
+// Inicializa listeners dos controles
+window.addEventListener('DOMContentLoaded', () => {
+  // Edge Threshold
+  const edgeThreshold = document.getElementById('edgeThreshold');
+  const edgeThresholdValue = document.getElementById('edgeThresholdValue');
+  edgeThreshold.addEventListener('input', (e) => {
+    CONFIG.edgeThreshold = parseInt(e.target.value);
+    edgeThresholdValue.textContent = CONFIG.edgeThreshold;
+  });
+  
+  // Morphology Size
+  const morphologySize = document.getElementById('morphologySize');
+  const morphologySizeValue = document.getElementById('morphologySizeValue');
+  morphologySize.addEventListener('input', (e) => {
+    CONFIG.morphologySize = parseInt(e.target.value);
+    morphologySizeValue.textContent = CONFIG.morphologySize;
+  });
+  
+  // Min Area
+  const minArea = document.getElementById('minArea');
+  const minAreaValue = document.getElementById('minAreaValue');
+  minArea.addEventListener('input', (e) => {
+    CONFIG.minArea = parseFloat(e.target.value);
+    minAreaValue.textContent = CONFIG.minArea.toFixed(1);
+  });
+  
+  // Simplification
+  const simplification = document.getElementById('simplification');
+  const simplificationValue = document.getElementById('simplificationValue');
+  simplification.addEventListener('input', (e) => {
+    CONFIG.simplification = parseFloat(e.target.value);
+    simplificationValue.textContent = CONFIG.simplification.toFixed(6);
+  });
+  
+  // Contrast Boost
+  const contrastBoost = document.getElementById('contrastBoost');
+  const contrastBoostValue = document.getElementById('contrastBoostValue');
+  contrastBoost.addEventListener('input', (e) => {
+    CONFIG.contrastBoost = parseFloat(e.target.value);
+    contrastBoostValue.textContent = CONFIG.contrastBoost.toFixed(1);
+  });
+});
+
+// Função para resetar parâmetros
+function resetarParametros() {
+  CONFIG = {
+    edgeThreshold: 100,
+    morphologySize: 3,
+    minArea: 1.0,
+    simplification: 0.00001,
+    contrastBoost: 1.2
+  };
+  
+  document.getElementById('edgeThreshold').value = 100;
+  document.getElementById('edgeThresholdValue').textContent = '100';
+  document.getElementById('morphologySize').value = 3;
+  document.getElementById('morphologySizeValue').textContent = '3';
+  document.getElementById('minArea').value = 1.0;
+  document.getElementById('minAreaValue').textContent = '1.0';
+  document.getElementById('simplification').value = 0.00001;
+  document.getElementById('simplificationValue').textContent = '0.00001';
+  document.getElementById('contrastBoost').value = 1.2;
+  document.getElementById('contrastBoostValue').textContent = '1.2';
+  
+  alert('Parâmetros restaurados aos valores padrão!');
+}
+
+// Função para limpar resultados
+function limparResultados() {
+  geojsonFeatures.length = 0;
+  drawnItems.clearLayers();
+  if (debugMaskLayer) {
+    map.removeLayer(debugMaskLayer);
+    debugMaskLayer = null;
+  }
+  if (window.debugMorphLayer) {
+    map.removeLayer(window.debugMorphLayer);
+    window.debugMorphLayer = null;
+  }
+  atualizarEstatisticas();
+  alert('Resultados limpos!');
+}
+
+// Função para atualizar estatísticas
+function atualizarEstatisticas() {
+  const totalPolygons = geojsonFeatures.length;
+  const totalArea = geojsonFeatures.reduce((sum, f) => sum + parseFloat(f.properties.area_m2 || 0), 0);
+  const highQ = geojsonFeatures.filter(f => f.properties.quality === 'alta').length;
+  const medQ = geojsonFeatures.filter(f => f.properties.quality === 'media').length;
+  const lowQ = geojsonFeatures.filter(f => f.properties.quality === 'baixa').length;
+  
+  document.getElementById('totalPolygons').textContent = totalPolygons;
+  document.getElementById('totalArea').textContent = totalArea.toFixed(2);
+  document.getElementById('highQuality').textContent = highQ;
+  document.getElementById('medQuality').textContent = medQ;
+  document.getElementById('lowQuality').textContent = lowQ;
+  document.getElementById('lastProcessTime').textContent = new Date().toLocaleTimeString('pt-BR');
+}
+
+// Obter estilo baseado na qualidade
+function getStyleByQuality(feature) {
+  const colorByQuality = document.getElementById('colorByQuality')?.checked;
+  
+  if (!colorByQuality) {
+    return { color: '#00ffcc', weight: 2, fillOpacity: 0.3 };
+  }
+  
+  const quality = feature.properties.quality;
+  let color;
+  
+  switch(quality) {
+    case 'alta':
+      color = '#00ff00'; // Verde
+      break;
+    case 'media':
+      color = '#ffff00'; // Amarelo
+      break;
+    case 'baixa':
+      color = '#ff0000'; // Vermelho
+      break;
+    default:
+      color = '#00ffcc'; // Ciano
+  }
+  
+  return { color: color, weight: 2, fillOpacity: 0.4 };
+}
+
+// Atualizar visualização quando checkbox muda
+function atualizarVisualizacao() {
+  if (window.lastGeoJSONLayer) {
+    // Remove camada antiga
+    drawnItems.removeLayer(window.lastGeoJSONLayer);
+    
+    // Recria com novo estilo
+    const geojson = { type: 'FeatureCollection', features: geojsonFeatures };
+    window.lastGeoJSONLayer = L.geoJSON(geojson, {
+      style: function(feature) {
+        return getStyleByQuality(feature);
+      },
+      onEachFeature: function(feature, layer) {
+        const props = feature.properties;
+        layer.bindPopup(`
+          <strong>ID:</strong> ${props.id}<br>
+          <strong>Área:</strong> ${props.area_m2} m²<br>
+          <strong>Score:</strong> ${props.confidence_score}/100<br>
+          <strong>Qualidade:</strong> ${props.quality}<br>
+          <strong>Compacidade:</strong> ${props.compactness}<br>
+          <strong>Vértices:</strong> ${props.vertices}
+        `);
+      }
+    });
+    
+    drawnItems.addLayer(window.lastGeoJSONLayer);
+  }
+}
+
+// ========== ALGORITMOS AVANÇADOS ==========
+
+// Threshold Adaptativo Otsu - encontra melhor threshold automaticamente
+function calcularThresholdOtsu(imageData) {
+  const histogram = new Array(256).fill(0);
+  const total = imageData.data.length / 4;
+  
+  // Calcular histograma
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    const gray = imageData.data[i]; // Usa canal vermelho (imagem já em grayscale)
+    histogram[gray]++;
+  }
+  
+  // Normalizar histograma
+  const prob = histogram.map(count => count / total);
+  
+  // Algoritmo Otsu
+  let maxVariance = 0;
+  let threshold = 0;
+  let sumTotal = 0;
+  
+  for (let i = 0; i < 256; i++) {
+    sumTotal += i * prob[i];
+  }
+  
+  let sumBackground = 0;
+  let weightBackground = 0;
+  
+  for (let t = 0; t < 256; t++) {
+    weightBackground += prob[t];
+    const weightForeground = 1 - weightBackground;
+    
+    if (weightBackground === 0 || weightForeground === 0) continue;
+    
+    sumBackground += t * prob[t];
+    const meanBackground = sumBackground / weightBackground;
+    const meanForeground = (sumTotal - sumBackground) / weightForeground;
+    
+    const variance = weightBackground * weightForeground * 
+                    Math.pow(meanBackground - meanForeground, 2);
+    
+    if (variance > maxVariance) {
+      maxVariance = variance;
+      threshold = t;
+    }
+  }
+  
+  console.log(`Threshold Otsu calculado: ${threshold}`);
+  return threshold;
+}
+
+// Calcular score de confiança do polígono
+function calcularScoreConfianca(polygon) {
+  try {
+    const area = turf.area(polygon);
+    const perimeter = turf.length(polygon, { units: 'meters' });
+    
+    // Compacidade (círculo perfeito = 1.0, linha = 0)
+    const compactness = (4 * Math.PI * area) / Math.pow(perimeter, 2);
+    
+    // Pontos do polígono
+    const coords = polygon.geometry.coordinates[0];
+    const numVertices = coords.length - 1; // -1 porque último = primeiro
+    
+    // Score baseado em múltiplos fatores:
+    let score = 0;
+    
+    // 1. Área razoável (edificações típicas: 20-500m²)
+    if (area >= 20 && area <= 500) {
+      score += 30;
+    } else if (area >= 10 && area <= 1000) {
+      score += 15;
+    }
+    
+    // 2. Compacidade (edificações são geralmente compactas)
+    if (compactness > 0.6) {
+      score += 30;
+    } else if (compactness > 0.4) {
+      score += 15;
+    }
+    
+    // 3. Número de vértices (edificações têm 4-20 vértices tipicamente)
+    if (numVertices >= 4 && numVertices <= 20) {
+      score += 25;
+    } else if (numVertices <= 30) {
+      score += 10;
+    }
+    
+    // 4. Razão perímetro/área (edificações têm razão moderada)
+    const perimeterAreaRatio = perimeter / Math.sqrt(area);
+    if (perimeterAreaRatio >= 3 && perimeterAreaRatio <= 6) {
+      score += 15;
+    }
+    
+    return {
+      score: Math.min(100, score),
+      compactness: compactness.toFixed(3),
+      vertices: numVertices
+    };
+  } catch (e) {
+    return { score: 0, compactness: 0, vertices: 0 };
+  }
+}
+
+// Limpar geometria: remover buracos internos e corrigir auto-interseções
+function limparGeometria(polygon) {
+  try {
+    // Remove buracos internos (mantém apenas outer ring)
+    if (polygon.geometry.coordinates.length > 1) {
+      polygon.geometry.coordinates = [polygon.geometry.coordinates[0]];
+    }
+    
+    // Tenta corrigir auto-interseções usando buffer(0)
+    let clean = turf.buffer(polygon, 0);
+    
+    // Se buffer retornar MultiPolygon, pega o maior
+    if (clean.geometry.type === 'MultiPolygon') {
+      const polygons = clean.geometry.coordinates.map(coords => 
+        turf.polygon(coords)
+      );
+      
+      // Ordena por área e pega o maior
+      polygons.sort((a, b) => turf.area(b) - turf.area(a));
+      clean = polygons[0];
+    }
+    
+    return clean;
+  } catch (e) {
+    console.warn('Erro ao limpar geometria:', e.message);
+    return polygon;
+  }
+}
+
+// Aplicar threshold adaptativo em substituição ao threshold fixo
+function aplicarThresholdAdaptativo(imageData, width, height) {
+  const threshold = calcularThresholdOtsu(imageData);
+  
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    const val = imageData.data[i];
+    const newVal = val > threshold ? 255 : 0;
+    imageData.data[i] = imageData.data[i + 1] = imageData.data[i + 2] = newVal;
+    imageData.data[i + 3] = 255;
+  }
+  
+  return threshold;
+}
+
 // Inicializa o WASM (Vetorizador)
 async function inicializarWasm() {
   try {
@@ -156,12 +468,12 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     // PRÉ-PROCESSAMENTO: aumenta contraste, aplica filtro de bordas e binariza
     const ctx = mainCanvas.getContext('2d');
     let imgData = ctx.getImageData(0, 0, width, height);
-    // 1. Aumenta contraste e brilho
+    // 1. Aumenta contraste e brilho (usa parâmetro CONFIG.contrastBoost)
     for (let i = 0; i < imgData.data.length; i += 4) {
-      // Simples realce: multiplica RGB e soma offset
-      imgData.data[i] = Math.min(255, imgData.data[i] * 1.2 + 20);     // R
-      imgData.data[i + 1] = Math.min(255, imgData.data[i + 1] * 1.2 + 20); // G
-      imgData.data[i + 2] = Math.min(255, imgData.data[i + 2] * 1.2 + 20); // B
+      // Realce configurável: multiplica RGB e soma offset
+      imgData.data[i] = Math.min(255, imgData.data[i] * CONFIG.contrastBoost + 20);     // R
+      imgData.data[i + 1] = Math.min(255, imgData.data[i + 1] * CONFIG.contrastBoost + 20); // G
+      imgData.data[i + 2] = Math.min(255, imgData.data[i + 2] * CONFIG.contrastBoost + 20); // B
     }
     ctx.putImageData(imgData, 0, 0);
 
@@ -195,7 +507,8 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         }
         const mag = Math.sqrt(gx * gx + gy * gy);
         const outIdx = (y * width + x) * 4;
-        outData[outIdx] = outData[outIdx + 1] = outData[outIdx + 2] = mag > 100 ? 255 : 0;
+        // Usa threshold configurável (CONFIG.edgeThreshold)
+        outData[outIdx] = outData[outIdx + 1] = outData[outIdx + 2] = mag > CONFIG.edgeThreshold ? 255 : 0;
         outData[outIdx + 3] = 255;
       }
     }
@@ -204,18 +517,11 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     }
     ctx.putImageData(sobelData, 0, 0);
 
-    // 3. Binarização (garante que só pixels brancos fiquem)
+    // 3. Binarização com Threshold Adaptativo (Otsu)
+    console.log('Aplicando threshold adaptativo (Otsu)...');
     let binData = ctx.getImageData(0, 0, width, height);
-    for (let i = 0; i < binData.data.length; i += 4) {
-      const v = binData.data[i];
-      if (v > 128) {
-        binData.data[i] = binData.data[i + 1] = binData.data[i + 2] = 255;
-        binData.data[i + 3] = 255;
-      } else {
-        binData.data[i] = binData.data[i + 1] = binData.data[i + 2] = 0;
-        binData.data[i + 3] = 255;
-      }
-    }
+    const thresholdUsado = aplicarThresholdAdaptativo(binData, width, height);
+    console.log(`Threshold adaptativo aplicado: ${thresholdUsado}`);
     ctx.putImageData(binData, 0, 0);
 
     loaderText.textContent = 'Aplicando detecção de contornos...';
@@ -254,9 +560,9 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       loaderText.textContent = 'Preenchendo contornos...';
       await yieldToMain();
       
-      // Dilate seguido de Erode (Closing) para fechar pequenos buracos
-      applyMorphologicalOperation(maskCtx, width, height, 'dilate', 3);
-      applyMorphologicalOperation(maskCtx, width, height, 'erode', 3);
+      // Dilate seguido de Erode (Closing) com tamanho de kernel configurável
+      applyMorphologicalOperation(maskCtx, width, height, 'dilate', CONFIG.morphologySize);
+      applyMorphologicalOperation(maskCtx, width, height, 'erode', CONFIG.morphologySize);
       
       // Inverter: bordas brancas -> preenchimento branco
       let imgData2 = maskCtx.getImageData(0, 0, width, height);
@@ -313,15 +619,40 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
           drawnItems.removeLayer(selectionLayer); // Remove o polígono de seleção manual
         } else {
           const poligonosVetorizados = L.geoJSON(geojsonConvertido, {
-            style: { color: '#00ffcc', weight: 2, fillOpacity: 0.3 }
+            style: function(feature) {
+              return getStyleByQuality(feature);
+            },
+            onEachFeature: function(feature, layer) {
+              // Adiciona popup com informações
+              const props = feature.properties;
+              layer.bindPopup(`
+                <strong>ID:</strong> ${props.id}<br>
+                <strong>Área:</strong> ${props.area_m2} m²<br>
+                <strong>Score:</strong> ${props.confidence_score}/100<br>
+                <strong>Qualidade:</strong> ${props.quality}<br>
+                <strong>Compacidade:</strong> ${props.compactness}<br>
+                <strong>Vértices:</strong> ${props.vertices}
+              `);
+            }
           });
           // Remove o polígono de seleção manual
           drawnItems.removeLayer(selectionLayer);
           // Adiciona os vetores
           drawnItems.addLayer(poligonosVetorizados);
+          // Guarda referência para atualização de visualização
+          window.lastGeoJSONLayer = poligonosVetorizados;
           // Guarda para exportação
           geojsonFeatures.push(...geojsonConvertido.features);
-          alert(`Processamento concluído. ${geojsonConvertido.features.length} polígonos detectados e vetorizados.`);
+          
+          // Atualiza estatísticas na UI
+          atualizarEstatisticas();
+          
+          const totalArea = geojsonConvertido.features.reduce((sum, f) => sum + parseFloat(f.properties.area_m2 || 0), 0);
+          const highQ = geojsonConvertido.features.filter(f => f.properties.quality === 'alta').length;
+          const medQ = geojsonConvertido.features.filter(f => f.properties.quality === 'media').length;
+          const lowQ = geojsonConvertido.features.filter(f => f.properties.quality === 'baixa').length;
+          
+          alert(`✅ Processamento concluído!\n\n📊 ${geojsonConvertido.features.length} polígonos detectados\n📐 Área total: ${totalArea.toFixed(2)} m²\n\n🎯 Qualidade:\n  🟢 Alta: ${highQ}\n  🟡 Média: ${medQ}\n  🔴 Baixa: ${lowQ}`);
         }
 
       } catch (e) {
@@ -402,8 +733,9 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   const imgHeight = canvas.height;
   const featuresFinais = [];
 
-  const MIN_AREA_METERS = 1.0; // Área mínima para considerar um edifício (reduzido para permitir mais polígonos)
-  const TOLERANCIA_SIMPLIFICACAO = 0.000005;
+  // Usa parâmetros configuráveis do painel de controle
+  const MIN_AREA_METERS = CONFIG.minArea;
+  const TOLERANCIA_SIMPLIFICACAO = CONFIG.simplification;
 
   console.log(`Convertendo pixels para LatLng: ${geojson.features.length} features recebidas do WASM`);
   console.log('Bounds do mapa:', {
@@ -460,15 +792,28 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
       }
 
       // AQUI é onde o filtro é aplicado.
-      if (area > MIN_AREA_METERS) { // Agora verifica se é maior que 1.0 m²
-        simplified.properties = {
+      if (area >= MIN_AREA_METERS) {
+        // Limpar geometria: remove buracos e corrige auto-interseções
+        let cleaned = limparGeometria(simplified);
+        
+        // Calcular score de confiança
+        const qualityScore = calcularScoreConfianca(cleaned);
+        
+        cleaned.properties = {
           id: `imovel_${geojsonFeatures.length + featuresFinais.length + 1}`,
-          area_m2: area.toFixed(2)
+          area_m2: area.toFixed(2),
+          confidence_score: qualityScore.score,
+          compactness: qualityScore.compactness,
+          vertices: qualityScore.vertices,
+          quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa'
         };
-        featuresFinais.push(simplified);
-        if (idx < 3) console.log(`Feature ${idx}: APROVADA!`);
+        
+        featuresFinais.push(cleaned);
+        if (idx < 3) {
+          console.log(`Feature ${idx}: APROVADA! Área: ${area.toFixed(2)}m² | Score: ${qualityScore.score} | Qualidade: ${cleaned.properties.quality}`);
+        }
       } else {
-        if (idx < 3) console.log(`Feature ${idx}: REJEITADA - área ${area.toFixed(6)}m² < ${MIN_AREA_METERS}m²`);
+        if (idx < 3) console.log(`Feature ${idx}: REJEITADA - área ${area.toFixed(2)}m² < ${MIN_AREA_METERS.toFixed(1)}m²`);
       }
     } catch (err) {
       console.error(`Feature ${idx} ERRO:`, err.message, err);

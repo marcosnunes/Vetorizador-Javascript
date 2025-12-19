@@ -27,8 +27,62 @@
 
     <div class="controls-panel">
       <div class="control-group">
-        <h3>Exportar Dados</h3>
+        <h3>⚙️ Parâmetros de Detecção</h3>
+        
+        <label for="edgeThreshold">Sensibilidade de Bordas: <span id="edgeThresholdValue">100</span></label>
+        <input type="range" id="edgeThreshold" min="30" max="200" value="100" step="10">
+        <small>Menor = mais bordas detectadas</small>
+        
+        <label for="morphologySize">Suavização de Bordas: <span id="morphologySizeValue">3</span>px</label>
+        <input type="range" id="morphologySize" min="1" max="7" value="3" step="2">
+        <small>Maior = fecha mais gaps</small>
+        
+        <label for="minArea">Área Mínima: <span id="minAreaValue">1.0</span>m²</label>
+        <input type="range" id="minArea" min="0.5" max="10" value="1.0" step="0.5">
+        <small>Filtra edificações pequenas</small>
+        
+        <label for="simplification">Simplificação: <span id="simplificationValue">0.00001</span></label>
+        <input type="range" id="simplification" min="0.000001" max="0.0001" value="0.00001" step="0.000001">
+        <small>Maior = polígonos mais simples</small>
+        
+        <label for="contrastBoost">Realce de Contraste: <span id="contrastBoostValue">1.2</span>x</label>
+        <input type="range" id="contrastBoost" min="1.0" max="2.0" value="1.2" step="0.1">
+        <small>Aumenta contraste da imagem</small>
+        
+        <div style="margin-top: 10px;">
+          <button onclick="resetarParametros()" style="background: #666;">🔄 Restaurar Padrões</button>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <h3>🎨 Visualização</h3>
+        <label>
+          <input type="checkbox" id="colorByQuality" onchange="atualizarVisualizacao()">
+          Colorir por Qualidade
+        </label>
+        <small>
+          🟢 Verde = Alta confiança (≥70)<br>
+          🟡 Amarelo = Média confiança (40-69)<br>
+          🔴 Vermelho = Baixa confiança (&lt;40)
+        </small>
+      </div>
+      
+      <div class="control-group">
+        <h3>📊 Estatísticas</h3>
+        <div id="stats">
+          <p><strong>Polígonos Detectados:</strong> <span id="totalPolygons">0</span></p>
+          <p><strong>Área Total:</strong> <span id="totalArea">0</span> m²</p>
+          <p><strong>Alta Qualidade:</strong> <span id="highQuality">0</span></p>
+          <p><strong>Média Qualidade:</strong> <span id="medQuality">0</span></p>
+          <p><strong>Baixa Qualidade:</strong> <span id="lowQuality">0</span></p>
+          <p><strong>Última Detecção:</strong> <span id="lastProcessTime">-</span></p>
+        </div>
+      </div>
+      
+      <div class="control-group">
+        <h3>💾 Exportar Dados</h3>
         <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
+        <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar Resultados</button>
       </div>
     </div>
   </div>

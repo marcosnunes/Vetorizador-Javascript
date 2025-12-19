@@ -72,6 +72,19 @@ input[type="file"] {
   box-sizing: border-box;
 }
 
+input[type="range"] {
+  width: 100%;
+  margin: 10px 0;
+  cursor: pointer;
+}
+
+small {
+  display: block;
+  color: #888;
+  font-size: 0.85em;
+  margin-bottom: 15px;
+}
+
 button {
   width: 100%;
   padding: 10px;
@@ -82,10 +95,24 @@ button {
   cursor: pointer;
   font-size: 16px;
   transition: background-color 0.2s;
+  font-weight: 500;
 }
 
 button:hover {
   background-color: #0056b3;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+#stats p {
+  margin: 8px 0;
+  padding: 8px;
+  background: #f8f9fa;
+  border-left: 3px solid #007bff;
+  border-radius: 3px;
 }
 
 #loader-overlay {
