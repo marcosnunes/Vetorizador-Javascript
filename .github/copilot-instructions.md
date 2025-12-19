@@ -1,25 +1,45 @@
-# Vetorizador de Imóveis - AI Agent Instructions
+# Vetorizador de Edificações - AI Agent Instructions
 
 ## Architecture Overview
 
 **Hybrid WebAssembly + Classical Computer Vision Application**
-- **Frontend**: Vanilla JS (`app.js`) with Leaflet for interactive maps, running via Vite dev server
-- **WASM Module**: Rust-compiled contour detection (`vetoriza/src/lib.rs`) → `vetoriza/pkg/vetoriza.js`
-- **Deployment**: Vercel with minimal config, Vite handles static builds
+- **Frontend**: Vanilla JS ([app.js](../app.js)) with Leaflet.js for interactive maps, Vite dev server
+- **WASM Module**: Rust-compiled contour detection ([vetoriza/src/lib.rs](../vetoriza/src/lib.rs)) → `vetoriza/pkg/vetoriza.js`
+- **Deployment**: Vercel with minimal config (`vercel.json`), Vite handles static builds
 - **100% Client-Side**: No backend APIs or external services required
+- **Key Libraries**: `turf.js` (geospatial analysis), `shpwrite.js` (Shapefile export), `leafletImage` (canvas capture)
 
-### Data Flow (Classical CV Pipeline - No AI)
-1. User draws rectangle on Leaflet map → captures canvas via `leafletImage()`
-2. Canvas preprocessing in `app.js` (lines 140-320):
-   - Contrast boost (×1.2 + 20)
-   - **Sobel edge detection** (3×3 kernels, Gx/Gy gradients)
-   - Binarization (threshold 128)
-   - **Morphological closing** (dilate+erode, 3px kernel)
-   - Color inversion (white edges → black, background → white)
+### Data Flow (Classical CV Pipeline)
+1. User draws polygon on Leaflet map → captures canvas via `leafletImage()`
+2. Canvas preprocessing in [app.js](../app.js#L550-L650):
+   - Contrast boost (configurable: `CONFIG.contrastBoost`, default ×1.3 + 20)
+   - **Sobel edge detection** (3×3 kernels, Gx/Gy gradients, threshold: `CONFIG.edgeThreshold`)
+   - **Otsu adaptive thresholding** ([app.js:258-304](../app.js#L258-L304)) - intelligent binarization
+   - **Morphological closing** (dilate+erode, kernel: `CONFIG.morphologySize`)
+   - Color inversion (white edges → black background)
 3. Base64 image sent to WASM `vetorizar_imagem()` → GeoJSON polygons via `imageproc::contours`
-4. Pixel coordinates converted to LatLng using map bounds
-5. **Area filtering**: Rejects polygons < 1m² to remove noise
-6. Results rendered as Leaflet GeoJSON layer → exported as Shapefile (Base64 ZIP)
+4. Pixel coordinates converted to LatLng using map bounds ([app.js:802-897](../app.js#L802-L897))
+5. **Quality scoring system** ([app.js:307-385](../app.js#L307-L385)):
+   - Score 0-100 based on: area (35pts), compactness (35pts), vertices (20pts), perimeter/area ratio (10pts)
+   - Filters out polygons with score < `CONFIG.minQualityScore` (default 35)
+   - Classifies as: Alta (70-100), Média (40-69), Baixa (0-39)
+6. **Geometry cleaning** ([app.js:387-408](../app.js#L387-L408)): removes inner holes, fixes self-intersections with `turf.buffer(0)`
+7. Results rendered as Leaflet GeoJSON layer with color-coded quality → exported as Shapefile (Base64 ZIP)
+
+### Configuration System
+**All CV parameters are runtime-adjustable** via UI sliders synced with `CONFIG` object ([app.js:16-75](../app.js#L16-L75)):
+```javascript
+CONFIG = {
+  edgeThreshold: 90,       // Sobel threshold (30-200)
+  morphologySize: 5,       // Kernel size (1-7px)
+  minArea: 15.0,           // Min polygon area (m²)
+  simplification: 0.00001, // Douglas-Peucker tolerance
+  contrastBoost: 1.3,      // Contrast multiplier
+  minQualityScore: 35      // Quality filter (0-100)
+}
+```
+
+**Presets** ([app.js:76-140](../app.js#L76-L140)): Urbano (dense buildings), Rural (sparse buildings), Industrial (large warehouses)
 
 ## Critical Patterns
 
