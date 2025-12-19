@@ -516,27 +516,29 @@ async function exportarShapefile() {
       throw new Error('shpwrite.zip retornou dados vazios');
     }
     
-    // Verificar primeiros caracteres/bytes
+    // Verificar primeiros caracteres
     if (typeof zipData === 'string') {
       console.log('Primeiros 10 chars:', zipData.substring(0, 10));
-      console.log('Primeiros 4 charCodes:', [
-        zipData.charCodeAt(0),
-        zipData.charCodeAt(1),
-        zipData.charCodeAt(2),
-        zipData.charCodeAt(3)
-      ]);
-      // Assinatura ZIP deve ser "PK" = [0x50, 0x4B, 0x03, 0x04]
+      
+      // Detectar se é Base64 (começa com "UEsDB" = "PK" em Base64)
+      if (zipData.startsWith('UEsDB') || /^[A-Za-z0-9+/=]+$/.test(zipData.substring(0, 100))) {
+        console.log('Detectado Base64! Decodificando...');
+      }
     }
     
-    // shpwrite retorna uma string binária, precisamos converter para Uint8Array
+    // shpwrite retorna Base64, precisamos decodificar para binário
     let zipBuffer;
     if (typeof zipData === 'string') {
-      console.log('Convertendo string binária para Uint8Array...');
-      // Cada caractere da string representa um byte
-      const len = zipData.length;
+      // Decodificar Base64 para binário
+      console.log('Decodificando Base64 para binário...');
+      const binaryString = atob(zipData);
+      console.log('Base64 decodificado, tamanho binário:', binaryString.length);
+      
+      // Converter string binária para Uint8Array
+      const len = binaryString.length;
       zipBuffer = new Uint8Array(len);
       for (let i = 0; i < len; i++) {
-        zipBuffer[i] = zipData.charCodeAt(i) & 0xff;
+        zipBuffer[i] = binaryString.charCodeAt(i);
       }
       console.log('Conversão concluída, bytes:', zipBuffer.byteLength);
       console.log('Primeiros 4 bytes:', [zipBuffer[0], zipBuffer[1], zipBuffer[2], zipBuffer[3]]);
