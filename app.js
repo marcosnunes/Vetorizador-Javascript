@@ -16,7 +16,8 @@ let CONFIG = {
   minArea: 15.0,              // Área mínima em m² (edificação residencial mínima)
   simplification: 0.00001,    // Tolerância de simplificação
   contrastBoost: 1.3,         // Multiplicador de contraste
-  minQualityScore: 35         // Score mínimo para aceitar polígono (0-100)
+  minQualityScore: 35,        // Score mínimo para aceitar polígono (0-100)
+  mergeDistance: 3            // Distância em metros para mesclar polígonos próximos
 };
 
 // Função para sincronizar slider e input numérico
@@ -57,6 +58,7 @@ window.addEventListener('DOMContentLoaded', () => {
   sincronizarControle('minQualityScore', 'minQualityScoreInput', 'minQualityScore', v => v.toFixed(0));
   sincronizarControle('simplification', 'simplificationInput', 'simplification', v => v.toFixed(6));
   sincronizarControle('contrastBoost', 'contrastBoostInput', 'contrastBoost', v => v.toFixed(1));
+  sincronizarControle('mergeDistance', 'mergeDistanceInput', 'mergeDistance', v => v.toFixed(1));
   
   // Ativa colorir por qualidade por padrão
   const colorByQuality = document.getElementById('colorByQuality');
@@ -72,37 +74,37 @@ function aplicarPreset(tipo) {
   switch(tipo) {
     case 'urbano':
       preset = {
-        edgeThreshold: 85,
-        morphologySize: 5,
-        minArea: 15.0,
-        simplification: 0.00001,
-        contrastBoost: 1.4,
-        minQualityScore: 40,
-        nome: 'Área Urbana Densa'
+        edgeThreshold: 75,        // Reduzido para capturar edificações completas
+        morphologySize: 7,        // Aumentado para fechar gaps e unir fragmentos
+        minArea: 25.0,            // Aumentado para filtrar ruído
+        simplification: 0.00003,  // Aumentado para geometrias mais limpas
+        contrastBoost: 1.5,       // Aumentado para bordas mais definidas
+        minQualityScore: 50,      // Aumentado para filtrar falsos positivos
+        nome: 'Área Urbana (Profissional)'
       };
       break;
       
     case 'rural':
       preset = {
-        edgeThreshold: 70,
-        morphologySize: 7,
-        minArea: 30.0,
-        simplification: 0.00002,
-        contrastBoost: 1.5,
-        minQualityScore: 35,
-        nome: 'Área Rural'
+        edgeThreshold: 65,        // Reduzido para capturar edificações em vegetação
+        morphologySize: 9,        // Muito maior para fechar gaps grandes
+        minArea: 40.0,            // Aumentado - edificações rurais são maiores
+        simplification: 0.00004,  // Mais simplificação para reduzir vértices
+        contrastBoost: 1.6,       // Alto contraste para separar de vegetação
+        minQualityScore: 45,      // Filtro médio para área rural
+        nome: 'Área Rural (Profissional)'
       };
       break;
       
     case 'industrial':
       preset = {
-        edgeThreshold: 80,
-        morphologySize: 5,
-        minArea: 100.0,
-        simplification: 0.00003,
-        contrastBoost: 1.3,
-        minQualityScore: 40,
-        nome: 'Galpões Industriais'
+        edgeThreshold: 70,
+        morphologySize: 7,
+        minArea: 150.0,           // Galpões são grandes
+        simplification: 0.00005,  // Muita simplificação - formas retangulares
+        contrastBoost: 1.4,
+        minQualityScore: 50,
+        nome: 'Galpões Industriais (Profissional)'
       };
       break;
       
@@ -117,6 +119,7 @@ function aplicarPreset(tipo) {
   CONFIG.simplification = preset.simplification;
   CONFIG.contrastBoost = preset.contrastBoost;
   CONFIG.minQualityScore = preset.minQualityScore;
+  CONFIG.mergeDistance = 3; // Sempre ativa fusão nos presets
   
   // Atualizar controles UI (sliders e inputs)
   document.getElementById('edgeThreshold').value = preset.edgeThreshold;
@@ -131,8 +134,10 @@ function aplicarPreset(tipo) {
   document.getElementById('simplificationInput').value = preset.simplification.toFixed(6);
   document.getElementById('contrastBoost').value = preset.contrastBoost;
   document.getElementById('contrastBoostInput').value = preset.contrastBoost.toFixed(1);
+  document.getElementById('mergeDistance').value = 3;
+  document.getElementById('mergeDistanceInput').value = '3.0';
   
-  alert(`✅ Preset "${preset.nome}" aplicado!\n\n🎯 Otimizado para este tipo de área.`);
+  alert(`✅ Preset "${preset.nome}" aplicado!\n\n🎯 Configurações profissionais ativadas:\n• Fusão automática de fragmentos\n• Filtros de qualidade otimizados\n• Geometrias simplificadas`);
 }
 
 // Função para resetar parâmetros
@@ -143,7 +148,8 @@ function resetarParametros() {
     minArea: 15.0,
     simplification: 0.00001,
     contrastBoost: 1.3,
-    minQualityScore: 35
+    minQualityScore: 35,
+    mergeDistance: 3
   };
   
   // Atualizar controles UI (sliders e inputs)
@@ -159,6 +165,8 @@ function resetarParametros() {
   document.getElementById('simplificationInput').value = 0.00001;
   document.getElementById('contrastBoost').value = 1.3;
   document.getElementById('contrastBoostInput').value = 1.3;
+  document.getElementById('mergeDistance').value = 3;
+  document.getElementById('mergeDistanceInput').value = '3.0';
   
   alert('✅ Parâmetros restaurados!\n\nTodos os valores foram redefinidos para os padrões recomendados.');
 }
@@ -396,6 +404,86 @@ function limparGeometria(polygon) {
     console.warn('Erro ao limpar geometria:', e.message);
     return polygon;
   }
+}
+
+// Mesclar polígonos próximos (mesma edificação fragmentada)
+function mesclarPoligonosProximos(features, distanciaMetros = 2) {
+  if (features.length === 0) return features;
+  
+  console.log(`🔗 Iniciando fusão de polígonos próximos (distância: ${distanciaMetros}m)...`);
+  
+  const merged = [];
+  const processed = new Set();
+  
+  features.forEach((feature, i) => {
+    if (processed.has(i)) return;
+    
+    // Lista de polígonos para mesclar com este
+    const toMerge = [feature];
+    processed.add(i);
+    
+    // Busca polígonos próximos
+    features.forEach((otherFeature, j) => {
+      if (i === j || processed.has(j)) return;
+      
+      try {
+        // Calcula distância entre polígonos
+        const distance = turf.distance(
+          turf.centerOfMass(feature),
+          turf.centerOfMass(otherFeature),
+          { units: 'meters' }
+        );
+        
+        // Se estão próximos, marca para fusão
+        if (distance <= distanciaMetros) {
+          toMerge.push(otherFeature);
+          processed.add(j);
+        }
+      } catch (e) {
+        // Ignora erros de geometria inválida
+      }
+    });
+    
+    // Mescla os polígonos próximos
+    if (toMerge.length === 1) {
+      merged.push(feature);
+    } else {
+      try {
+        // Aplica buffer pequeno para unir polígonos próximos
+        const buffered = toMerge.map(f => turf.buffer(f, distanciaMetros / 1000, { units: 'kilometers' }));
+        let union = buffered[0];
+        
+        for (let k = 1; k < buffered.length; k++) {
+          try {
+            union = turf.union(union, buffered[k]);
+          } catch (e) {
+            console.warn('Erro ao unir polígonos:', e.message);
+          }
+        }
+        
+        // Remove o buffer aplicado
+        const debuffered = turf.buffer(union, -(distanciaMetros / 1000), { units: 'kilometers' });
+        
+        // Se gerou MultiPolygon, separa novamente
+        if (debuffered.geometry.type === 'MultiPolygon') {
+          debuffered.geometry.coordinates.forEach(coords => {
+            const poly = turf.polygon(coords);
+            if (turf.area(poly) >= CONFIG.minArea) {
+              merged.push(poly);
+            }
+          });
+        } else if (turf.area(debuffered) >= CONFIG.minArea) {
+          merged.push(debuffered);
+        }
+      } catch (e) {
+        // Se falhar, mantém os polígonos originais
+        toMerge.forEach(f => merged.push(f));
+      }
+    }
+  });
+  
+  console.log(`✅ Fusão concluída: ${features.length} → ${merged.length} polígonos`);
+  return merged;
 }
 
 // Aplicar threshold adaptativo em substituição ao threshold fixo
@@ -942,7 +1030,31 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   });
 
   console.log(`Total de features após filtro: ${featuresFinais.length}`);
-  return turf.featureCollection(featuresFinais);
+  
+  // FUSÃO DE POLÍGONOS PRÓXIMOS (reduz fragmentação)
+  const mesclados = CONFIG.mergeDistance > 0 
+    ? mesclarPoligonosProximos(featuresFinais, CONFIG.mergeDistance)
+    : featuresFinais;
+  
+  // Recalcula propriedades após fusão
+  const finaisComPropriedades = mesclados.map((feature, idx) => {
+    const area = turf.area(feature);
+    const qualityScore = calcularScoreConfianca(feature);
+    
+    feature.properties = {
+      id: `imovel_${geojsonFeatures.length + idx + 1}`,
+      area_m2: area.toFixed(2),
+      confidence_score: qualityScore.score,
+      compactness: qualityScore.compactness,
+      vertices: qualityScore.vertices,
+      quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa'
+    };
+    
+    return feature;
+  });
+  
+  console.log(`✅ Total final após fusão: ${finaisComPropriedades.length} polígonos`);
+  return turf.featureCollection(finaisComPropriedades);
 }
 
 

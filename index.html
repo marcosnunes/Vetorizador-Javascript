@@ -114,6 +114,19 @@
           <small>1.0: Original | 1.3-1.5: Recomendado | 2.0: Máximo</small>
         </div>
         
+        <div class="param-control">
+          <label for="mergeDistance">
+            <span class="param-icon">🔗</span>
+            <span class="param-name">Fusão de Fragmentos</span>
+          </label>
+          <div class="input-group">
+            <input type="range" id="mergeDistance" min="0" max="10" value="3" step="0.5">
+            <input type="number" id="mergeDistanceInput" min="0" max="10" value="3" step="0.5" class="number-input">
+            <span class="unit">m</span>
+          </div>
+          <small>0: Desativado | 2-4: Recomendado | 8-10: Agressivo</small>
+        </div>
+        
         <div class="button-row">
           <button onclick="resetarParametros()" class="secondary-btn">🔄 Restaurar</button>
         </div>
