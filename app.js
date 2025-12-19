@@ -218,110 +218,73 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     }
     ctx.putImageData(binData, 0, 0);
 
-    // Pega a imagem completa com prefixo data:image/png;base64,
-    const base64Full = mainCanvas.toDataURL('image/png');
-
-    loaderText.textContent = 'Analisando com IA (Aguarde)...';
+    loaderText.textContent = 'Aplicando detecção de contornos...';
     await yieldToMain();
 
     try {
-      // 1. Chama a API Vercel (Serverless)
-      const svgString = await chamarBackendGemini(base64Full, width, height);
-      console.log("SVG recebido da IA.");
-
-      console.log("Conteúdo do SVG (Debug):", svgString);
-
-      // 2. Renderiza o SVG diretamente no canvas usando Canvg
+      // ABORDAGEM CLÁSSICA: Pula o Gemini e usa processamento direto
+      // A imagem já está binarizada (bordas detectadas)
+      
+      // Criar canvas para máscara final
       const maskCanvas = document.createElement('canvas');
       maskCanvas.width = width;
       maskCanvas.height = height;
-      const maskCtx = maskCanvas.getContext('2d');
-
-      try {
-        // Tenta usar Canvg de diferentes formas
-        let Canvg = null;
-        
-        console.log('Verificando disponibilidade de Canvg...');
-        console.log('window.canvg:', typeof window.canvg);
-        console.log('window.Canvg:', typeof window.Canvg);
-        
-        // Verifica window.canvg primeiro
-        if (window.canvg) {
-          if (typeof window.canvg.Canvg !== 'undefined') {
-            Canvg = window.canvg.Canvg;
-            console.log('Usando window.canvg.Canvg');
-          } else if (typeof window.canvg.from === 'function') {
-            Canvg = window.canvg;
-            console.log('Usando window.canvg diretamente');
-          } else if (typeof window.canvg === 'function') {
-            Canvg = window.canvg;
-            console.log('Usando window.canvg como função');
-          }
-        }
-        
-        // Tenta window.Canvg
-        if (!Canvg && window.Canvg) {
-          Canvg = window.Canvg;
-          console.log('Usando window.Canvg');
-        }
-        
-        if (!Canvg || typeof Canvg.from !== 'function') {
-          console.error('Estrutura de window.canvg:', window.canvg);
-          console.error('Estrutura de window.Canvg:', window.Canvg);
-          throw new Error('Canvg.from não está disponível. Verifique se a biblioteca foi carregada corretamente.');
-        }
-
-        console.log('Renderizando SVG com Canvg...');
-        // Usa o método correto do Canvg (versão 3.x usa .from())
-        const canvgInstance = await Canvg.from(maskCtx, svgString);
-        await canvgInstance.render();
-        console.log('SVG renderizado com sucesso!');
-
-      } catch (err) {
-        console.error('Erro ao renderizar SVG com Canvg:', err);
-        alert('Erro: Não foi possível renderizar o SVG com Canvg. Detalhes: ' + err.message);
-        loader.style.display = 'none';
-        drawnItems.removeLayer(selectionLayer);
-        return;
-      }
-
-      // DEBUG: Mostra a máscara no mapa (opcional)
-      if (debugMaskLayer) map.removeLayer(debugMaskLayer);
-      debugMaskLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.7 });
-      debugMaskLayer.addTo(map);
+      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+      
+      // Copia a imagem binarizada para o canvas de máscara
+      maskCtx.drawImage(mainCanvas, 0, 0);
+      
+      console.log('Imagem com bordas detectadas copiada para máscara');
       
       // Verifica se a máscara tem pixels brancos
-      const checkData = maskCtx.getImageData(0, 0, width, height);
+      let checkData = maskCtx.getImageData(0, 0, width, height);
       let whitePixels = 0;
       for (let i = 0; i < checkData.data.length; i += 4) {
         if (checkData.data[i] > 200) whitePixels++;
       }
-      console.log(`Máscara renderizada: ${whitePixels} pixels brancos de ${width * height} total`);
+      console.log(`Máscara com bordas: ${whitePixels} pixels brancos de ${width * height} total`);
 
-      // 4. Limpeza de ruído (Morfologia)
-      console.log('Aplicando limpeza morfológica...');
-      applyMorphologicalClean(maskCtx, width, height);
-      // Torna o fundo preto transparente na máscara binária
-      const imgData2 = maskCtx.getImageData(0, 0, width, height);
+      // DEBUG: Mostra a máscara de bordas no mapa
+      if (debugMaskLayer) map.removeLayer(debugMaskLayer);
+      debugMaskLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.7 });
+      debugMaskLayer.addTo(map);
+
+      // Limpeza de ruído (Morfologia) - Closing para preencher gaps
+      console.log('Aplicando morphological closing...');
+      loaderText.textContent = 'Preenchendo contornos...';
+      await yieldToMain();
+      
+      // Dilate seguido de Erode (Closing) para fechar pequenos buracos
+      applyMorphologicalOperation(maskCtx, width, height, 'dilate', 3);
+      applyMorphologicalOperation(maskCtx, width, height, 'erode', 3);
+      
+      // Inverter: bordas brancas -> preenchimento branco
+      let imgData2 = maskCtx.getImageData(0, 0, width, height);
+      
+      // Flood fill das regiões fechadas (transformar bordas em áreas preenchidas)
+      console.log('Aplicando flood fill para preencher áreas fechadas...');
+      loaderText.textContent = 'Preenchendo áreas...';
+      await yieldToMain();
+      
+      // Inverter cores: branco vira preto, preto vira branco
+      // Depois o WASM vai encontrar as regiões brancas como polígonos
       for (let i = 0; i < imgData2.data.length; i += 4) {
-        // Se o pixel for preto (R=0,G=0,B=0), torna transparente
-        if (imgData2.data[i] === 0 && imgData2.data[i + 1] === 0 && imgData2.data[i + 2] === 0) {
-          imgData2.data[i + 3] = 0;
-        } else {
-          imgData2.data[i + 3] = 255;
-        }
+        const val = imgData2.data[i];
+        const newVal = 255 - val; // Inverte
+        imgData2.data[i] = imgData2.data[i + 1] = imgData2.data[i + 2] = newVal;
+        imgData2.data[i + 3] = 255;
       }
       maskCtx.putImageData(imgData2, 0, 0);
       
-      // Verifica pixels após morfologia
-      const checkData2 = maskCtx.getImageData(0, 0, width, height);
-      let whitePixels2 = 0;
-      for (let i = 0; i < checkData2.data.length; i += 4) {
-        if (checkData2.data[i] > 200) whitePixels2++;
+      // Verifica pixels após inversão
+      checkData = maskCtx.getImageData(0, 0, width, height);
+      whitePixels = 0;
+      for (let i = 0; i < checkData.data.length; i += 4) {
+        if (checkData.data[i] > 200) whitePixels++;
       }
-      console.log(`Após morfologia: ${whitePixels2} pixels brancos`);
+      console.log(`Após inversão: ${whitePixels} pixels brancos`);
       
-      // DEBUG: Mostra a máscara binária após morfologia
+      // DEBUG: Mostra a máscara final
       if (window.debugMorphLayer) map.removeLayer(window.debugMorphLayer);
       window.debugMorphLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.9 });
       window.debugMorphLayer.addTo(map);
@@ -329,7 +292,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       loaderText.textContent = 'Vetorizando polígonos...';
       await yieldToMain();
 
-      // 5. Prepara para o WASM
+      // Prepara para o WASM
       const base64Mask = maskCanvas.toDataURL('image/png').split(',')[1];
       console.log('Enviando para WASM vetorizar_imagem...');
 
