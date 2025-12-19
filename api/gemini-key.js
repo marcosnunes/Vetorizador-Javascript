@@ -1,4 +1,6 @@
-module.exports = async function handler(req, res) {
+/* eslint-env node */
+/* global process, module */
+module.exports = function(req, res) {
   // Configurar CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -6,24 +8,28 @@ module.exports = async function handler(req, res) {
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
   
   // Permitir apenas GET para este endpoint
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    res.status(405).json({ error: 'Method Not Allowed' });
+    return;
   }
   
   const apiKey = process.env.GEMINI_API_KEY;
   
   if (!apiKey) {
     console.error('GEMINI_API_KEY não encontrada nas variáveis de ambiente');
-    return res.status(500).json({ 
+    console.error('Variáveis disponíveis:', Object.keys(process.env));
+    res.status(500).json({ 
       error: 'GEMINI_API_KEY não encontrada',
-      env: Object.keys(process.env).filter(k => k.includes('GEMINI'))
+      available: Object.keys(process.env).filter(k => k.includes('GEMINI'))
     });
+    return;
   }
   
   // Retorna a chave
-  return res.status(200).json({ geminiKey: apiKey });
+  res.status(200).json({ geminiKey: apiKey });
 };
