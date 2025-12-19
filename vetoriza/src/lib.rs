@@ -29,8 +29,19 @@ pub fn vetorizar_imagem(base64_img: &str) -> String {
     let contours: Vec<Contour<u32>> = find_contours(&binary_img);
 
     let features = contours.iter().map(|contour| {
-        let coordinates: Vec<Vec<f64>> = contour.points.iter().map(|p| vec![p.x as f64, p.y as f64]).collect();
-        let geometry = Geometry::new(Value::LineString(coordinates));
+        let mut coordinates: Vec<Vec<f64>> = contour.points.iter().map(|p| vec![p.x as f64, p.y as f64]).collect();
+        
+        // Fecha o polígono se necessário (primeiro ponto = último ponto)
+        if !coordinates.is_empty() {
+            let first = coordinates[0].clone();
+            let last = coordinates.last().unwrap();
+            if first[0] != last[0] || first[1] != last[1] {
+                coordinates.push(first);
+            }
+        }
+        
+        // Cria um Polygon ao invés de LineString (polígonos precisam de array de anéis)
+        let geometry = Geometry::new(Value::Polygon(vec![coordinates]));
         Feature {
             bbox: None,
             geometry: Some(geometry),

@@ -1,5 +1,6 @@
 {
   "name": "vetoriza",
+  "type": "module",
   "collaborators": [
     "marcosnunes <marcos.nunes.lph@outlook.com>"
   ],
@@ -9,6 +10,9 @@
     "vetoriza.js",
     "vetoriza.d.ts"
   ],
-  "browser": "vetoriza.js",
-  "types": "vetoriza.d.ts"
+  "main": "vetoriza.js",
+  "types": "vetoriza.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
 }
