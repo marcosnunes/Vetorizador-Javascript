@@ -5,8 +5,8 @@
 **Hybrid WebAssembly + Classical Computer Vision Application**
 - **Frontend**: Vanilla JS (`app.js`) with Leaflet for interactive maps, running via Vite dev server
 - **WASM Module**: Rust-compiled contour detection (`vetoriza/src/lib.rs`) → `vetoriza/pkg/vetoriza.js`
-- **Serverless APIs**: Node.js functions in `api/` deployed to Vercel (CommonJS only)
 - **Deployment**: Vercel with minimal config, Vite handles static builds
+- **100% Client-Side**: No backend APIs or external services required
 
 ### Data Flow (Classical CV Pipeline - No AI)
 1. User draws rectangle on Leaflet map → captures canvas via `leafletImage()`
@@ -57,16 +57,6 @@ const zipBlob = new Blob([zipBuffer], { type: 'application/zip' });
 
 Without `atob()` decoding, ZIP files are corrupted. Verify header: `[80, 75, 3, 4]` = "PK".
 
-### Vercel Serverless Functions
-**All API files MUST use CommonJS** (no `"type": "module"` in package.json):
-```javascript
-// ✅ Correct
-module.exports = function handler(req, res) { ... }
-
-// ❌ Wrong (causes 404)
-export default function handler(req, res) { ... }
-```
-
 ### Vite Build Plugin
 **Custom plugin copies WASM + app.js to dist** (vite.config.js:17-37):
 - Ensures `vetoriza/pkg/*.wasm` and `app.js` are available in build output
@@ -83,9 +73,9 @@ npm run dev              # Vite dev server on localhost:8080
 ### Vercel Deployment
 ```bash
 vercel link              # First time only
-vercel env add VAR_NAME  # Set environment variables
 vercel --prod            # Deploy to production
 ```
+**Note**: No environment variables required - all processing is client-side.
 
 ### WASM Rebuild
 ```bash
