@@ -452,6 +452,28 @@ satelliteMap.addTo(map);
 const drawnItems = new L.FeatureGroup();
 map.addLayer(drawnItems);
 
+// Tradução para português
+L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar área';
+L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar a área';
+L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Clique para continuar desenhando';
+L.drawLocal.draw.handlers.polygon.tooltip.end = 'Clique no primeiro ponto para fechar';
+L.drawLocal.draw.toolbar.actions.title = 'Cancelar desenho';
+L.drawLocal.draw.toolbar.actions.text = 'Cancelar';
+L.drawLocal.draw.toolbar.finish.title = 'Finalizar desenho';
+L.drawLocal.draw.toolbar.finish.text = 'Concluir';
+L.drawLocal.draw.toolbar.undo.title = 'Deletar último ponto';
+L.drawLocal.draw.toolbar.undo.text = 'Desfazer';
+L.drawLocal.edit.toolbar.actions.save.title = 'Salvar alterações';
+L.drawLocal.edit.toolbar.actions.save.text = 'Salvar';
+L.drawLocal.edit.toolbar.actions.cancel.title = 'Cancelar edição';
+L.drawLocal.edit.toolbar.actions.cancel.text = 'Cancelar';
+L.drawLocal.edit.toolbar.actions.clearAll.title = 'Limpar tudo';
+L.drawLocal.edit.toolbar.actions.clearAll.text = 'Limpar';
+L.drawLocal.edit.toolbar.buttons.edit = 'Editar camadas';
+L.drawLocal.edit.toolbar.buttons.editDisabled = 'Sem camadas para editar';
+L.drawLocal.edit.toolbar.buttons.remove = 'Deletar camadas';
+L.drawLocal.edit.toolbar.buttons.removeDisabled = 'Sem camadas para deletar';
+
 const drawControl = new L.Control.Draw({
   edit: { featureGroup: drawnItems },
   draw: {
