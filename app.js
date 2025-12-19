@@ -516,9 +516,18 @@ async function exportarShapefile() {
       throw new Error('shpwrite.zip retornou dados vazios');
     }
     
-    // Garantir que zipData é ArrayBuffer ou Uint8Array
+    // shpwrite retorna uma string binária, precisamos converter para Uint8Array
     let zipBuffer;
-    if (zipData instanceof ArrayBuffer) {
+    if (typeof zipData === 'string') {
+      console.log('Convertendo string binária para Uint8Array...');
+      // Cada caractere da string representa um byte
+      const len = zipData.length;
+      zipBuffer = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        zipBuffer[i] = zipData.charCodeAt(i) & 0xff;
+      }
+      console.log('Conversão concluída, bytes:', zipBuffer.byteLength);
+    } else if (zipData instanceof ArrayBuffer) {
       zipBuffer = zipData;
     } else if (zipData.buffer instanceof ArrayBuffer) {
       zipBuffer = zipData.buffer;
