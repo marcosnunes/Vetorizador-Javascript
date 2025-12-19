@@ -160,7 +160,7 @@ function resetarParametros() {
   document.getElementById('contrastBoost').value = 1.3;
   document.getElementById('contrastBoostInput').value = 1.3;
   
-  alert('Parâmetros restaurados aos valores padrão profissionais!');
+  alert('✅ Parâmetros restaurados!\n\nTodos os valores foram redefinidos para os padrões recomendados.');
 }
 
 // Função para limpar resultados
@@ -176,7 +176,7 @@ function limparResultados() {
     window.debugMorphLayer = null;
   }
   atualizarEstatisticas();
-  alert('Resultados limpos!');
+  alert('🗑️ Resultados limpos!\n\nTodos os polígonos foram removidos do mapa.');
 }
 
 // Função para atualizar estatísticas
@@ -422,7 +422,7 @@ async function inicializarWasm() {
     console.log("Função vetorizar_imagem:", vetorizar_imagem);
   } catch (e) {
     console.error("Falha ao carregar WASM:", e);
-    alert("Erro crítico: O módulo de vetorização não carregou. Detalhes: " + e.message);
+    alert("❌ Erro crítico ao carregar o módulo de processamento\n\nO sistema de vetorização não pôde ser inicializado.\n\nDetalhes técnicos: " + e.message);
   }
 }
 
@@ -541,7 +541,7 @@ async function chamarBackendGemini(base64Image, width, height) {
 
 // --- LÓGICA PRINCIPAL ---
 async function processarAreaDesenhada(bounds, selectionLayer) {
-  loaderText.textContent = 'Capturando imagem da área...';
+  loaderText.textContent = '📸 Capturando imagem da área selecionada...';
   loader.style.display = 'flex';
 
   // Usamos os bounds do polígono desenhado para a captura
@@ -549,7 +549,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     if (err) {
       loader.style.display = 'none';
       drawnItems.removeLayer(selectionLayer); // Remove o polígono se a captura falhar
-      alert("Erro ao capturar mapa: " + err.message);
+      alert("❌ Erro ao capturar imagem do mapa\n\n" + err.message);
       return;
     }
 
@@ -706,7 +706,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
 
         if (geojsonConvertido.features.length === 0) {
           console.warn('Nenhum polígono encontrado após vetorização WASM');
-          alert("A IA não detectou construções nesta área. Verifique o console para detalhes.");
+          alert("⚠️ Nenhuma edificação detectada\n\nNão foram encontradas construções na área selecionada.\n\nDicas:\n• Escolha uma área com edificações visíveis\n• Ajuste os parâmetros de sensibilidade\n• Reduza o score mínimo de qualidade");
           drawnItems.removeLayer(selectionLayer); // Remove o polígono de seleção manual
         } else {
           const poligonosVetorizados = L.geoJSON(geojsonConvertido, {
@@ -748,7 +748,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
 
       } catch (e) {
         console.error("Erro no processo de vetorização (WASM/Turf):", e);
-        alert("Erro ao processar vetores. Verifique o console para detalhes.");
+        alert("❌ Erro ao processar imagem\n\n" + e.message + "\n\nVerifique o console do navegador (F12) para mais detalhes.");
         drawnItems.removeLayer(selectionLayer);
       }
 
@@ -757,9 +757,9 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     } catch (error) {
       console.error("Erro Fatal:", error);
       if (error.message && error.message.includes('O modelo não retornou um SVG limpo')) {
-        alert("A IA não conseguiu identificar construções na área selecionada. Tente desenhar uma área diferente ou verifique se há edificações visíveis na imagem.");
+        alert("❌ Erro no processamento\n\nNão foi possível processar a área selecionada.\n\nTente:\n• Desenhar uma área diferente\n• Verificar se há edificações visíveis\n• Ajustar os parâmetros de detecção");
       } else {
-        alert("Erro: " + error.message);
+        alert("❌ Erro: " + error.message);
       }
       loader.style.display = 'none';
       drawnItems.removeLayer(selectionLayer);
@@ -927,7 +927,7 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
 // --- EXPORTAÇÃO ---
 async function exportarShapefile() {
   if (geojsonFeatures.length === 0) {
-    alert("Não há polígonos para exportar. Desenhe uma área e aguarde o processamento.");
+    alert("⚠️ Não há polígonos para exportar.\n\nDesenhe uma área no mapa e aguarde o processamento.");
     return;
   }
 
@@ -939,14 +939,14 @@ async function exportarShapefile() {
   
   const options = { folder: 'mapeamento_ia', types: { polygon: 'edificacoes' } };
 
-  loaderText.textContent = 'Gerando Shapefile...';
+  loaderText.textContent = '💾 Gerando arquivo Shapefile...';
   loader.style.display = 'flex';
 
   try {
     console.log('Verificando shpwrite:', typeof window.shpwrite);
     
     if (!window.shpwrite) {
-      throw new Error('Biblioteca shpwrite não carregada');
+      throw new Error('Biblioteca de exportação não foi carregada. Recarregue a página.');
     }
     
     console.log('Chamando shpwrite.zip...');
@@ -956,7 +956,7 @@ async function exportarShapefile() {
     console.log('ZIP tamanho:', zipData ? zipData.byteLength || zipData.length : 'undefined');
     
     if (!zipData) {
-      throw new Error('shpwrite.zip retornou dados vazios');
+      throw new Error('Não foi possível gerar o arquivo. Tente novamente.');
     }
     
     // Verificar primeiros caracteres
@@ -1006,11 +1006,11 @@ async function exportarShapefile() {
     document.body.removeChild(link);
     
     console.log('Download iniciado com sucesso');
-    alert(`Exportação concluída! Foram exportados ${geojsonFeatures.length} polígonos.`);
+    alert(`✅ Exportação concluída!\n\n📦 ${geojsonFeatures.length} polígonos exportados no formato Shapefile.\n\nO arquivo foi salvo como 'mapeamento_edificacoes.zip'`);
   } catch (e) {
     console.error("Erro ao exportar:", e);
     console.error("Stack trace:", e.stack);
-    alert("Erro ao gerar arquivo ZIP: " + e.message);
+    alert("❌ Erro ao gerar arquivo Shapefile:\n\n" + e.message);
   } finally {
     loader.style.display = 'none';
   }
