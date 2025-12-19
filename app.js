@@ -441,16 +441,30 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   const TOLERANCIA_SIMPLIFICACAO = 0.000005;
 
   console.log(`Convertendo pixels para LatLng: ${geojson.features.length} features recebidas do WASM`);
-  console.log('Bounds do mapa:', mapBounds);
+  console.log('Bounds do mapa:', {
+    north: mapBounds.getNorth(),
+    south: mapBounds.getSouth(),
+    east: mapBounds.getEast(),
+    west: mapBounds.getWest()
+  });
+  console.log('Dimensões canvas:', imgWidth, 'x', imgHeight);
 
   if (!geojson || !geojson.features) return turf.featureCollection([]);
 
   geojson.features.forEach((feature, idx) => {
     // Garante que é polígono
-    if (!feature.geometry || feature.geometry.type !== 'Polygon') return;
+    if (!feature.geometry || feature.geometry.type !== 'Polygon') {
+      console.log(`Feature ${idx}: não é polígono, tipo=${feature.geometry?.type}`);
+      return;
+    }
 
     const coords = feature.geometry.coordinates[0];
-    if (!coords || coords.length < 3) return;
+    if (!coords || coords.length < 3) {
+      console.log(`Feature ${idx}: coordenadas inválidas, length=${coords?.length}`);
+      return;
+    }
+
+    if (idx < 3) console.log(`Feature ${idx}: ${coords.length} pontos, primeiros 3:`, coords.slice(0, 3));
 
     // Conversão Matemática: Pixel -> Lat/Lng
     const newCoords = coords.map(p => {
@@ -459,6 +473,8 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
       const lat = mapBounds.getNorth() - ((p[1] / imgHeight) * (mapBounds.getNorth() - mapBounds.getSouth()));
       return [lng, lat];
     });
+    
+    if (idx < 3) console.log(`Feature ${idx} convertida, primeiras 3 coords:`, newCoords.slice(0, 3));
 
     // Fecha o anel se necessário
     if (newCoords[0][0] !== newCoords[newCoords.length - 1][0]) {
@@ -467,12 +483,15 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
 
     try {
       const poly = turf.polygon([newCoords]);
+      if (idx < 3) console.log(`Feature ${idx}: polígono criado com turf`);
+      
       // Simplifica para ficar com cara de "Building Footprint" (menos vértices)
       const simplified = turf.simplify(poly, { tolerance: TOLERANCIA_SIMPLIFICACAO, highQuality: true });
+      if (idx < 3) console.log(`Feature ${idx}: polígono simplificado`);
 
       const area = turf.area(simplified);
-      if (idx < 5) {
-        console.log(`Feature ${idx}: ${coords.length} pontos originais, área ${area.toFixed(2)}m²`);
+      if (idx < 3) {
+        console.log(`Feature ${idx}: área calculada = ${area.toFixed(6)}m² (original ${coords.length} pontos)`);
       }
 
       // AQUI é onde o filtro é aplicado.
@@ -482,11 +501,12 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
           area_m2: area.toFixed(2)
         };
         featuresFinais.push(simplified);
+        if (idx < 3) console.log(`Feature ${idx}: APROVADA!`);
       } else {
-        if (idx < 5) console.log(`Feature ${idx} rejeitada: área ${area.toFixed(2)}m² < ${MIN_AREA_METERS}m²`);
+        if (idx < 3) console.log(`Feature ${idx}: REJEITADA - área ${area.toFixed(6)}m² < ${MIN_AREA_METERS}m²`);
       }
     } catch (err) {
-      if (idx < 5) console.log(`Feature ${idx} erro:`, err.message);
+      console.error(`Feature ${idx} ERRO:`, err.message, err);
       // Ignora polígonos inválidos gerados pelo trace
     }
   });
