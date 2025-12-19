@@ -1,7 +1,6 @@
 {
   "name": "mapeador-imoveis-ai",
   "version": "1.0.0",
-  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "vite",
