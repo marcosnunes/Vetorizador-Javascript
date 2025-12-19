@@ -239,31 +239,41 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         // Tenta usar Canvg de diferentes formas
         let Canvg = null;
         
+        console.log('Verificando disponibilidade de Canvg...');
+        console.log('window.canvg:', typeof window.canvg);
+        console.log('window.Canvg:', typeof window.Canvg);
+        
         // Verifica window.canvg primeiro
         if (window.canvg) {
           if (typeof window.canvg.Canvg !== 'undefined') {
             Canvg = window.canvg.Canvg;
+            console.log('Usando window.canvg.Canvg');
           } else if (typeof window.canvg.from === 'function') {
             Canvg = window.canvg;
+            console.log('Usando window.canvg diretamente');
           } else if (typeof window.canvg === 'function') {
             Canvg = window.canvg;
+            console.log('Usando window.canvg como função');
           }
         }
         
         // Tenta window.Canvg
         if (!Canvg && window.Canvg) {
           Canvg = window.Canvg;
+          console.log('Usando window.Canvg');
         }
         
         if (!Canvg || typeof Canvg.from !== 'function') {
-          console.error('window.canvg:', window.canvg);
-          console.error('window.Canvg:', window.Canvg);
-          throw new Error('Canvg.from não está disponível. Estrutura do objeto canvg: ' + JSON.stringify(Object.keys(canvgLib)));
+          console.error('Estrutura de window.canvg:', window.canvg);
+          console.error('Estrutura de window.Canvg:', window.Canvg);
+          throw new Error('Canvg.from não está disponível. Verifique se a biblioteca foi carregada corretamente.');
         }
 
+        console.log('Renderizando SVG com Canvg...');
         // Usa o método correto do Canvg (versão 3.x usa .from())
         const canvgInstance = await Canvg.from(maskCtx, svgString);
         await canvgInstance.render();
+        console.log('SVG renderizado com sucesso!');
 
       } catch (err) {
         console.error('Erro ao renderizar SVG com Canvg:', err);
@@ -277,8 +287,17 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       if (debugMaskLayer) map.removeLayer(debugMaskLayer);
       debugMaskLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.7 });
       debugMaskLayer.addTo(map);
+      
+      // Verifica se a máscara tem pixels brancos
+      const checkData = maskCtx.getImageData(0, 0, width, height);
+      let whitePixels = 0;
+      for (let i = 0; i < checkData.data.length; i += 4) {
+        if (checkData.data[i] > 200) whitePixels++;
+      }
+      console.log(`Máscara renderizada: ${whitePixels} pixels brancos de ${width * height} total`);
 
       // 4. Limpeza de ruído (Morfologia)
+      console.log('Aplicando limpeza morfológica...');
       applyMorphologicalClean(maskCtx, width, height);
       // Torna o fundo preto transparente na máscara binária
       const imgData2 = maskCtx.getImageData(0, 0, width, height);
@@ -291,6 +310,15 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         }
       }
       maskCtx.putImageData(imgData2, 0, 0);
+      
+      // Verifica pixels após morfologia
+      const checkData2 = maskCtx.getImageData(0, 0, width, height);
+      let whitePixels2 = 0;
+      for (let i = 0; i < checkData2.data.length; i += 4) {
+        if (checkData2.data[i] > 200) whitePixels2++;
+      }
+      console.log(`Após morfologia: ${whitePixels2} pixels brancos`);
+      
       // DEBUG: Mostra a máscara binária após morfologia
       if (window.debugMorphLayer) map.removeLayer(window.debugMorphLayer);
       window.debugMorphLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.9 });
@@ -301,17 +329,22 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
 
       // 5. Prepara para o WASM
       const base64Mask = maskCanvas.toDataURL('image/png').split(',')[1];
+      console.log('Enviando para WASM vetorizar_imagem...');
 
       try {
         // Chama o Rust/WASM para transformar pixels em GeoJSON
         const geojsonStr = vetorizar_imagem(base64Mask);
+        console.log('WASM retornou GeoJSON string');
         const geojsonResult = JSON.parse(geojsonStr);
+        console.log('GeoJSON parseado:', geojsonResult);
 
         // Converte coordenadas de pixel (0,0) para Lat/Lng reais
         const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds);
+        console.log(`Conversão para LatLng: ${geojsonConvertido.features.length} features`);
 
         if (geojsonConvertido.features.length === 0) {
-          alert("A IA não detectou construções nesta área.");
+          console.warn('Nenhum polígono encontrado após vetorização WASM');
+          alert("A IA não detectou construções nesta área. Verifique o console para detalhes.");
           drawnItems.removeLayer(selectionLayer); // Remove o polígono de seleção manual
         } else {
           const poligonosVetorizados = L.geoJSON(geojsonConvertido, {
