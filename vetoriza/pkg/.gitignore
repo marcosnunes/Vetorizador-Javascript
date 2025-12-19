@@ -1,0 +1,2 @@
+# Não ignorar os arquivos do pacote WebAssembly
+# Estes arquivos são necessários para o Vercel

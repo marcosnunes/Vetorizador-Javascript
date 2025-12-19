@@ -1,0 +1,14 @@
+{
+  "name": "vetoriza",
+  "collaborators": [
+    "marcosnunes <marcos.nunes.lph@outlook.com>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "vetoriza_bg.wasm",
+    "vetoriza.js",
+    "vetoriza.d.ts"
+  ],
+  "browser": "vetoriza.js",
+  "types": "vetoriza.d.ts"
+}
