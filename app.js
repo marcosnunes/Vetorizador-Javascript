@@ -488,26 +488,61 @@ async function exportarShapefile() {
     return;
   }
 
+  console.log(`Iniciando exportação de ${geojsonFeatures.length} features`);
+  console.log('Primeira feature:', geojsonFeatures[0]);
+  
   const geojson = { type: "FeatureCollection", features: geojsonFeatures };
+  console.log('GeoJSON completo:', geojson);
+  
   const options = { folder: 'mapeamento_ia', types: { polygon: 'edificacoes' } };
 
   loaderText.textContent = 'Gerando Shapefile...';
   loader.style.display = 'flex';
 
   try {
-    // @ts-ignore (shpwrite é global)
+    console.log('Verificando shpwrite:', typeof window.shpwrite);
+    
+    if (!window.shpwrite) {
+      throw new Error('Biblioteca shpwrite não carregada');
+    }
+    
+    console.log('Chamando shpwrite.zip...');
     const zipData = await window.shpwrite.zip(geojson, options);
-    const zipBlob = new Blob([zipData], { type: 'application/zip' });
+    
+    console.log('ZIP gerado, tipo:', typeof zipData);
+    console.log('ZIP tamanho:', zipData ? zipData.byteLength || zipData.length : 'undefined');
+    
+    if (!zipData) {
+      throw new Error('shpwrite.zip retornou dados vazios');
+    }
+    
+    // Garantir que zipData é ArrayBuffer ou Uint8Array
+    let zipBuffer;
+    if (zipData instanceof ArrayBuffer) {
+      zipBuffer = zipData;
+    } else if (zipData.buffer instanceof ArrayBuffer) {
+      zipBuffer = zipData.buffer;
+    } else {
+      zipBuffer = zipData;
+    }
+    
+    console.log('Criando blob com tamanho:', zipBuffer.byteLength || zipBuffer.length);
+    const zipBlob = new Blob([zipBuffer], { type: 'application/zip' });
+    console.log('Blob criado, tamanho:', zipBlob.size);
+    
     const link = document.createElement('a');
     link.href = URL.createObjectURL(zipBlob);
     link.download = 'mapeamento_edificacoes.zip';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    
+    console.log('Download iniciado com sucesso');
     alert(`Exportação concluída! Foram exportados ${geojsonFeatures.length} polígonos.`);
   } catch (e) {
     console.error("Erro ao exportar:", e);
-    alert("Erro ao gerar arquivo ZIP.");
+    console.error("Stack trace:", e.stack);
+    alert("Erro ao gerar arquivo ZIP: " + e.message);
   } finally {
     loader.style.display = 'none';
   }
