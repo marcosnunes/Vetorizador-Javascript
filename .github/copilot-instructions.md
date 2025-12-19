@@ -2,23 +2,63 @@
 
 ## Architecture Overview
 
-**Hybrid WebAssembly + Serverless Application**
+**Hybrid WebAssembly + Classical Computer Vision Application**
 - **Frontend**: Vanilla JS (`app.js`) with Leaflet for interactive maps, running via Vite dev server
-- **WASM Module**: Rust-compiled image vectorization (`vetoriza/src/lib.rs`) → `vetoriza/pkg/vetoriza.js`
-- **Serverless APIs**: Node.js functions in `api/` deployed to Vercel (use CommonJS, not ES modules)
-- **Deployment**: Vercel with auto-detection (no complex `builds` config needed)
+- **WASM Module**: Rust-compiled contour detection (`vetoriza/src/lib.rs`) → `vetoriza/pkg/vetoriza.js`
+- **Serverless APIs**: Node.js functions in `api/` deployed to Vercel (CommonJS only)
+- **Deployment**: Vercel with minimal config, Vite handles static builds
 
-### Data Flow
+### Data Flow (Classical CV Pipeline - No AI)
 1. User draws rectangle on Leaflet map → captures canvas via `leafletImage()`
-2. Canvas preprocessing in `app.js` (contrast, Sobel edge detection, binarization)
-3. Base64 image sent to `/api/gemini-key` → Google Gemini AI generates SVG
-4. Alternatively, WASM `vetorizar_imagem()` processes image → GeoJSON polygons
-5. Results rendered as Leaflet layers → exported as Shapefile
+2. Canvas preprocessing in `app.js` (lines 140-320):
+   - Contrast boost (×1.2 + 20)
+   - **Sobel edge detection** (3×3 kernels, Gx/Gy gradients)
+   - Binarization (threshold 128)
+   - **Morphological closing** (dilate+erode, 3px kernel)
+   - Color inversion (white edges → black, background → white)
+3. Base64 image sent to WASM `vetorizar_imagem()` → GeoJSON polygons via `imageproc::contours`
+4. Pixel coordinates converted to LatLng using map bounds
+5. **Area filtering**: Rejects polygons < 1m² to remove noise
+6. Results rendered as Leaflet GeoJSON layer → exported as Shapefile (Base64 ZIP)
 
 ## Critical Patterns
 
+### WASM Integration (No-Modules Target)
+**Current setup uses `--target no-modules` for UMD compatibility**:
+```bash
+cd vetoriza
+wasm-pack build --target no-modules --release
+git add pkg/  # MUST commit WASM artifacts
+```
+
+**Frontend loading** (app.js:13-17):
+```javascript
+await wasm_bindgen('vetoriza/pkg/vetoriza_bg.wasm');
+vetorizar_imagem = wasm_bindgen.vetorizar_imagem;
+```
+
+**Rust function** (lib.rs:12): Returns GeoJSON string with Polygon geometry (not LineString):
+```rust
+let geometry = Geometry::new(Value::Polygon(vec![coordinates]));
+```
+
+### Shapefile Export (Base64 ZIP Issue)
+**CRITICAL**: `shpwrite.zip()` returns **Base64-encoded ZIP**, not binary. Must decode before creating Blob:
+
+```javascript
+// app.js:534-542
+const binaryString = atob(zipData);  // Decode Base64 first
+const zipBuffer = new Uint8Array(binaryString.length);
+for (let i = 0; i < binaryString.length; i++) {
+  zipBuffer[i] = binaryString.charCodeAt(i);
+}
+const zipBlob = new Blob([zipBuffer], { type: 'application/zip' });
+```
+
+Without `atob()` decoding, ZIP files are corrupted. Verify header: `[80, 75, 3, 4]` = "PK".
+
 ### Vercel Serverless Functions
-**All API files must use CommonJS** (Vercel requirement):
+**All API files MUST use CommonJS** (no `"type": "module"` in package.json):
 ```javascript
 // ✅ Correct
 module.exports = function handler(req, res) { ... }
@@ -27,26 +67,10 @@ module.exports = function handler(req, res) { ... }
 export default function handler(req, res) { ... }
 ```
 
-**Routing**: Use `vercel.json` rewrites, not complex builds:
-```json
-{
-  "version": 2,
-  "rewrites": [{"source": "/api/gemini-key", "destination": "/api/gemini-key.js"}]
-}
-```
-
-### WASM Integration
-- Build Rust: `cd vetoriza && wasm-pack build --target web --release`
-- Output goes to `vetoriza/pkg/` (must be committed to Git for Vercel)
-- Frontend loads via: `<script src="vetoriza/pkg/vetoriza.js"></script>` then `await window.vetoriza()`
-- Function signature: `vetorizar_imagem(base64_img: &str) -> String` (returns GeoJSON)
-
-### Canvas Processing Pipeline
-See `app.js:140-210` for preprocessing:
-1. Contrast boost (×1.2 + 20)
-2. Sobel edge detection (3×3 kernels)
-3. Binarization (threshold 128)
-4. Pass to AI or WASM
+### Vite Build Plugin
+**Custom plugin copies WASM + app.js to dist** (vite.config.js:17-37):
+- Ensures `vetoriza/pkg/*.wasm` and `app.js` are available in build output
+- Without this, production builds fail with 404s on WASM
 
 ## Developer Workflows
 
@@ -54,6 +78,7 @@ See `app.js:140-210` for preprocessing:
 ```bash
 npm run dev              # Vite dev server on localhost:8080
 ```
+**Browser caching issue**: After JS changes, use **Ctrl+Shift+R** (Windows) to force reload without cache.
 
 ### Vercel Deployment
 ```bash
@@ -62,39 +87,47 @@ vercel env add VAR_NAME  # Set environment variables
 vercel --prod            # Deploy to production
 ```
 
-### WASM Development
+### WASM Rebuild
 ```bash
 cd vetoriza
-cargo build --release --target wasm32-unknown-unknown
-wasm-pack build --target web --release
-git add pkg/  # Must commit WASM artifacts
+wasm-pack build --target no-modules --release
+cd ..
+npm run build            # Test locally first
+git add vetoriza/pkg/    # MUST commit
 ```
-
-## Environment Variables
-- `GEMINI_API_KEY`: Required in Vercel for `/api/gemini-key` and `/api/vetorizar`
-- Check with: `vercel env ls`
-- Already configured for Development, Preview, Production
 
 ## Common Pitfalls
 
-1. **404 on APIs**: Ensure `api/*.js` uses `module.exports`, not ES modules
-2. **WASM not found**: `vetoriza/pkg/` was previously gitignored - now must be committed
-3. **CDN libraries**: Use unpkg.com for third-party libs (e.g., canvg) - local copies can have minification issues
-4. **Safari warnings**: "Tracking Prevention blocked access to storage" are browser-level, ignorable
-5. **Vercel builds**: Avoid `"builds": [...]` in vercel.json - let Vercel auto-detect
+1. **Corrupted Shapefile ZIP**: Forgetting `atob()` decode for Base64 → binary conversion
+2. **Browser cache**: Old `app.js` cached → use Ctrl+Shift+R or test in incognito
+3. **WASM 404**: `vetoriza/pkg/` must be committed (no longer gitignored)
+4. **Wrong WASM target**: `--target web` breaks UMD loading → use `--target no-modules`
+5. **LineString vs Polygon**: Rust must return `Polygon` geometry, not `LineString` (shapefile requirement)
+6. **Safari warnings**: "Tracking Prevention blocked access to storage" are ignorable browser-level warnings
 
-## Key Files
-- `app.js`: Main application logic (477 lines), event handlers, canvas processing
-- `api/gemini-key.js`: Returns GEMINI_API_KEY from Vercel env vars
-- `api/vetorizar.js`: Full AI vectorization pipeline (Google Gemini + prompt engineering)
-- `vetoriza/src/lib.rs`: WASM image processing (find_contours → GeoJSON)
-- `vercel.json`: Simple rewrites only
-- `vite.config.js`: Dev server on port 8080
+## Key Files & Line References
+
+- **app.js** (577 lines):
+  - Lines 13-22: WASM initialization with `wasm_bindgen` namespace
+  - Lines 140-320: Complete CV pipeline (Sobel → morphological ops → inversion)
+  - Lines 432-471: Pixel→LatLng conversion + area filtering (< 1m² rejected)
+  - Lines 485-565: Shapefile export with Base64 decoding (critical fix)
+
+- **vetoriza/src/lib.rs**: 
+  - Uses `imageproc::contours::find_contours` for contour detection
+  - Returns `Polygon` geometry with closed rings (first point = last point)
+
+- **vite.config.js**: 
+  - Custom `copy-assets` plugin copies WASM files to `dist/` during build
+  
+- **vercel.json**: 
+  - Minimal config with API rewrites only
 
 ## Testing Checklist
 - [ ] WASM loads: Console shows "Módulo WASM carregado com sucesso"
-- [ ] Map renders: Leaflet tiles appear
+- [ ] Map renders: Leaflet tiles appear (OpenStreetMap)
 - [ ] Draw tool: Rectangle selection works
-- [ ] API responds: `/api/gemini-key` returns JSON (not 404)
-- [ ] Vectorization: Polygons appear after processing
-- [ ] Export: Shapefile download works
+- [ ] Vectorization: Console shows polygon count (e.g., "534 features")
+- [ ] Filtering: Console shows "APROVADA" for polygons ≥ 1m²
+- [ ] Export: ZIP downloads and **extracts successfully** (verify with 7-Zip/WinRAR)
+- [ ] Shapefile: Opens in ArcGIS Pro/QGIS without corruption
