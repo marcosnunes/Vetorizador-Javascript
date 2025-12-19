@@ -9,6 +9,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    sourcemap: true
-  }
+    sourcemap: true,
+    copyPublicDir: true
+  },
+  publicDir: 'vetoriza',
+  assetsInclude: ['**/*.wasm']
 });
