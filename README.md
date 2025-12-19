@@ -4,7 +4,7 @@
 ![Platform](https://img.shields.io/badge/platform-Web-brightgreen.svg)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-Rust-orange.svg)
 
-Aplicação web de alta performance para detecção e vetorização automática de edificações a partir de imagens de satélite, utilizando técnicas de visão computacional clássica e WebAssembly.
+Sistema web profissional para detecção e vetorização automática de edificações a partir de imagens de satélite, utilizando técnicas avançadas de visão computacional e WebAssembly para processamento de alta performance totalmente no navegador.
 
 ## 🎯 Características
 
@@ -19,58 +19,78 @@ Aplicação web de alta performance para detecção e vetorização automática 
 - **Alta Performance**: Rust compilado para WASM garante processamento rápido de imagens
 
 ### Advanced Features
-- **🎚️ Controles Ajustáveis em Tempo Real**:
+- **🎚️ Controles Profissionais Ajustáveis**:
   - Sensibilidade de bordas (30-200)
-  - Tamanho de kernel morfológico (1-7px)
-  - Área mínima de detecção (0.5-10m²)
-  - Tolerância de simplificação
+  - Kernel morfológico ajustável (1-9px)
+  - Área mínima de detecção configurável
+  - Fusão automática de fragmentos (0-10m)
+  - Tolerância de simplificação Douglas-Peucker
   - Realce de contraste (1.0-2.0x)
 
-- **🎯 Sistema de Confiança**:
-  - Score automático (0-100) para cada polígono
-  - Análise de compacidade e geometria
-  - Classificação: Alta/Média/Baixa qualidade
+- **🎯 Sistema de Qualidade Avançado**:
+  - Score automático (0-100) baseado em múltiplos critérios
+  - Análise de compacidade geométrica
+  - Avaliação de número de vértices
+  - Razão perímetro/área
+  - Classificação: Alta (≥70) / Média (40-69) / Baixa (<40)
 
-- **🎨 Visualização Inteligente**:
-  - Cores por qualidade (Verde/Amarelo/Vermelho)
-  - Popups com métricas detalhadas
-  - Estatísticas em tempo real
+- **🔗 Fusão Inteligente de Polígonos**:
+  - Detecta e mescla fragmentos da mesma edificação
+  - Reduz drasticamente falsos positivos
+  - Algoritmo baseado em distância entre centróides
+  - Configurável via interface (0-10 metros)
 
-- **🔧 Limpeza Automática de Geometria**:
+- **🎨 Visualização Profissional**:
+  - Cores dinâmicas por qualidade (Verde/Amarelo/Vermelho)
+  - Popups detalhados com todas as métricas
+  - Painel de estatísticas em tempo real
+  - Contadores por categoria de qualidade
+
+- **🔧 Limpeza e Validação Automática**:
   - Remoção de buracos internos
-  - Correção de auto-interseções
-  - Validação topológica
+  - Correção de auto-interseções via buffer(0)
+  - Validação topológica completa
+  - Simplificação de geometrias complexas
 
-## 🚀 Demonstração
+## 🚀 Demonstração Online
 
 🔗 **[https://vetorizador-javascript.vercel.app](https://vetorizador-javascript.vercel.app)**
 
-## 🎯 Sistema de Qualidade
+Experimente agora mesmo no Multi-Critério
 
-Cada polígono detectado recebe um **Score de Confiança (0-100)** baseado em múltiplos critérios:
+Cada polígono detectado passa por análise automática recebendo um **Score de Confiança (0-100)** baseado em múltiplos critérios geométricos:
 
 ### Critérios de Avaliação
 
-| Critério | Pontos | Descrição |
-|----------|--------|-----------|
-| **Área Ideal** | 30 pts | 20-500m² (edificações típicas) |
-| **Compacidade** | 30 pts | >0.6 (formas compactas, não lineares) |
-| **Vértices** | 25 pts | 4-20 vértices (geometrias regulares) |
-| **Razão P/A** | 15 pts | Perímetro/√Área entre 3-6 |
+| Critério | Peso | Faixa Ideal | Descrição |
+|----------|------|-------------|-----------|
+| **Área** | 35 pts | 25-400m² | Edificações residenciais/comerciais típicas |
+| **Compacidade** | 35 pts | > 0.65 | Formas compactas vs lineares (sombras/estradas) |
+| **Vértices** | 20 pts | 4-15 vértices | Geometrias regulares vs ruído |
+| **Razão P/√A** | 10 pts | 3.5-5.5 | Relação perímetro/área normalizada |
 
-### Classificação
+**Fórmula de Compacidade**: `(4π × Área) / Perímetro²` onde círculo perfeito = 1.0 e linha = 0.0
 
-- **🟢 Alta Qualidade (70-100)**: Edificações bem definidas, geometria regular
-- **🟡 Média Qualidade (40-69)**: Edificações válidas, geometria irregular
-- **🔴 Baixa Qualidade (0-39)**: Possíveis falsos positivos, requer validação
+### Classificação Automática
 
-### Métricas Exportadas
+- **🟢 Alta Qualidade (70-100)**: Edificações bem definidas, geometria regular e compacta
+- **🟡 Média Qualidade (40-69)**: Edificações válidas com geometria irregular
+- **🔴 Baixa Qualidade (0-39)**: Possíveis falsos positivos, recomenda-se validação manual
 
-Cada polígono no Shapefile contém:
-- `id`: Identificador único
-- `area_m2`: Área em metros quadrados
-- `confidence_score`: Score 0-100
-- `quality`: Classificação (alta/media/baixa)
+### Atributos Exportados (Shapefile)
+
+Cada polígono no arquivo `.shp` exportado contém os seguintes atributos profissionais:
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | String | Identificador único (ex: `imovel_1`) |
+| `area_m2` | Float | Área em metros quadrados (2 decimais) |
+| `confidence_score` | Integer | Score de confiança (0-100) |
+| `quality` | String | Classificação (`alta`, `media`, `baixa`) |
+| `compactness` | Float | Índice de compacidade (0.0-1.0) |
+| `vertices` | Integer | Número de vértices do polígono |
+
+Totalmente compatível com ArcGIS Pro, QGIS e AutoCAD Map 3D./media/baixa)
 - `compactness`: Índice de compacidade (0-1)
 - `vertices`: Número de vértices
 
@@ -180,221 +200,178 @@ vercel --prod
 
 ## 📖 Como Usar
 
-### Workflow Básico
+### Workflow Profissional
 
-1. **Ajuste os Parâmetros** (opcional, mas recomendado):
-   - Configure **Sensibilidade de Bordas** conforme contraste da imagem
-   - Ajuste **Área Mínima** baseado no zoom (edificações pequenas = menor valor)
-   - Modifique **Suavização** se houver gaps nas bordas
+1. **Selecione um Preset** (recomendado para início rápido):
+   - 🏘️ **Área Urbana**: Otimizado para edificações residenciais densas
+   - 🌾 **Área Rural**: Configurado para edificações esparsas com vegetação
+   - 🏭 **Galpões Industriais**: Ajustado para grandes estruturas
 
-2. **Navegue até a área desejada** no mapa utilizando zoom e pan
-   - Recomendado: Zoom 16-18 para melhor resolução
+2. **Ou Configure Manualmente** os parâmetros avançados:
+   - **Sensibilidade de Bordas**: Controla detecção de contornos (30-200)
+   - **Kernel Morfológico**: Tamanho para fechamento de gaps (1-9px)
+   - **Área Mínima**: Filtra pequenos ruídos (5-200m²)
+   - **Fusão de Fragmentos**: Une polígonos da mesma edificação (0-10m)
+   - **Simplificação**: Reduz número de vértices mantendo forma
+   - **Realce de Contraste**: Melhora definição de bordas (1.0-2.0x)
+   - **Qualidade Mínima**: Score mínimo para aceitar polígono (0-100)
 
-3. **Desenhe um polígono** sobre a região que deseja vetorizar
-   - Use a ferramenta de desenho (ícone de polígono)
+3. **Navegue no Mapa**:
+   - Use zoom e pan para localizar a área de interesse
+   - Recomendado: **Zoom 17-18** para edificações residenciais
+   - Recomendado: **Zoom 16-17** para galpões industriais
 
-4. **Aguarde o processamento automático**:
-   - ✅ Captura de imagem
-   - ✅ Realce de contraste
-   - ✅ Detecção de bordas (Sobel)
-   - ✅ Threshold adaptativo (Otsu)
-   - ✅ Operações morfológicas
-   - ✅ Vetorização via WASM
-   - ✅ Análise de qualidade
-   - ✅ Limpeza de geometria
+4. **Desenhe a Área de Interesse**:
+   - Clique no ícone de polígono na barra lateral
+   - Desenhe sobre a região desejada
+   - Finalize clicando no primeiro ponto
 
-5. **Visualize os Resultados**:
-   - Polígonos aparecem no mapa com cores por qualidade (se ativado)
-   - Clique em um polígono para ver detalhes (área, score, etc.)
-   - Confira estatísticas no painel lateral
+5. **Processamento Automático** (30s - 2min dependendo da área):
+   - 📸 Captura de imagem em alta resolução
+   - 🔆 Realce de contraste adaptativo
+   - 🎯 Detecção de bordas (Sobel 3×3)
+   - 📊 Threshold inteligente (Otsu)
+   - 🔧 Operações morfológicas (dilatação + erosão)
+   - 🎨 Vetorização via WASM/Rust
+   - 🔗 Fusão de fragmentos adjacentes
+   - ✅ Análise de qualidade multi-critério
+   - 🧹 Limpeza e validação de geometrias
 
-6. **Ajuste se Necessário**:
-   - Se muitos falsos positivos → aumente Área Mínima
-   - Se bordas desconectadas → aumente Suavização
-   - Se poucas detecções → reduza Sensibilidade de Bordas
+6. **Visualize e Valide**:
+   - Polígonos aparecem coloridos por qualidade (Verde/Amarelo/Vermelho)
+   - Clique em qualquer polígono para ver métricas detalhadas
+   - Painel de **Estatísticas** mostra resumo completo
+   - **Total de polígonos, área total, distribuição de qualidade**
 
-7. **Exporte para Shapefile**:
-   - Clique em "Exportar Shapefile"
-   - Arquivo `.zip` será baixado com todos os layers
+7. **Exporte Profissionalmente**:
+   - Clique em **"Exportar para Shapefile"**
+   - Arquivo `.zip` é baixado contendo:
+     - `edificacoes.shp` (geometrias)
+     - `edificacoes.shx` (índice)
+     - `edificacoes.dbf` (atributos)
+     - `edificacoes.prj` (projeção WGS84)
+   - Compatível com **ArcGIS Pro, QGIS, AutoCAD Map 3D**
 
-## 🔍 Pipeline de Processamento Detalhado
+## 🔍 Pipeline de Processamento
 
-### 1. Pré-processamento (Canvas)
-- **Realce de Contraste**: `pixel * CONFIG.contrastBoost + 20` (configurável 1.0-2.0x)
+### 1. Captura e Pré-processamento
+- **Captura de Canvas**: Extração de imagem via `leafletImage()`
+- **Realce de Contraste**: `pixel × CONFIG.contrastBoost + 20`
 - **Sobel Edge Detection**: 
-  - Kernels 3×3 para gradientes Gx e Gy
-  - Magnitude: `sqrt(Gx² + Gy²)`
+  - Kernels Gx e Gy 3×3 para detecção de gradientes
+  - Magnitude: `√(Gx² + Gy²)`
   - Threshold configurável (30-200)
-- **Binarização Adaptativa**: 
-  - **Algoritmo Otsu**: Calcula threshold ótimo automaticamente
-  - Analisa histograma e maximiza variância inter-classes
-  - Adapta-se a diferentes condições de iluminação
+- **Otsu Adaptive Thresholding**: 
+  - Análise de histograma automática
+  - Maximização de variância inter-classes
+  - Adapta-se a diferentes iluminações
 
-### 2. Limpeza Morfológica
-- **Morphological Closing**: 
-  - Dilatação seguida de erosão
-  - Kernel configurável (1-7px)
-  - Fecha gaps e remove ruídos
-- **Inversão de Cores**: Prepara máscara para WASM
+### 2. Operações Morfológicas
+- **Morphological Closing**: Dilatação + Erosão
+- **Fechamento de Gaps**: União de bordas fragmentadas
+- **Remoção de Ruído**: Filtragem de artefatos pequenos
+- **Kernel Ajustável**: 1-9px configurável via interface
 
-### 3. Vetorização (WASM/Rust)
-- **Detecção de Contornos**: 
-  - Biblioteca `imageproc::find_contours`
-  - Algoritmo de rastreamento de bordas
-- **Geração de GeoJSON**: 
-  - Converte contornos em Polygon
-  - Fecha anéis automaticamente
+### 3. Vetorização WASM/Rust
+- **Contour Detection**: Algoritmo `imageproc::find_contours`
+- **GeoJSON Generation**: Conversão para formato padrão
+- **Polygon Closure**: Fechamento automático de anéis
+- **Alta Performance**: Processamento compiled nativo
 
-### 4. Pós-processamento Avançado
-- **Conversão de Coordenadas**: Pixel (x,y) → Lat/Lng usando bounds
-- **Simplificação Douglas-Peucker**: 
-  - Tolerância configurável (0.000001-0.0001)
-  - Mantém forma com menos vértices
-- **Limpeza de Geometria**:
-  - Remove buracos internos
-  - Corrige auto-interseções via `turf.buffer(0)`
-  - Valida topologia
-- **Análise de Qualidade**:
-  - **Compacidade**: `(4πA) / P²` (círculo perfeito = 1.0)
-  - **Score de Confiança**: 0-100 baseado em:
-    - Área razoável (20-500m² = ideal)
-    - Alta compacidade (>0.6 = ótimo)
-    - Número de vértices (4-20 = típico)
-    - Razão perímetro/área (3-6 = normal)
-- **Classificação**: Alta (≥70) / Média (40-69) / Baixa (<40)
-- **Filtragem por Área**: Remove polígonos < CONFIG.minArea m²
+### 4. Pós-processamento Geoespacial
+- **Conversão de Coordenadas**: Pixel → LatLng WGS84
+- **Douglas-Peucker Simplification**: Redução inteligente de vértices
+- **Fusão de Fragmentos**: União de polígonos adjacentes (mesma edificação)
+- **Buffer(0) Cleaning**: Correção de auto-interseções
+- **Hole Removal**: Remoção de buracos internos
+- **Topology Validation**: Garantia de geometrias válidas
 
-## 🐛 Resolução de Problemas
+### 5. Análise de Qualidade
+- **Área Analysis**: Verifica faixa esperada (25-400m²)
+- **Compactness Score**: `(4πA) / P²` para detectar formas lineares
+- **Vertex Count**: Valida geometrias regulares (4-15 vértices)
+- **Perimeter/Area Ratio**: Identifica polígonos irregulares
+- **Confidence Score**: 0-100 baseado em múltiplos critérios
+- **Quality Classification**: Alta/Média/Baixa automática
 
-### WASM não carrega
-- **Sintoma**: Console mostra "Falha ao carregar WASM"
-- **Solução**: Verifique se `vetoriza/pkg/` foi commitado no Git e deployed no Vercel
-- **Verificação**: Console deve mostrar "Módulo WASM carregado com sucesso"
+## � Tecnologias e Algoritmos
 
-### Shapefile corrompido
-- **Sintoma**: ZIP não extrai ou ArcGIS não abre
-- **Solução**: Verificar se os primeiros 4 bytes são `[80, 75, 3, 4]` (assinatura "PK")
-- **Causa comum**: Cache do navegador - use Ctrl+Shift+R para forçar reload
+### Stack Tecnológica
 
-### JavaScript não atualiza
-- **Sintoma**: Mudanças no código não aparecem
-- **Solução**: 
-  - Limpar cache: Ctrl+Shift+R (Windows) ou Cmd+Shift+R (Mac)
-  - Testar em modo anônimo
-  - Verificar se o build foi executado (`npm run build`)
+**Frontend (JavaScript)**
+- Vanilla JS - Lógica sem dependências de frameworks pesados
+- Leaflet.js 1.9.4 - Mapas interativos e visualização geoespacial
+- Leaflet Draw - Ferramentas profissionais de desenho
+- Turf.js 6.5.0 - Operações geoespaciais (área, buffer, simplificação, união, validação)
+- shp-write 3.3.0 - Geração de Shapefiles compatíveis com ArcGIS/QGIS
+- leaflet-image - Captura de canvas em alta resolução
 
-### Muitos falsos positivos
-- **Sintoma**: Polígonos em áreas sem edificações (vegetação, sombras)
-- **Solução**:
-  1. **Aumentar Área Mínima** para 2-5m²
-  2. **Aumentar Sensibilidade de Bordas** para 120-150
-  3. **Reduzir Suavização** para 1-3px
-  4. Verificar qualidade dos polígonos (usar visualização por cores)
+**Backend (Rust/WASM)**
+- wasm-bindgen - Bridge JavaScript ↔ Rust para máxima performance
+- imageproc - Algoritmos otimizados de visão computacional
+- image - Carregamento e manipulação de imagens
+- geojson - Serialização padrão OGC
 
-### Poucas detecções
-- **Sintoma**: Edificações não são detectadas
-- **Solução**:
-  1. **Reduzir Sensibilidade de Bordas** para 50-80
-  2. **Aumentar Realce de Contraste** para 1.5-1.8x
-  3. **Aumentar Suavização** para 5-7px para fechar gaps
-  4. Verificar se zoom está adequado (16-18 recomendado)
+**Algoritmos de Visão Computacional**
+- Sobel Edge Detection (3×3 kernels)
+- Otsu Adaptive Thresholding
+- Morphological Operations (Dilation + Erosion)
+- Contour Tracing (Suzuki-Abe algorithm)
+- Douglas-Peucker Simplification
+- Buffer(0) Topology Cleaning
 
-### Bordas desconectadas
-- **Sintoma**: Polígonos com gaps ou formas quebradas
-- **Solução**:
-  1. **Aumentar Suavização de Bordas** para 5-7px
-  2. **Reduzir Sensibilidade** para detectar mais bordas fracas
-  3. Usar zoom maior para capturar mais detalhes
+**Build & Deploy**
+- Vite 7.3 - Build tool ultra-rápido
+- Vercel - Edge network global com CDN
+- w🎯 Presets Profissionais
 
-### Polígonos com baixa qualidade
-- **Sintoma**: Muitos polígonos vermelhos/amarelos
-- **Solução**:
-  1. Filtrar manualmente no shapefile exportado
-  2. Ajustar **Área Mínima** para remover pequenos ruídos
-  3. Usar **Simplificação** maior para suavizar geometrias
-  4. Verificar popups para entender score de cada polígono
+O sistema inclui 3 presets otimizados para diferentes cenários:
 
-### Performance lenta
-- **Sintoma**: Processamento demora muito
-- **Solução**:
-  1. Reduzir área de seleção (processar em partes menores)
-  2. Aumentar **Simplificação** para reduzir vértices
-  3. Aumentar **Área Mínima** para filtrar mais ruídos
-  4. Usar navegador moderno (Chrome/Edge recomendados)
+### 🏘️ Área Urbana Profissional
+Otimizado para edificações residenciais/comerciais em áreas densas.
 
-## 📊 Tecnologias Utilizadas
+**Parâmetros:**
+- Edge Threshold: 75
+- Morphology Size: 7px
+- Min Area: 25m²
+- Simplification: 0.00003
+- Contrast Boost: 1.5x
+- Quality Score: ≥50
+- Merge Distance: 3m
 
-### Frontend
-- **Vanilla JavaScript**: Lógica principal sem frameworks
-- **Leaflet.js**: Mapas interativos e visualização
-- **Leaflet Draw**: Ferramentas de desenho
-- **Turf.js**: Operações geoespaciais avançadas (área, simplificação, buffer, validação)
-- **shp-write**: Exportação de Shapefiles
+**Ideal para:** Bairros residenciais, centros comerciais, áreas urbanas consolidadas
 
-### Backend WASM (Rust)
-- **wasm-bindgen**: Ponte JS ↔ Rust
-- **imageproc**: Algoritmos de visão computacional
-  - `find_contours`: Detecção de contornos
-  - `threshold`: Binarização
-- **image**: Manipulação de imagens
-- **geojson**: Serialização de geometrias
+---
 
-### Algoritmos Implementados
-- **Sobel Edge Detection**: Detecção de gradientes
-- **Otsu's Method**: Threshold adaptativo
-- **Morphological Operations**: Dilatação e erosão
-- **Douglas-Peucker**: Simplificação de polígonos
-- **Buffer(0) Trick**: Correção de auto-interseções
-- **Quality Scoring**: Análise multi-critério de confiança
+### 🌾 Área Rural Profissional
+Configurado para edificações esparsas em meio à vegetação.
 
-### Build & Deploy
-- **Vite 7.3**: Build tool rápido
-- **Vercel**: Hosting com edge network global
+**Parâmetros:**
+- Edge Threshold: 65
+- Morphology Size: 9px (fecha gaps grandes)
+- Min Area: 40m²
+- Simplification: 0.00004
+- Contrast Boost: 1.6x (separa de vegetação)
+- Quality Score: ≥45
+- Merge Distance: 3m
 
-## 📝 Limitações e Boas Práticas
+**Ideal para:** Propriedades rurais, fazendas, chácaras, áreas agrícolas
 
-### Limitações Conhecidas
-- **Resolução**: Funciona melhor em zoom 16-18 (imagens de alta resolução)
-- **Contraste**: Edificações com telhados similares ao entorno podem não ser detectadas
-- **Falsos Positivos**: Sombras, vegetação densa e piscinas podem gerar detecções
-  - Mitigado por: filtro de área, score de qualidade, análise de compacidade
-- **Edificações Sobrepostas**: Muito próximas podem ser unidas em um único polígono
-- **Geometrias Complexas**: Edificações com formas muito irregulares podem ter simplificação
+---
 
-### Boas Práticas
+### 🏭 Galpões Industriais Profissional
+Ajustado para grandes estruturas retangulares.
 
-✅ **Para Melhores Resultados**:
-- Use zoom 17-18 para edificações residenciais
-- Use zoom 16 para galpões/indústrias grandes
-- Processe áreas pequenas (< 1km²) por vez
-- Configure parâmetros ANTES de processar
-- Teste configurações em área pequena primeiro
-- Ative "Colorir por Qualidade" para validação visual
-- Exporte apenas após verificar estatísticas
+**Parâmetros:**
+- Edge Threshold: 70
+- Morphology Size: 7px
+- Min Area: 150m²
+- Simplification: 0.00005 (formas muito simplificadas)
+- Contrast Boost: 1.4x
+- Quality Score: ≥50
+- Merge Distance: 3m
 
-✅ **Configurações Recomendadas por Cenário**:
-
-**Área Urbana Densa** (muitas casas próximas):
-- Sensibilidade: 80-100
-- Suavização: 3-5px
-- Área Mínima: 15-25m²
-- Contraste: 1.3-1.5x
-
-**Área Rural** (edificações esparsas):
-- Sensibilidade: 60-80
-- Suavização: 5-7px
-- Área Mínima: 30-50m²
-- Contraste: 1.4-1.6x
-
-**Galpões Industriais** (grandes estruturas):
-- Sensibilidade: 70-90
-- Suavização: 5-7px
-- Área Mínima: 100-200m²
-- Contraste: 1.2-1.4x
-- Simplificação: 0.00003-0.00005
-
-**Área com Sombras** (muitos falsos positivos):
-- Sensibilidade: 100-120
+**Ideal para:** Distritos industriais, armazéns, centros logísticos, fábricas
 - Área Mínima: 20-30m²
 - Verificar qualidade: filtrar score < 50
 
