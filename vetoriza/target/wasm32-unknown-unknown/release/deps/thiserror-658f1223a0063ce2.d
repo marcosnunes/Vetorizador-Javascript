@@ -1,0 +1,10 @@
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\thiserror-658f1223a0063ce2.d: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\aserror.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\display.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\var.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libthiserror-658f1223a0063ce2.rlib: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\aserror.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\display.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\var.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libthiserror-658f1223a0063ce2.rmeta: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\aserror.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\display.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\var.rs
+
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\lib.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\aserror.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\display.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\src\var.rs:

@@ -1,0 +1,10 @@
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\bitstream_io-e269398ac802bd4b.d: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\huffman.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\read.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\write.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libbitstream_io-e269398ac802bd4b.rlib: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\huffman.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\read.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\write.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libbitstream_io-e269398ac802bd4b.rmeta: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\huffman.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\read.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\write.rs
+
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\lib.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\huffman.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\read.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitstream-io-2.6.0\src\write.rs:

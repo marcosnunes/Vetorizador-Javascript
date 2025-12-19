@@ -1,0 +1,10 @@
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\ravif-675d57eb9e7aa6f5.d: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\av1encoder.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\error.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\dirtyalpha.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libravif-675d57eb9e7aa6f5.rlib: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\av1encoder.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\error.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\dirtyalpha.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libravif-675d57eb9e7aa6f5.rmeta: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\av1encoder.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\error.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\dirtyalpha.rs
+
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\lib.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\av1encoder.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\error.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ravif-0.11.20\src\dirtyalpha.rs:

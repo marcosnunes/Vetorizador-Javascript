@@ -1,0 +1,5 @@
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\release\build\thiserror-fc1827c2c3e25a36\build_script_build-fc1827c2c3e25a36.d: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\build.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\release\build\thiserror-fc1827c2c3e25a36\build_script_build-fc1827c2c3e25a36.exe: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\build.rs
+
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.12\build.rs:

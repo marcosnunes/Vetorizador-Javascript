@@ -1,0 +1,1 @@
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V06\vetorizador-main\vetoriza\target\wasm32-unknown-unknown\release\vetoriza.wasm: D:\Projetos_html\mapeador_webapp\Desenvolvimento\V06\vetorizador-main\vetoriza\src\lib.rs

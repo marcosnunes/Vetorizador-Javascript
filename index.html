@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Mapeador de Imóveis</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+  <link rel="icon" href="favicon.ico" type="image/x-icon" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div id="loader-overlay">
+    <p id="loader-text">Vetorizando, por favor aguarde...</p>
+  </div>
+
+  <header>
+    <h2>Mapeador de Imóveis e Benfeitorias</h2>
+  </header>
+
+  <div class="main-container">
+    <div class="map-container">
+      <div id="map"></div>
+    </div>
+
+    <div class="controls-panel">
+      <div class="control-group">
+        <h3>Exportar Dados</h3>
+        <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>Desenvolvido por Marcos Lindolpho</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+  <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
+  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://unpkg.com/@mapbox/shp-write@latest/shpwrite.js"></script>
+  
+  <script src="vetoriza/pkg/vetoriza.js"></script>
+  <script src="umd.js"></script>
+  <script src="app.js"></script>
+
+</body>
+
+</html>

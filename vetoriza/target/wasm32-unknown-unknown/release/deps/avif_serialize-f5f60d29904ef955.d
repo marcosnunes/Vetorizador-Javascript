@@ -1,0 +1,10 @@
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\avif_serialize-f5f60d29904ef955.d: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\boxes.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\constants.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\writer.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libavif_serialize-f5f60d29904ef955.rlib: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\boxes.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\constants.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\writer.rs
+
+D:\Projetos_html\mapeador_webapp\Desenvolvimento\V01\mapeador_webapp\vetoriza\target\wasm32-unknown-unknown\release\deps\libavif_serialize-f5f60d29904ef955.rmeta: C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\lib.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\boxes.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\constants.rs C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\writer.rs
+
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\lib.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\boxes.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\constants.rs:
+C:\Users\marco\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\avif-serialize-0.8.5\src\writer.rs:

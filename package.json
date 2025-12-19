@@ -1,0 +1,23 @@
+{
+  "name": "mapeador-imoveis-ai",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node api/vetorizar.js",
+    "serve": "live-server --open=index.html --watch=index.html,app.js,style.css,api/",
+    "lint": "eslint . --ext .js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "canvg": "^3.0.11",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "live-server": "^1.2.2"
+  }
+}
