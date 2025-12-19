@@ -89,10 +89,26 @@ export default async function handler(req, res) {
       6. Comece com <svg> e termine com </svg>.
     `;
 
+    // Extrai MIME type e dados base64
+    let mimeType = 'image/png'; // default
+    let base64Data = imageBase64;
+    
+    if (imageBase64.includes('data:')) {
+      const parts = imageBase64.split(';');
+      if (parts[0] && parts[0].includes(':')) {
+        mimeType = parts[0].split(':')[1];
+      }
+      if (parts[1] && parts[1].includes(',')) {
+        base64Data = parts[1].split(',')[1];
+      } else if (imageBase64.includes(',')) {
+        base64Data = imageBase64.split(',')[1];
+      }
+    }
+
     const imagePart = {
       inlineData: {
-        mimeType: imageBase64.split(';')[0].split(':')[1],
-        data: imageBase64.split(',')[1]
+        mimeType: mimeType,
+        data: base64Data
       }
     };
 

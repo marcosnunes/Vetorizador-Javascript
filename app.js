@@ -216,8 +216,8 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     }
     ctx.putImageData(binData, 0, 0);
 
-    // Pega apenas os dados base64 (remove o prefixo data:image/png;base64,)
-    const base64Full = mainCanvas.toDataURL('image/png').split(',')[1];
+    // Pega a imagem completa com prefixo data:image/png;base64,
+    const base64Full = mainCanvas.toDataURL('image/png');
 
     loaderText.textContent = 'Analisando com IA (Aguarde)...';
     await yieldToMain();
