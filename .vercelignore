@@ -1,13 +1,8 @@
-# Vercel
-.vercel
+# Git
+.git/
 
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
+# Rust build artifacts (não são necessários no deploy)
+vetoriza/target/
 
 # Dependencies
 node_modules/
@@ -19,20 +14,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Environment variables (mantém no repositório, remove no Vercel)
-# .env
-
-# Build outputs
-dist/
-build/
-.next/
-out/
-
-# Testing
-coverage/
-
-# Local development
-.cache/
+# Logs
+*.log
