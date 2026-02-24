@@ -724,6 +724,37 @@ function ativarEdicaoPoligono(featureId, feature) {
   // Habilitar edição usando Leaflet.Draw
   editablePolygon.editing.enable();
 
+  // Redimensionar os marcadores de vértice AINDA MAIS PEQUENOS
+  setTimeout(() => {
+    const markers = editablePolygon.editing._markers;
+    if (markers) {
+      markers.forEach((marker, idx) => {
+        marker.setIcon(L.divIcon({
+          className: 'leaflet-div-icon-edit-tiny',
+          html: '<div style="width: 6px; height: 6px; background: white; border: 1.5px solid #FF6B00; border-radius: 50%; cursor: move; box-shadow: 0 0 3px rgba(255,107,0,0.8);"></div>',
+          iconSize: [6, 6],
+          iconAnchor: [3, 3]
+        }));
+        
+        // Adicionar listener para remover vértice com Ctrl+Click
+        marker.on('click', (e) => {
+          if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) {
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
+            
+            // Remover vértice
+            if (editablePolygon.editing._markers.length > 3) { // Mínimo 3 vértices para polígono
+              editablePolygon.editing._deleteMarker(marker);
+              console.log(`🗑️ Vértice #${idx} removido`);
+            } else {
+              alert('⚠️ Um polígono precisa de no mínimo 3 vértices!');
+            }
+          }
+        });
+      });
+    }
+  }, 50);
+
   // Criar painel de instruções temporário - COMPACTO E TRANSPARENTE
   const instrucoes = L.control({ position: 'bottomright' });
   instrucoes.onAdd = function() {
@@ -738,15 +769,20 @@ function ativarEdicaoPoligono(featureId, feature) {
     div.style.backdropFilter = 'blur(4px)';
     div.innerHTML = `
       <strong style="color: #FFA500; font-size: 14px; display: block; margin-bottom: 8px;">✏️ Editando Polígono</strong>
-      <p style="margin: 0 0 10px 0; font-size: 12px; line-height: 1.4; color: #E0E0E0;">
-        • Arraste vértices brancos<br>
-        • Clique em linhas → novo ponto<br>
-        • 🏆 <span style="color: #FFD700;">ML aprende com isso!</span>
+      <p style="margin: 0 0 10px 0; font-size: 11px; line-height: 1.5; color: #E0E0E0;">
+        <strong>Adicionar ponto:</strong><br>
+        • Clique nas linhas<br>
+        <br>
+        <strong>Mover vértice:</strong><br>
+        • Arraste os quadrados<br>
+        <br>
+        <strong>Remover vértice:</strong><br>
+        • <kbd style="background: #333; padding: 2px 4px; border-radius: 2px;">Ctrl</kbd> + Clique
       </p>
-      <button id="salvar-edicao" style="background: #28a745; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 6px; font-weight: bold; font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
-        ✅ Salvar Correção
+      <button id="salvar-edicao" style="background: #28a745; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 6px; font-weight: bold; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+        ✅ Salvar
       </button>
-      <button id="cancelar-edicao" style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+      <button id="cancelar-edicao" style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 11px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
         ❌ Cancelar
       </button>
     `;
