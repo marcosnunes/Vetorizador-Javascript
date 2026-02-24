@@ -91,17 +91,17 @@ function aplicarPreset(tipo) {
   switch(tipo) {
     case 'urbano':
       preset = {
-        edgeThreshold: 75,        // Reduzido para capturar edificações completas
-        morphologySize: 7,        // Aumentado para fechar gaps e unir fragmentos
-        minArea: 25.0,            // Aumentado para filtrar ruído
-        simplification: 0.00003,  // Aumentado para geometrias mais limpas
-        contrastBoost: 1.5,       // Aumentado para bordas mais definidas
-        minQualityScore: 50,      // Aumentado para filtrar falsos positivos
+        edgeThreshold: 105,       // Mais seletivo para reduzir bordas espúrias urbanas
+        morphologySize: 5,        // Preserva telhados sem unir objetos distintos
+        minArea: 35.0,            // Remove pequenos artefatos em área densa
+        simplification: 0.00002,  // Mantém melhor o footprint dos telhados
+        contrastBoost: 1.4,       // Realce moderado para não estourar sombras
+        minQualityScore: 60,      // Filtro mais rígido em qualidade
         clusteringEnabled: true,
-        clusterEps: 2.5,
-        clusterMinPts: 6,
-        minClusterSize: 45,
-        nome: 'Área Urbana (Profissional)'
+        clusterEps: 2.2,
+        clusterMinPts: 8,
+        minClusterSize: 90,
+        nome: 'Área Urbana (Precisão Alta)'
       };
       break;
       
@@ -711,6 +711,29 @@ function aplicarClusteringDBSCAN(imageData, width, height, options = {}) {
   };
 }
 
+function contarPixelsBrancos(imageData, threshold = 200) {
+  let whitePixels = 0;
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] > threshold) whitePixels++;
+  }
+  return whitePixels;
+}
+
+function registrarRelatorioProcessamento(relatorio) {
+  if (!relatorio) return;
+
+  console.groupCollapsed('📊 Relatório de Processamento');
+  console.log('ROI:', relatorio.roi);
+  console.log('Parâmetros:', relatorio.parametros);
+  if (relatorio.dbscan) {
+    console.log('DBSCAN:', relatorio.dbscan);
+  }
+  console.table(relatorio.etapas);
+  console.log('Resultado final:', relatorio.resultadoFinal);
+  console.groupEnd();
+}
+
 // Inicializa o WASM (Vetorizador)
 async function inicializarWasm() {
   try {
@@ -822,11 +845,91 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       return;
     }
 
-    const width = mainCanvas.width;
-    const height = mainCanvas.height;
+    // Recorta apenas a área selecionada para evitar distorção espacial
+    const nwPoint = map.latLngToContainerPoint(bounds.getNorthWest());
+    const sePoint = map.latLngToContainerPoint(bounds.getSouthEast());
+
+    const cropX = Math.max(0, Math.floor(Math.min(nwPoint.x, sePoint.x)));
+    const cropY = Math.max(0, Math.floor(Math.min(nwPoint.y, sePoint.y)));
+    const cropW = Math.max(1, Math.min(mainCanvas.width - cropX, Math.ceil(Math.abs(sePoint.x - nwPoint.x))));
+    const cropH = Math.max(1, Math.min(mainCanvas.height - cropY, Math.ceil(Math.abs(sePoint.y - nwPoint.y))));
+
+    if (cropW < 10 || cropH < 10) {
+      loader.style.display = 'none';
+      drawnItems.removeLayer(selectionLayer);
+      alert('⚠️ Área selecionada muito pequena para processamento.\n\nAmplie a seleção e tente novamente.');
+      return;
+    }
+
+    const roiCanvas = document.createElement('canvas');
+    roiCanvas.width = cropW;
+    roiCanvas.height = cropH;
+    const roiCtx = roiCanvas.getContext('2d', { willReadFrequently: true });
+    roiCtx.drawImage(mainCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    // Máscara da geometria desenhada (remove pixels fora do polígono de seleção)
+    const maskPathCanvas = document.createElement('canvas');
+    maskPathCanvas.width = cropW;
+    maskPathCanvas.height = cropH;
+    const maskPathCtx = maskPathCanvas.getContext('2d', { willReadFrequently: true });
+    maskPathCtx.clearRect(0, 0, cropW, cropH);
+    maskPathCtx.fillStyle = '#ffffff';
+    maskPathCtx.beginPath();
+
+    const latLngs = selectionLayer.getLatLngs();
+    const ring = Array.isArray(latLngs[0]) ? latLngs[0] : latLngs;
+
+    ring.forEach((latLng, idx) => {
+      const p = map.latLngToContainerPoint(latLng);
+      const x = p.x - cropX;
+      const y = p.y - cropY;
+      if (idx === 0) {
+        maskPathCtx.moveTo(x, y);
+      } else {
+        maskPathCtx.lineTo(x, y);
+      }
+    });
+    maskPathCtx.closePath();
+    maskPathCtx.fill();
+
+    const roiData = roiCtx.getImageData(0, 0, cropW, cropH);
+    const polyMaskData = maskPathCtx.getImageData(0, 0, cropW, cropH);
+    for (let i = 0; i < roiData.data.length; i += 4) {
+      if (polyMaskData.data[i] < 10) {
+        roiData.data[i] = 0;
+        roiData.data[i + 1] = 0;
+        roiData.data[i + 2] = 0;
+      }
+    }
+    roiCtx.putImageData(roiData, 0, 0);
+
+    const width = roiCanvas.width;
+    const height = roiCanvas.height;
+    const relatorio = {
+      roi: {
+        width,
+        height,
+        areaPixels: width * height,
+        cropX,
+        cropY
+      },
+      parametros: {
+        edgeThreshold: CONFIG.edgeThreshold,
+        morphologySize: CONFIG.morphologySize,
+        minArea: CONFIG.minArea,
+        minQualityScore: CONFIG.minQualityScore,
+        clusterEps: CONFIG.clusterEps,
+        clusterMinPts: CONFIG.clusterMinPts,
+        minClusterSize: CONFIG.minClusterSize,
+        clusteringEnabled: CONFIG.clusteringEnabled
+      },
+      etapas: [],
+      dbscan: null,
+      resultadoFinal: null
+    };
 
     // PRÉ-PROCESSAMENTO: aumenta contraste, aplica filtro de bordas e binariza
-    const ctx = mainCanvas.getContext('2d');
+    const ctx = roiCtx;
     let imgData = ctx.getImageData(0, 0, width, height);
     // 1. Aumenta contraste e brilho (usa parâmetro CONFIG.contrastBoost)
     for (let i = 0; i < imgData.data.length; i += 4) {
@@ -875,6 +978,10 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     for (let i = 0; i < outData.length; i++) {
       sobelData.data[i] = outData[i];
     }
+    relatorio.etapas.push({
+      etapa: 'Sobel',
+      brancos: contarPixelsBrancos(sobelData)
+    });
     ctx.putImageData(sobelData, 0, 0);
 
     // 3. Binarização com Threshold Adaptativo (Otsu)
@@ -882,6 +989,11 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     let binData = ctx.getImageData(0, 0, width, height);
     const thresholdUsado = aplicarThresholdAdaptativo(binData);
     console.log(`Threshold adaptativo aplicado: ${thresholdUsado}`);
+    relatorio.etapas.push({
+      etapa: 'Otsu',
+      threshold: thresholdUsado,
+      brancos: contarPixelsBrancos(binData)
+    });
 
     if (CONFIG.clusteringEnabled) {
       loaderText.textContent = 'Agrupando bordas (DBSCAN)...';
@@ -891,6 +1003,14 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         eps: CONFIG.clusterEps,
         minPts: CONFIG.clusterMinPts,
         minClusterSize: CONFIG.minClusterSize
+      });
+      relatorio.dbscan = statsCluster;
+      relatorio.etapas.push({
+        etapa: 'DBSCAN',
+        brancos: contarPixelsBrancos(binData),
+        mantidos: statsCluster.keptPoints,
+        removidos: statsCluster.removedPoints,
+        clustersValidos: statsCluster.validClusters
       });
 
       console.log(
@@ -916,17 +1036,18 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
       
       // Copia a imagem binarizada para o canvas de máscara
-      maskCtx.drawImage(mainCanvas, 0, 0);
+      maskCtx.drawImage(roiCanvas, 0, 0);
       
       console.log('Imagem com bordas detectadas copiada para máscara');
       
       // Verifica se a máscara tem pixels brancos
       let checkData = maskCtx.getImageData(0, 0, width, height);
-      let whitePixels = 0;
-      for (let i = 0; i < checkData.data.length; i += 4) {
-        if (checkData.data[i] > 200) whitePixels++;
-      }
+      let whitePixels = contarPixelsBrancos(checkData);
       console.log(`Máscara com bordas: ${whitePixels} pixels brancos de ${width * height} total`);
+      relatorio.etapas.push({
+        etapa: 'MascaraInicial',
+        brancos: whitePixels
+      });
 
       // DEBUG: Mostra a máscara de bordas no mapa
       if (debugMaskLayer) map.removeLayer(debugMaskLayer);
@@ -941,6 +1062,12 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       // Dilate seguido de Erode (Closing) com tamanho de kernel configurável
       applyMorphologicalOperation(maskCtx, width, height, 'dilate', CONFIG.morphologySize);
       applyMorphologicalOperation(maskCtx, width, height, 'erode', CONFIG.morphologySize);
+
+      checkData = maskCtx.getImageData(0, 0, width, height);
+      relatorio.etapas.push({
+        etapa: 'Morfologia',
+        brancos: contarPixelsBrancos(checkData)
+      });
       
       // Inverter: bordas brancas -> preenchimento branco
       let imgData2 = maskCtx.getImageData(0, 0, width, height);
@@ -962,11 +1089,12 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
       
       // Verifica pixels após inversão
       checkData = maskCtx.getImageData(0, 0, width, height);
-      whitePixels = 0;
-      for (let i = 0; i < checkData.data.length; i += 4) {
-        if (checkData.data[i] > 200) whitePixels++;
-      }
+      whitePixels = contarPixelsBrancos(checkData);
       console.log(`Após inversão: ${whitePixels} pixels brancos`);
+      relatorio.etapas.push({
+        etapa: 'Inversao',
+        brancos: whitePixels
+      });
       
       // DEBUG: Mostra a máscara final
       if (window.debugMorphLayer) map.removeLayer(window.debugMorphLayer);
@@ -990,6 +1118,11 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         // Converte coordenadas de pixel (0,0) para Lat/Lng reais
         const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds);
         console.log(`Conversão para LatLng: ${geojsonConvertido.features.length} features`);
+        relatorio.resultadoFinal = {
+          featuresWasm: geojsonResult.features?.length || 0,
+          featuresAposFiltro: geojsonConvertido.features.length
+        };
+        registrarRelatorioProcessamento(relatorio);
 
         if (geojsonConvertido.features.length === 0) {
           console.warn('Nenhum polígono encontrado após vetorização WASM');
@@ -1207,7 +1340,7 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
     ? mesclarPoligonosProximos(featuresFinais, CONFIG.mergeDistance)
     : featuresFinais;
   
-  // Recalcula propriedades após fusão
+  // Recalcula propriedades após fusão e reaplica filtros finais
   const finaisComPropriedades = mesclados.map((feature, idx) => {
     const area = turf.area(feature);
     const qualityScore = calcularScoreConfianca(feature);
@@ -1222,6 +1355,10 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
     };
     
     return feature;
+  }).filter((feature) => {
+    const area = Number(feature.properties.area_m2 || 0);
+    const score = Number(feature.properties.confidence_score || 0);
+    return area >= CONFIG.minArea && score >= CONFIG.minQualityScore;
   });
   
   console.log(`✅ Total final após fusão: ${finaisComPropriedades.length} polígonos`);
