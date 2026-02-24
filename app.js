@@ -45,7 +45,7 @@ function sincronizarControle(sliderId, inputId, configKey, formatter = (v) => v.
     slider.value = value;
   });
   
-  input.addEventListener('blur', (e) => {
+  input.addEventListener('blur', () => {
     input.value = formatter(CONFIG[configKey]);
   });
 }
@@ -64,6 +64,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const colorByQuality = document.getElementById('colorByQuality');
   if (colorByQuality) {
     colorByQuality.checked = true;
+    // Listener para atualizar visualização quando checkbox muda
+    colorByQuality.addEventListener('change', atualizarVisualizacao);
   }
 });
 
@@ -372,7 +374,7 @@ function calcularScoreConfianca(polygon) {
       compactness: compactness.toFixed(3),
       vertices: numVertices
     };
-  } catch (e) {
+  } catch {
     return { score: 0, compactness: 0, vertices: 0 };
   }
 }
@@ -400,8 +402,8 @@ function limparGeometria(polygon) {
     }
     
     return clean;
-  } catch (e) {
-    console.warn('Erro ao limpar geometria:', e.message);
+  } catch {
+    console.warn('Erro ao limpar geometria');
     return polygon;
   }
 }
@@ -439,7 +441,7 @@ function mesclarPoligonosProximos(features, distanciaMetros = 2) {
           toMerge.push(otherFeature);
           processed.add(j);
         }
-      } catch (e) {
+      } catch {
         // Ignora erros de geometria inválida
       }
     });
@@ -456,8 +458,8 @@ function mesclarPoligonosProximos(features, distanciaMetros = 2) {
         for (let k = 1; k < buffered.length; k++) {
           try {
             union = turf.union(union, buffered[k]);
-          } catch (e) {
-            console.warn('Erro ao unir polígonos:', e.message);
+          } catch {
+            console.warn('Erro ao unir polígonos');
           }
         }
         
@@ -475,7 +477,7 @@ function mesclarPoligonosProximos(features, distanciaMetros = 2) {
         } else if (turf.area(debuffered) >= CONFIG.minArea) {
           merged.push(debuffered);
         }
-      } catch (e) {
+      } catch {
         // Se falhar, mantém os polígonos originais
         toMerge.forEach(f => merged.push(f));
       }
@@ -487,7 +489,7 @@ function mesclarPoligonosProximos(features, distanciaMetros = 2) {
 }
 
 // Aplicar threshold adaptativo em substituição ao threshold fixo
-function aplicarThresholdAdaptativo(imageData, width, height) {
+function aplicarThresholdAdaptativo(imageData) {
   const threshold = calcularThresholdOtsu(imageData);
   
   for (let i = 0; i < imageData.data.length; i += 4) {
@@ -597,58 +599,6 @@ map.on(L.Draw.Event.CREATED, (e) => {
   }
 });
 
-// --- FUNÇÃO DE COMUNICAÇÃO COM A API ---
-async function chamarBackendGemini(base64Image, width, height) {
-  // Busca a chave Gemini do backend
-  let geminiKey = null;
-  try {
-    const keyRes = await fetch('/api/gemini-key');
-    if (keyRes.ok) {
-      const keyData = await keyRes.json();
-      geminiKey = keyData.geminiKey;
-    } else {
-      throw new Error('Não foi possível obter a chave Gemini do backend.');
-    }
-  } catch (err) {
-    console.error('Erro ao buscar chave Gemini:', err);
-    throw err;
-  }
-
-  // URL relativa: funciona no localhost:3000 e no vercel.app
-  const url = '/api/vetorizar';
-
-  console.log("Enviando imagem para processamento no servidor...");
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Gemini-Key': geminiKey },
-      body: JSON.stringify({
-        imageBase64: base64Image,
-        width: width,
-        height: height
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Erro do servidor (${response.status}): ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    if (!data.svg) {
-      throw new Error("O servidor não retornou um SVG válido.");
-    }
-
-    return data.svg;
-
-  } catch (error) {
-    console.error("Erro na comunicação com a API:", error);
-    throw error;
-  }
-}
-
 // --- LÓGICA PRINCIPAL ---
 async function processarAreaDesenhada(bounds, selectionLayer) {
   loaderText.textContent = '📸 Capturando imagem da área selecionada...';
@@ -721,7 +671,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     // 3. Binarização com Threshold Adaptativo (Otsu)
     console.log('Aplicando threshold adaptativo (Otsu)...');
     let binData = ctx.getImageData(0, 0, width, height);
-    const thresholdUsado = aplicarThresholdAdaptativo(binData, width, height);
+    const thresholdUsado = aplicarThresholdAdaptativo(binData);
     console.log(`Threshold adaptativo aplicado: ${thresholdUsado}`);
     ctx.putImageData(binData, 0, 0);
 
@@ -921,12 +871,6 @@ function applyMorphologicalOperation(ctx, width, height, operationType, kernelSi
     }
   }
   ctx.putImageData(processedData, 0, 0);
-}
-
-function applyMorphologicalClean(ctx, width, height) {
-  // Ajuste fino para remover ruídos e fechar telhados
-  applyMorphologicalOperation(ctx, width, height, 'dilate', 9); // Fecha buracos (kernel maior)
-  applyMorphologicalOperation(ctx, width, height, 'erode', 9);  // Restaura borda (kernel maior)
 }
 
 function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
@@ -1152,3 +1096,6 @@ async function exportarShapefile() {
 
 // Expõe para o botão do HTML
 window.exportarShapefile = exportarShapefile;
+window.aplicarPreset = aplicarPreset;
+window.resetarParametros = resetarParametros;
+window.limparResultados = limparResultados;
