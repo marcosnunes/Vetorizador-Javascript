@@ -1536,23 +1536,37 @@ function registrarRelatorioProcessamento(relatorio) {
 // Inicializa o WASM (Vetorizador)
 async function inicializarWasm() {
   try {
+    console.log('🔄 Iniciando carregamento do WASM...');
+    console.log('Tentando carregar: vetoriza/pkg/vetoriza_bg.wasm');
+    
     // Com --target no-modules, o namespace é wasm_bindgen
     await wasm_bindgen('vetoriza/pkg/vetoriza_bg.wasm');
+    console.log('✅ wasm_bindgen carregado com sucesso');
+    console.log('Objeto wasm_bindgen:', wasm_bindgen);
+    
     vetorizar_imagem = wasm_bindgen.vetorizar_imagem;
-    console.log("Módulo WASM carregado com sucesso.");
-    console.log("Função vetorizar_imagem:", vetorizar_imagem);
+    
+    if (typeof vetorizar_imagem === 'function') {
+      console.log('✅ Módulo WASM carregado com sucesso.');
+      console.log('Função vetorizar_imagem está disponível:', vetorizar_imagem);
+    } else {
+      console.error('❌ vetorizar_imagem não é uma função!', typeof vetorizar_imagem);
+      throw new Error('vetorizar_imagem não está disponível no objeto wasm_bindgen');
+    }
   } catch (e) {
-    console.error("Falha ao carregar WASM:", e);
-    alert("❌ Erro crítico ao carregar o módulo de processamento\n\nO sistema de vetorização não pôde ser inicializado.\n\nDetalhes técnicos: " + e.message);
+    console.error("❌ Falha ao carregar WASM:", e);
+    console.error("Stack trace:", e.stack);
+    alert("❌ Erro crítico ao carregar o módulo de processamento\n\nO sistema de vetorização não pôde ser inicializado.\n\nDetalhes técnicos: " + e.message + "\n\nSolução: Verifique se o arquivo 'vetoriza/pkg/vetoriza_bg.wasm' existe e recarregue a página (F5).");
   }
 }
 
 function testarObjetoGlobalWasm() {
   if (typeof wasm_bindgen !== 'undefined') {
-    console.log('wasm_bindgen está disponível:', wasm_bindgen);
+    console.log('✅ Objeto global wasm_bindgen encontrado:', wasm_bindgen);
     inicializarWasm();
   } else {
-    console.error('Nenhum objeto global WASM encontrado (wasm_bindgen). Verifique o build e a ordem dos scripts.');
+    console.error('❌ Nenhum objeto global WASM encontrado (wasm_bindgen). Verifique o build e a ordem dos scripts.');
+    alert('❌ Erro ao carregar módulo WASM\n\nVerifique o console (F12) para mais detalhes.');
   }
 }
 
@@ -1910,18 +1924,42 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
 
       // Prepara para o WASM
       const base64Mask = maskCanvas.toDataURL('image/png').split(',')[1];
-      console.log('Enviando para WASM vetorizar_imagem...');
+      console.log('📍 [DEBUG] Base64 gerado, tamanho:', base64Mask.length);
+      console.log('📍 [DEBUG] Enviando para WASM vetorizar_imagem...');
+      console.log('📍 [DEBUG] Verificando tipo de vetorizar_imagem:', typeof vetorizar_imagem);
+      console.log('📍 [DEBUG] Verificando se é função:', typeof vetorizar_imagem === 'function');
 
       try {
+        // Verifica se WASM foi carregado
+        if (!vetorizar_imagem || typeof vetorizar_imagem !== 'function') {
+          console.error('❌ [FATAL] vetorizar_imagem não é uma função!');
+          console.error('   Tipo:', typeof vetorizar_imagem);
+          console.error('   Valor:', vetorizar_imagem);
+          throw new Error('WASM não foi carregado corretamente. Função vetorizar_imagem está ' + (typeof vetorizar_imagem) + '. Recarregue a página (F5).');
+        }
+
+        console.log('✅ [DEBUG] Chamando WASM...');
         // Chama o Rust/WASM para transformar pixels em GeoJSON
-        const geojsonStr = vetorizar_imagem(base64Mask);
-        console.log('WASM retornou GeoJSON string');
+        let geojsonStr;
+        try {
+          geojsonStr = vetorizar_imagem(base64Mask);
+          console.log('✅ [DEBUG] WASM retornou com sucesso');
+        } catch (wasmError) {
+          console.error('❌ [WASM_ERROR] Erro ao executar função WASM:', wasmError);
+          throw new Error('Erro ao executar WASM: ' + wasmError.message);
+        }
+        
+        console.log('📍 [DEBUG] GeoJSON string recebido, tamanho:', geojsonStr?.length || 0);
+        console.log('📍 [DEBUG] Primeiros 100 caracteres:', geojsonStr?.substring(0, 100));
+        
         const geojsonResult = JSON.parse(geojsonStr);
-        console.log('GeoJSON parseado:', geojsonResult);
+        console.log('✅ [DEBUG] GeoJSON parseado com sucesso');
+        console.log('📍 [DEBUG] Features recebidas:', geojsonResult.features?.length || 0);
 
         // Converte coordenadas de pixel (0,0) para Lat/Lng reais
         const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds);
-        console.log(`Conversão para LatLng: ${geojsonConvertido.features.length} features`);
+        console.log(`📍 [DEBUG] Conversão para LatLng completa: ${geojsonConvertido.features.length} features`);
+        console.log('📍 [DEBUG] Primeiros dados de features:', geojsonConvertido.features.slice(0, 2));
         relatorio.resultadoFinal = {
           featuresWasm: geojsonResult.features?.length || 0,
           featuresAposFiltro: geojsonConvertido.features.length

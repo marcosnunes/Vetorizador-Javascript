@@ -284,5 +284,10 @@ let wasm_bindgen;
     }
 
     wasm_bindgen = Object.assign(__wbg_init, { initSync }, __exports);
+    
+    // Expor globalmente para app.js
+    if (typeof window !== 'undefined') {
+        window.wasm_bindgen = wasm_bindgen;
+    }
 
 })();
