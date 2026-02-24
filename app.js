@@ -1383,11 +1383,12 @@ const MAP_CENTER = [-25.706923, -52.385530];
 const map = L.map('map').setView(MAP_CENTER, 15);
 window.map = map; // Tornar acessível globalmente para edição de polígonos
 
-const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Tiles &copy; Esri',
+const satelliteMap = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+  attribution: '&copy; Google Maps',
   maxZoom: 21,
-  maxNativeZoom: 19,
-  preferCanvas: true
+  maxNativeZoom: 21,
+  preferCanvas: true,
+  crossOrigin: 'anonymous'
 });
 satelliteMap.addTo(map);
 
