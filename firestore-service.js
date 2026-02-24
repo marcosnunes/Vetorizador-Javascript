@@ -34,8 +34,19 @@ export async function salvarRunFirestore(runId, dadosRun) {
 
   try {
     const runRef = doc(db, 'runs', runId);
+    
+    // Sanear dados: remover arrays aninhados e campos undefined
+    const dadosSaneados = {};
+    for (const [key, value] of Object.entries(dadosRun)) {
+      if (key === 'features') continue; // Features vai em subcoleção
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) continue; // Firestore não suporta arrays aninhados
+      if (typeof value === 'object' && !value.type) continue;
+      dadosSaneados[key] = value;
+    }
+
     const dadosCompletos = {
-      ...dadosRun,
+      ...dadosSaneados,
       userId: userId,
       timestamp: serverTimestamp(),
       createdAt: new Date().toISOString() // Fallback para offline
@@ -67,8 +78,22 @@ export async function salvarFeaturesFirestore(runId, features) {
       const featureId = `${runId}_feature_${index}`;
       const featureRef = doc(collection(runRef, 'features'), featureId);
       
+      // Saneamento: extrair apenas dados não-aninhados e metadados importantes
+      const featureSaneada = {
+        id: feature.properties?.id,
+        area_m2: feature.properties?.area_m2,
+        score: feature.properties?.score,
+        quality: feature.properties?.quality,
+        compactness: feature.properties?.compactness,
+        vertices: feature.properties?.vertices,
+        feedback_status: feature.properties?.feedback_status || 'pendente',
+        feedback_reason: feature.properties?.feedback_reason || '',
+        geometryType: feature.geometry?.type,
+        coordinateCount: feature.geometry?.coordinates?.[0]?.length || 0
+      };
+      
       batch.set(featureRef, {
-        ...feature,
+        ...featureSaneada,
         featureIndex: index,
         createdAt: serverTimestamp()
       });
@@ -102,7 +127,6 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
     const timestampSeguro = feedback?.timestamp || feedback?.createdAt || new Date().toISOString();
     
     const dadosFeedback = {
-      ...feedback,
       status: statusSeguro,
       reason: reasonSeguro,
       userId: userId,
@@ -110,6 +134,18 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
       timestamp: serverTimestamp(),
       createdAt: timestampSeguro // Fallback para offline
     };
+
+    // Adiciona geometrias apenas se existirem (evita undefined)
+    if (feedback?.editedGeometry || feedback?.geometriaCorrigida) {
+      const geom = feedback.editedGeometry || feedback.geometriaCorrigida;
+      dadosFeedback.editedGeometryType = geom.type;
+      dadosFeedback.editedGeometryCoordinateCount = geom.coordinates?.[0]?.length || 0;
+    }
+    if (feedback?.originalGeometry || feedback?.geometriaOriginal) {
+      const geom = feedback.originalGeometry || feedback.geometriaOriginal;
+      dadosFeedback.originalGeometryType = geom.type;
+      dadosFeedback.originalGeometryCoordinateCount = geom.coordinates?.[0]?.length || 0;
+    }
 
     await setDoc(feedbackRef, dadosFeedback);
     console.log(`✅ Feedback salvo em Firestore (featureId: ${featureId})`);
