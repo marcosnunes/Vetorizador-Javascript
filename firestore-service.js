@@ -97,13 +97,18 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
   try {
     const runRef = doc(db, 'runs', runId);
     const feedbackRef = doc(collection(runRef, 'feedback'), featureId);
+    const statusSeguro = feedback?.status || feedback?.feedbackStatus || feedback?.label || 'pendente';
+    const reasonSeguro = feedback?.reason || feedback?.feedbackReason || '';
+    const timestampSeguro = feedback?.timestamp || feedback?.createdAt || new Date().toISOString();
     
     const dadosFeedback = {
       ...feedback,
+      status: statusSeguro,
+      reason: reasonSeguro,
       userId: userId,
       featureId: featureId,
       timestamp: serverTimestamp(),
-      createdAt: new Date().toISOString() // Fallback para offline
+      createdAt: timestampSeguro // Fallback para offline
     };
 
     await setDoc(feedbackRef, dadosFeedback);

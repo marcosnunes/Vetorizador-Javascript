@@ -33,6 +33,7 @@ let learningDbPromise = null;
 // Variáveis de sincronização Firebase
 let firebaseInicializado = false;
 let modoOffline = false;
+let sincronizacaoEmAndamento = false;
 
 // --- PARÂMETROS AJUSTÁVEIS ---
 let CONFIG = {
@@ -48,6 +49,14 @@ let CONFIG = {
   clusterMinPts: 6,           // Mínimo de pontos vizinhos para core point
   minClusterSize: 40          // Mínimo de pixels por cluster aceito
 };
+
+const DEBUG_LOGS = false;
+
+function debugLog(...args) {
+  if (DEBUG_LOGS) {
+    console.log(...args);
+  }
+}
 
 // Função para sincronizar slider e input numérico
 function sincronizarControle(sliderId, inputId, configKey, formatter = (v) => v.toFixed(0)) {
@@ -189,11 +198,16 @@ async function sincronizarFilaPendente() {
     return;
   }
 
+  if (sincronizacaoEmAndamento) {
+    return;
+  }
+
   const pendentes = await contarOperacoesPendentes();
   if (pendentes === 0) {
     return;
   }
 
+  sincronizacaoEmAndamento = true;
   console.log(`🔄 Sincronizando ${pendentes} operações pendentes...`);
   
   try {
@@ -206,7 +220,7 @@ async function sincronizarFilaPendente() {
           await salvarFeaturesFirestore(payload.runId, payload.features);
           break;
         case 'feedback':
-          await salvarFeedbackFirestore(payload.runId, payload.featureId, payload.feedback);
+          await salvarFeedbackFirestore(payload.runId, payload.featureId, normalizarFeedbackPayload(payload.feedback));
           break;
         default:
           console.warn(`⚠️ Tipo de operação desconhecido: ${operationType}`);
@@ -218,7 +232,19 @@ async function sincronizarFilaPendente() {
     }
   } catch (error) {
     console.error('❌ Erro na sincronização da fila:', error);
+  } finally {
+    sincronizacaoEmAndamento = false;
   }
+}
+
+function normalizarFeedbackPayload(feedbackPayload = {}) {
+  return {
+    status: feedbackPayload.feedbackStatus || feedbackPayload.status || feedbackPayload.label || 'pendente',
+    reason: feedbackPayload.feedbackReason || feedbackPayload.reason || '',
+    editedGeometry: feedbackPayload.editedGeometry || feedbackPayload.geometriaCorrigida,
+    originalGeometry: feedbackPayload.originalGeometry || feedbackPayload.geometriaOriginal,
+    timestamp: feedbackPayload.timestamp || feedbackPayload.createdAt || new Date().toISOString()
+  };
 }
 
 // ==================== ATUALIZAR INDICADOR DE CONEXÃO ====================
@@ -588,8 +614,17 @@ async function salvarRunAprendizado(runPayload) {
 }
 
 async function salvarFeedbackAprendizado(feedbackPayload) {
+  const feedbackNormalizado = normalizarFeedbackPayload(feedbackPayload);
+
   // Salva localmente no IndexedDB (sempre)
-  await idbPut('feedback', feedbackPayload);
+  await idbPut('feedback', {
+    ...feedbackPayload,
+    ...feedbackNormalizado,
+    feedbackStatus: feedbackNormalizado.status,
+    feedbackReason: feedbackNormalizado.reason,
+    editedGeometry: feedbackNormalizado.editedGeometry,
+    timestamp: feedbackNormalizado.timestamp
+  });
 
   // Tenta salvar no Firestore se online e inicializado
   if (firebaseInicializado && estaOnline()) {
@@ -597,12 +632,7 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
       await salvarFeedbackFirestore(
         feedbackPayload.runId, 
         feedbackPayload.featureId, 
-        {
-          status: feedbackPayload.feedbackStatus,
-          reason: feedbackPayload.feedbackReason,
-          editedGeometry: feedbackPayload.editedGeometry,
-          timestamp: feedbackPayload.timestamp
-        }
+        feedbackNormalizado
       );
       console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
     } catch (error) {
@@ -610,12 +640,7 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
       await adicionarNaFila('feedback', {
         runId: feedbackPayload.runId,
         featureId: feedbackPayload.featureId,
-        feedback: {
-          status: feedbackPayload.feedbackStatus,
-          reason: feedbackPayload.feedbackReason,
-          editedGeometry: feedbackPayload.editedGeometry,
-          timestamp: feedbackPayload.timestamp
-        }
+        feedback: feedbackNormalizado
       });
     }
   } else {
@@ -623,12 +648,7 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
     await adicionarNaFila('feedback', {
       runId: feedbackPayload.runId,
       featureId: feedbackPayload.featureId,
-      feedback: {
-        status: feedbackPayload.feedbackStatus,
-        reason: feedbackPayload.feedbackReason,
-        editedGeometry: feedbackPayload.editedGeometry,
-        timestamp: feedbackPayload.timestamp
-      }
+      feedback: feedbackNormalizado
     });
   }
 }
@@ -675,9 +695,9 @@ async function marcarFeedbackPoligono(featureId, status) {
     feedbackId: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     runId: feature.properties.run_id || activeRunId || 'sem_run',
     featureId: featureId,
-    label: status,
-    reason: feedbackReason,
-    createdAt: new Date().toISOString()
+    feedbackStatus: status,
+    feedbackReason: feedbackReason,
+    timestamp: new Date().toISOString()
   };
 
   try {
@@ -853,11 +873,13 @@ function ativarEdicaoPoligono(featureId, feature) {
           feedbackId: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
           runId: feature.properties.run_id || activeRunId || 'sem_run',
           featureId: featureId,
-          label: 'editado',
-          reason: motivo,
+          feedbackStatus: 'editado',
+          feedbackReason: motivo,
           geometriaOriginal: geometriaOriginal,
           geometriaCorrigida: geometriaEditada,
-          createdAt: new Date().toISOString()
+          editedGeometry: geometriaEditada,
+          originalGeometry: geometriaOriginal,
+          timestamp: new Date().toISOString()
         };
         
         try {
@@ -1035,7 +1057,6 @@ async function treinarComDataset(dataset) {
 }
 
 // Carregar e treinar com arquivo JSON
-/* eslint-disable-next-line no-unused-vars */
 async function carregarETreinarModelo() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1067,7 +1088,6 @@ function mostrarNotificacao(mensagem, tipo = 'info') {
 }
 
 // Salvar ponto de ajuste fino (checkpoint dos parâmetros)
-/* eslint-disable-next-line no-unused-vars */
 async function salvarPontoAjusteFino() {
   const checkpoint = {
     timestamp: new Date().toISOString(),
@@ -1540,7 +1560,7 @@ async function inicializarWasm() {
     console.log('Tentando carregar: vetoriza/pkg/vetoriza_bg.wasm');
     
     // Com --target no-modules, o namespace é wasm_bindgen
-    await wasm_bindgen('vetoriza/pkg/vetoriza_bg.wasm');
+    await wasm_bindgen({ module_or_path: 'vetoriza/pkg/vetoriza_bg.wasm' });
     console.log('✅ wasm_bindgen carregado com sucesso');
     console.log('Objeto wasm_bindgen:', wasm_bindgen);
     
@@ -1577,10 +1597,10 @@ const MAP_CENTER = [-25.706923, -52.385530];
 const map = L.map('map').setView(MAP_CENTER, 15);
 window.map = map; // Tornar acessível globalmente para edição de polígonos
 
-const satelliteMap = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-  attribution: '&copy; Google Maps',
-  maxZoom: 21,
-  maxNativeZoom: 21,
+const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri',
+  maxZoom: 20,
+  maxNativeZoom: 19,
   preferCanvas: true,
   crossOrigin: 'anonymous'
 });
@@ -1924,10 +1944,10 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
 
       // Prepara para o WASM
       const base64Mask = maskCanvas.toDataURL('image/png').split(',')[1];
-      console.log('📍 [DEBUG] Base64 gerado, tamanho:', base64Mask.length);
-      console.log('📍 [DEBUG] Enviando para WASM vetorizar_imagem...');
-      console.log('📍 [DEBUG] Verificando tipo de vetorizar_imagem:', typeof vetorizar_imagem);
-      console.log('📍 [DEBUG] Verificando se é função:', typeof vetorizar_imagem === 'function');
+      debugLog('📍 [DEBUG] Base64 gerado, tamanho:', base64Mask.length);
+      debugLog('📍 [DEBUG] Enviando para WASM vetorizar_imagem...');
+      debugLog('📍 [DEBUG] Verificando tipo de vetorizar_imagem:', typeof vetorizar_imagem);
+      debugLog('📍 [DEBUG] Verificando se é função:', typeof vetorizar_imagem === 'function');
 
       try {
         // Verifica se WASM foi carregado
@@ -1938,28 +1958,28 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
           throw new Error('WASM não foi carregado corretamente. Função vetorizar_imagem está ' + (typeof vetorizar_imagem) + '. Recarregue a página (F5).');
         }
 
-        console.log('✅ [DEBUG] Chamando WASM...');
+        debugLog('✅ [DEBUG] Chamando WASM...');
         // Chama o Rust/WASM para transformar pixels em GeoJSON
         let geojsonStr;
         try {
           geojsonStr = vetorizar_imagem(base64Mask);
-          console.log('✅ [DEBUG] WASM retornou com sucesso');
+          debugLog('✅ [DEBUG] WASM retornou com sucesso');
         } catch (wasmError) {
           console.error('❌ [WASM_ERROR] Erro ao executar função WASM:', wasmError);
           throw new Error('Erro ao executar WASM: ' + wasmError.message);
         }
         
-        console.log('📍 [DEBUG] GeoJSON string recebido, tamanho:', geojsonStr?.length || 0);
-        console.log('📍 [DEBUG] Primeiros 100 caracteres:', geojsonStr?.substring(0, 100));
+        debugLog('📍 [DEBUG] GeoJSON string recebido, tamanho:', geojsonStr?.length || 0);
+        debugLog('📍 [DEBUG] Primeiros 100 caracteres:', geojsonStr?.substring(0, 100));
         
         const geojsonResult = JSON.parse(geojsonStr);
-        console.log('✅ [DEBUG] GeoJSON parseado com sucesso');
-        console.log('📍 [DEBUG] Features recebidas:', geojsonResult.features?.length || 0);
+        debugLog('✅ [DEBUG] GeoJSON parseado com sucesso');
+        debugLog('📍 [DEBUG] Features recebidas:', geojsonResult.features?.length || 0);
 
         // Converte coordenadas de pixel (0,0) para Lat/Lng reais
         const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds);
-        console.log(`📍 [DEBUG] Conversão para LatLng completa: ${geojsonConvertido.features.length} features`);
-        console.log('📍 [DEBUG] Primeiros dados de features:', geojsonConvertido.features.slice(0, 2));
+        debugLog(`📍 [DEBUG] Conversão para LatLng completa: ${geojsonConvertido.features.length} features`);
+        debugLog('📍 [DEBUG] Primeiros dados de features:', geojsonConvertido.features.slice(0, 2));
         relatorio.resultadoFinal = {
           featuresWasm: geojsonResult.features?.length || 0,
           featuresAposFiltro: geojsonConvertido.features.length
@@ -2356,3 +2376,5 @@ window.aplicarPreset = aplicarPreset;
 window.resetarParametros = resetarParametros;
 window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
+window.carregarETreinarModelo = carregarETreinarModelo;
+window.salvarPontoAjusteFino = salvarPontoAjusteFino;
