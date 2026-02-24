@@ -679,6 +679,16 @@ function ativarEdicaoPoligono(featureId, feature) {
   // Fechar todos os popups para liberar a visão do mapa
   window.map.closePopup();
   
+  // CRÍTICO: Remover layers de debug que bloqueiam a visualização
+  if (debugMaskLayer) {
+    window.map.removeLayer(debugMaskLayer);
+    debugMaskLayer = null;
+  }
+  if (window.debugMorphLayer) {
+    window.map.removeLayer(window.debugMorphLayer);
+    window.debugMorphLayer = null;
+  }
+  
   // Procurar o layer correspondente no mapa
   let targetLayer = null;
   if (window.lastGeoJSONLayer) {
@@ -714,28 +724,29 @@ function ativarEdicaoPoligono(featureId, feature) {
   // Habilitar edição usando Leaflet.Draw
   editablePolygon.editing.enable();
 
-  // Criar painel de instruções temporário
-  const instrucoes = L.control({ position: 'topright' });
+  // Criar painel de instruções temporário - COMPACTO E TRANSPARENTE
+  const instrucoes = L.control({ position: 'bottomright' });
   instrucoes.onAdd = function() {
     const div = L.DomUtil.create('div', 'edit-instructions');
-    div.style.background = 'rgba(255, 255, 255, 0.95)';
-    div.style.padding = '15px';
-    div.style.borderRadius = '8px';
-    div.style.boxShadow = '0 2px 10px rgba(0,0,0,0.3)';
-    div.style.maxWidth = '320px';
+    div.style.background = 'rgba(0, 0, 0, 0.75)';
+    div.style.padding = '12px';
+    div.style.borderRadius = '6px';
+    div.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
+    div.style.maxWidth = '280px';
     div.style.zIndex = '1000';
+    div.style.color = 'white';
+    div.style.backdropFilter = 'blur(4px)';
     div.innerHTML = `
-      <strong style="color: #FF6B00; font-size: 15px;">✏️ Modo de Edição Ativo</strong>
-      <p style="margin: 10px 0; font-size: 13px; line-height: 1.5;">
-        • <strong>Arraste os vértices</strong> (círculos brancos)<br>
-        • <strong>Clique nas linhas</strong> para adicionar pontos<br>
-        • <strong>Ajuste conforme necessário</strong><br>
-        • 🏆 <span style="color: #FFD700; font-weight: bold;">Dados mais valiosos para ML!</span>
+      <strong style="color: #FFA500; font-size: 14px; display: block; margin-bottom: 8px;">✏️ Editando Polígono</strong>
+      <p style="margin: 0 0 10px 0; font-size: 12px; line-height: 1.4; color: #E0E0E0;">
+        • Arraste vértices brancos<br>
+        • Clique em linhas → novo ponto<br>
+        • 🏆 <span style="color: #FFD700;">ML aprende com isso!</span>
       </p>
-      <button id="salvar-edicao" style="background: #28a745; color: white; border: none; padding: 12px 15px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 8px; font-weight: bold; font-size: 14px;">
+      <button id="salvar-edicao" style="background: #28a745; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 6px; font-weight: bold; font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
         ✅ Salvar Correção
       </button>
-      <button id="cancelar-edicao" style="background: #dc3545; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 14px;">
+      <button id="cancelar-edicao" style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
         ❌ Cancelar
       </button>
     `;

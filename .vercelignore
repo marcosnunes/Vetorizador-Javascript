@@ -1,7 +1,7 @@
 # Git
 .git/
 
-# Rust build artifacts (não são necessários no deploy)
+# Rust build artifacts (não são necessários no deploy).
 vetoriza/target/
 
 # Dependencies
