@@ -636,9 +636,15 @@ async function marcarFeedbackPoligono(featureId, status) {
     return;
   }
 
+  // Se for modo editado, ativar edição visual
+  if (status === 'editado') {
+    ativarEdicaoPoligono(featureId, feature);
+    return;
+  }
+
   let feedbackReason = '';
-  if (status === 'rejeitado' || status === 'editado') {
-    feedbackReason = prompt('Informe o motivo (ex.: sombra, rua, fragmentado):', feature.properties.feedback_reason || '') || '';
+  if (status === 'rejeitado') {
+    feedbackReason = prompt('Informe o motivo (ex.: sombra, rua, fragmentado, noise):', feature.properties.feedback_reason || '') || '';
   }
 
   feature.properties.feedback_status = status;
@@ -666,6 +672,168 @@ async function marcarFeedbackPoligono(featureId, status) {
   } catch (err) {
     console.error('Erro ao salvar feedback no banco local:', err);
   }
+}
+
+// Nova função para ativar modo de edição visual
+function ativarEdicaoPoligono(featureId, feature) {
+  // Fechar todos os popups para liberar a visão do mapa
+  window.map.closePopup();
+  
+  // Procurar o layer correspondente no mapa
+  let targetLayer = null;
+  if (window.lastGeoJSONLayer) {
+    window.lastGeoJSONLayer.eachLayer((layer) => {
+      if (layer.feature?.properties?.id === featureId) {
+        targetLayer = layer;
+      }
+    });
+  }
+
+  if (!targetLayer) {
+    alert('⚠️ Layer não encontrado no mapa para edição.');
+    return;
+  }
+
+  // Salvar geometria original antes de editar
+  const geometriaOriginal = JSON.parse(JSON.stringify(feature.geometry));
+  
+  // Obter coordenadas do polígono
+  const latlngs = targetLayer.getLatLngs();
+  
+  // Remover layer do GeoJSON temporariamente
+  window.lastGeoJSONLayer.removeLayer(targetLayer);
+  
+  // Criar polígono editável
+  const editablePolygon = L.polygon(latlngs, {
+    color: '#FF6B00',
+    weight: 4,
+    fillOpacity: 0.2,
+    fillColor: '#FF6B00'
+  }).addTo(window.map);
+  
+  // Habilitar edição usando Leaflet.Draw
+  editablePolygon.editing.enable();
+
+  // Criar painel de instruções temporário
+  const instrucoes = L.control({ position: 'topright' });
+  instrucoes.onAdd = function() {
+    const div = L.DomUtil.create('div', 'edit-instructions');
+    div.style.background = 'rgba(255, 255, 255, 0.95)';
+    div.style.padding = '15px';
+    div.style.borderRadius = '8px';
+    div.style.boxShadow = '0 2px 10px rgba(0,0,0,0.3)';
+    div.style.maxWidth = '320px';
+    div.style.zIndex = '1000';
+    div.innerHTML = `
+      <strong style="color: #FF6B00; font-size: 15px;">✏️ Modo de Edição Ativo</strong>
+      <p style="margin: 10px 0; font-size: 13px; line-height: 1.5;">
+        • <strong>Arraste os vértices</strong> (círculos brancos)<br>
+        • <strong>Clique nas linhas</strong> para adicionar pontos<br>
+        • <strong>Ajuste conforme necessário</strong><br>
+        • 🏆 <span style="color: #FFD700; font-weight: bold;">Dados mais valiosos para ML!</span>
+      </p>
+      <button id="salvar-edicao" style="background: #28a745; color: white; border: none; padding: 12px 15px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 8px; font-weight: bold; font-size: 14px;">
+        ✅ Salvar Correção
+      </button>
+      <button id="cancelar-edicao" style="background: #dc3545; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 14px;">
+        ❌ Cancelar
+      </button>
+    `;
+    
+    // Prevenir propagação de eventos do mapa
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    
+    return div;
+  };
+  instrucoes.addTo(window.map);
+
+  // Handler para salvar edição
+  setTimeout(() => {
+    const btnSalvar = document.getElementById('salvar-edicao');
+    const btnCancelar = document.getElementById('cancelar-edicao');
+    
+    if (btnSalvar) {
+      btnSalvar.addEventListener('click', async () => {
+        // Capturar geometria editada
+        const geometriaEditada = editablePolygon.toGeoJSON().geometry;
+        
+        // Pedir motivo da edição
+        const motivo = prompt(
+          '📝 Informe o motivo da correção:\n\n' +
+          'Exemplos:\n' +
+          '• "borda imprecisa"\n' +
+          '• "faltou canto sudeste"\n' +
+          '• "sobrou parte da sombra"\n' +
+          '• "forma irregular"',
+          ''
+        ) || 'correção manual';
+        
+        if (!motivo.trim()) {
+          alert('⚠️ Por favor, informe um motivo para a correção.');
+          return;
+        }
+        
+        // Atualizar feature com geometrias original E editada
+        feature.geometry = geometriaEditada;
+        feature.properties.feedback_status = 'editado';
+        feature.properties.feedback_reason = motivo;
+        feature.properties.feedback_updated_at = new Date().toISOString();
+        feature.properties.geometria_original = geometriaOriginal;  // GOLD para ML!
+        
+        // Salvar feedback com ambas geometrias
+        const feedbackPayload = {
+          feedbackId: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          runId: feature.properties.run_id || activeRunId || 'sem_run',
+          featureId: featureId,
+          label: 'editado',
+          reason: motivo,
+          geometriaOriginal: geometriaOriginal,
+          geometriaCorrigida: geometriaEditada,
+          createdAt: new Date().toISOString()
+        };
+        
+        try {
+          await salvarFeedbackAprendizado(feedbackPayload);
+          await atualizarFeedbackNoRun(
+            feedbackPayload.runId,
+            featureId,
+            'editado',
+            motivo
+          );
+          
+          // Remover polígono editável e instruções
+          window.map.removeLayer(editablePolygon);
+          instrucoes.remove();
+          
+          // Atualizar visualização com nova geometria
+          atualizarVisualizacao();
+          
+          mostrarNotificacao('✅ Correção salva com sucesso! Dados valiosos para o ML 🏆', 'success');
+          console.log('✏️ Edição salva:', {
+            featureId,
+            motivo,
+            geometriaOriginal: geometriaOriginal.coordinates,
+            geometriaCorrigida: geometriaEditada.coordinates
+          });
+        } catch (err) {
+          console.error('Erro ao salvar correção:', err);
+          alert('❌ Erro ao salvar correção: ' + err.message);
+        }
+      });
+    }
+
+    if (btnCancelar) {
+      btnCancelar.addEventListener('click', () => {
+        // Remover polígono editável e instruções
+        window.map.removeLayer(editablePolygon);
+        instrucoes.remove();
+        
+        // Restaurar visualização original
+        atualizarVisualizacao();
+      });
+    }
+  }, 100); // Pequeno delay para garantir que elementos foram adicionados ao DOM
 }
 
 async function exportarDatasetAprendizado() {
@@ -1202,6 +1370,7 @@ window.addEventListener('DOMContentLoaded', testarObjetoGlobalWasm);
 // --- MAPA ---
 const MAP_CENTER = [-25.706923, -52.385530];
 const map = L.map('map').setView(MAP_CENTER, 15);
+window.map = map; // Tornar acessível globalmente para edição de polígonos
 
 const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   attribution: 'Tiles &copy; Esri',
