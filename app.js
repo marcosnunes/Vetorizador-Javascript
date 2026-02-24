@@ -676,6 +676,8 @@ async function marcarFeedbackPoligono(featureId, status) {
 
 // Nova função para ativar modo de edição visual
 function ativarEdicaoPoligono(featureId, feature) {
+  console.log('🔵 Iniciando edição do polígono:', featureId);
+  
   // Fechar todos os popups para liberar a visão do mapa
   window.map.closePopup();
   
@@ -689,40 +691,76 @@ function ativarEdicaoPoligono(featureId, feature) {
     window.debugMorphLayer = null;
   }
   
-  // Procurar o layer correspondente no mapa
+  // Procurar o layer correspondente no mapa pelo featureId
   let targetLayer = null;
+  let layerIndex = 0;
+  
   if (window.lastGeoJSONLayer) {
-    window.lastGeoJSONLayer.eachLayer((layer) => {
-      if (layer.feature?.properties?.id === featureId) {
+    window.lastGeoJSONLayer.eachLayer((layer, index) => {
+      const layerFeatureId = layer.feature?.properties?.id;
+      console.log(`  Layer ${index}: id=${layerFeatureId}, procurando=${featureId}`);
+      
+      if (layerFeatureId === featureId) {
         targetLayer = layer;
+        layerIndex = index;
+        console.log(`  ✅ Encontrado exato no índice ${index}`);
       }
     });
   }
 
   if (!targetLayer) {
-    alert('⚠️ Layer não encontrado no mapa para edição.');
+    console.error('❌ Layer não encontrado para featureId:', featureId);
+    alert('⚠️ Polígono não encontrado. Tente clicar diretamente no polígono no mapa.');
     return;
   }
 
+  console.log('✅ Layer encontrado, iniciando edição');
+  
   // Salvar geometria original antes de editar
   const geometriaOriginal = JSON.parse(JSON.stringify(feature.geometry));
   
   // Obter coordenadas do polígono
   const latlngs = targetLayer.getLatLngs();
+  console.log(`  Coordenadas originais: ${latlngs.length} vértices`);
   
   // Remover layer do GeoJSON temporariamente
   window.lastGeoJSONLayer.removeLayer(targetLayer);
   
-  // Criar polígono editável
+  // Criar polígono editável com estilo destacado
   const editablePolygon = L.polygon(latlngs, {
     color: '#FF6B00',
     weight: 4,
     fillOpacity: 0.2,
-    fillColor: '#FF6B00'
+    fillColor: '#FF6B00',
+    dashArray: '10, 5'
   }).addTo(window.map);
   
+  // Customizar os marcadores de vértice ANTES de ativar edição
+  const editHandler = editablePolygon.editing;
+  
   // Habilitar edição usando Leaflet.Draw
-  editablePolygon.editing.enable();
+  editHandler.enable();
+  
+  // Redimensionar marcadores de vértice após 100ms (dar tempo para renderizar)
+  setTimeout(() => {
+    const markers = editHandler._markers;
+    if (markers) {
+      markers.forEach(marker => {
+        // Reduzir significativamente o tamanho do marcador
+        const icon = marker.getIcon();
+        if (icon) {
+          marker.setIcon(L.divIcon({
+            className: 'leaflet-div-icon-edit-small',
+            html: '<div style="width: 10px; height: 10px; background: white; border: 2px solid #FF6B00; border-radius: 50%; cursor: move;"></div>',
+            iconSize: [10, 10],
+            iconAnchor: [5, 5]
+          }));
+        }
+      });
+    }
+  }, 100);
+  
+  console.log('✅ Vértices habilitados para edição');
 
   // Criar painel de instruções temporário - COMPACTO E TRANSPARENTE
   const instrucoes = L.control({ position: 'bottomright' });
@@ -733,15 +771,16 @@ function ativarEdicaoPoligono(featureId, feature) {
     div.style.borderRadius = '6px';
     div.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
     div.style.maxWidth = '280px';
-    div.style.zIndex = '1000';
+    div.style.zIndex = '10000'; // Aumentar z-index para garantir visibilidade
     div.style.color = 'white';
     div.style.backdropFilter = 'blur(4px)';
     div.innerHTML = `
       <strong style="color: #FFA500; font-size: 14px; display: block; margin-bottom: 8px;">✏️ Editando Polígono</strong>
       <p style="margin: 0 0 10px 0; font-size: 12px; line-height: 1.4; color: #E0E0E0;">
-        • Arraste vértices brancos<br>
-        • Clique em linhas → novo ponto<br>
-        • 🏆 <span style="color: #FFD700;">ML aprende com isso!</span>
+        • <strong>Arraste vértices</strong> brancos<br>
+        • <strong>Clique linhas</strong> → novo ponto<br>
+        • <strong>Zoom</strong> para precisão (até 23x)<br>
+        • 🏆 <span style="color: #FFD700;">ML aprende!</span>
       </p>
       <button id="salvar-edicao" style="background: #28a745; color: white; border: none; padding: 10px 12px; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 6px; font-weight: bold; font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
         ✅ Salvar Correção
@@ -1383,13 +1422,33 @@ const MAP_CENTER = [-25.706923, -52.385530];
 const map = L.map('map').setView(MAP_CENTER, 15);
 window.map = map; // Tornar acessível globalmente para edição de polígonos
 
+// Mapa Esri World Imagery com maior claridade em altos zooms
 const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
   attribution: 'Tiles &copy; Esri',
-  maxZoom: 21,
-  maxNativeZoom: 19,
-  preferCanvas: true
+  maxZoom: 23,
+  maxNativeZoom: 21,
+  preferCanvas: true,
+  crossOrigin: 'anonymous'
 });
 satelliteMap.addTo(map);
+
+// Customizar tamanho dos vértices de edição (Leaflet.Draw)
+L.EditToolbar.Edit.include({
+  options: {
+    poly: {
+      allowIntersection: false
+    },
+    featureGroup: drawnItems
+  }
+});
+
+// Customizar tamanho dos marcadores de vértice
+L.Edit.PolyVertexMarker.include({
+  options: {
+    touchRadius: 12,
+    radius: 6
+  }
+});
 
 const drawnItems = new L.FeatureGroup();
 map.addLayer(drawnItems);
