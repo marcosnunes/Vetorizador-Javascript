@@ -67,6 +67,57 @@
         </div>
 
         <div class="param-control">
+          <label for="clusteringEnabled">
+            <span class="param-icon">🧠</span>
+            <span class="param-name">Clustering DBSCAN</span>
+          </label>
+          <div class="input-group">
+            <input type="checkbox" id="clusteringEnabled" checked>
+            <span class="unit">Ativo</span>
+          </div>
+          <small>Remove ruídos isolados e mantém grupos de bordas consistentes</small>
+        </div>
+
+        <div class="param-control">
+          <label for="clusterEps">
+            <span class="param-icon">📍</span>
+            <span class="param-name">Raio do Cluster (eps)</span>
+          </label>
+          <div class="input-group">
+            <input type="range" id="clusterEps" min="1.0" max="6.0" value="2.5" step="0.1">
+            <input type="number" id="clusterEpsInput" min="1.0" max="6.0" value="2.5" step="0.1" class="number-input">
+            <span class="unit">px</span>
+          </div>
+          <small>1-2: Conservador | 2.5-3.5: Recomendado | 4-6: Agressivo</small>
+        </div>
+
+        <div class="param-control">
+          <label for="clusterMinPts">
+            <span class="param-icon">🔢</span>
+            <span class="param-name">Densidade Mínima (minPts)</span>
+          </label>
+          <div class="input-group">
+            <input type="range" id="clusterMinPts" min="2" max="20" value="6" step="1">
+            <input type="number" id="clusterMinPtsInput" min="2" max="20" value="6" step="1" class="number-input">
+            <span class="unit">pts</span>
+          </div>
+          <small>Menor: mais sensível | Maior: mais rígido contra ruído</small>
+        </div>
+
+        <div class="param-control">
+          <label for="minClusterSize">
+            <span class="param-icon">🧱</span>
+            <span class="param-name">Tamanho Mínimo de Cluster</span>
+          </label>
+          <div class="input-group">
+            <input type="range" id="minClusterSize" min="10" max="500" value="40" step="5">
+            <input type="number" id="minClusterSizeInput" min="10" max="500" value="40" step="5" class="number-input">
+            <span class="unit">px</span>
+          </div>
+          <small>Filtra grupos pequenos de borda antes da vetorização</small>
+        </div>
+
+        <div class="param-control">
           <label for="minArea">
             <span class="param-icon">📐</span>
             <span class="param-name">Área Mínima</span>

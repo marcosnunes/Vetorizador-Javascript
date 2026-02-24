@@ -17,7 +17,11 @@ let CONFIG = {
   simplification: 0.00001,    // Tolerância de simplificação
   contrastBoost: 1.3,         // Multiplicador de contraste
   minQualityScore: 35,        // Score mínimo para aceitar polígono (0-100)
-  mergeDistance: 3            // Distância em metros para mesclar polígonos próximos
+  mergeDistance: 3,           // Distância em metros para mesclar polígonos próximos
+  clusteringEnabled: true,    // Ativa DBSCAN para limpar ruído de borda
+  clusterEps: 2.5,            // Raio (px) de vizinhança do DBSCAN
+  clusterMinPts: 6,           // Mínimo de pontos vizinhos para core point
+  minClusterSize: 40          // Mínimo de pixels por cluster aceito
 };
 
 // Função para sincronizar slider e input numérico
@@ -59,6 +63,17 @@ window.addEventListener('DOMContentLoaded', () => {
   sincronizarControle('simplification', 'simplificationInput', 'simplification', v => v.toFixed(6));
   sincronizarControle('contrastBoost', 'contrastBoostInput', 'contrastBoost', v => v.toFixed(1));
   sincronizarControle('mergeDistance', 'mergeDistanceInput', 'mergeDistance', v => v.toFixed(1));
+  sincronizarControle('clusterEps', 'clusterEpsInput', 'clusterEps', v => v.toFixed(1));
+  sincronizarControle('clusterMinPts', 'clusterMinPtsInput', 'clusterMinPts', v => v.toFixed(0));
+  sincronizarControle('minClusterSize', 'minClusterSizeInput', 'minClusterSize', v => v.toFixed(0));
+
+  const clusteringEnabled = document.getElementById('clusteringEnabled');
+  if (clusteringEnabled) {
+    clusteringEnabled.checked = CONFIG.clusteringEnabled;
+    clusteringEnabled.addEventListener('change', (e) => {
+      CONFIG.clusteringEnabled = e.target.checked;
+    });
+  }
   
   // Ativa colorir por qualidade por padrão
   const colorByQuality = document.getElementById('colorByQuality');
@@ -82,6 +97,10 @@ function aplicarPreset(tipo) {
         simplification: 0.00003,  // Aumentado para geometrias mais limpas
         contrastBoost: 1.5,       // Aumentado para bordas mais definidas
         minQualityScore: 50,      // Aumentado para filtrar falsos positivos
+        clusteringEnabled: true,
+        clusterEps: 2.5,
+        clusterMinPts: 6,
+        minClusterSize: 45,
         nome: 'Área Urbana (Profissional)'
       };
       break;
@@ -94,6 +113,10 @@ function aplicarPreset(tipo) {
         simplification: 0.00004,  // Mais simplificação para reduzir vértices
         contrastBoost: 1.6,       // Alto contraste para separar de vegetação
         minQualityScore: 45,      // Filtro médio para área rural
+        clusteringEnabled: true,
+        clusterEps: 3.0,
+        clusterMinPts: 5,
+        minClusterSize: 35,
         nome: 'Área Rural (Profissional)'
       };
       break;
@@ -106,6 +129,10 @@ function aplicarPreset(tipo) {
         simplification: 0.00005,  // Muita simplificação - formas retangulares
         contrastBoost: 1.4,
         minQualityScore: 50,
+        clusteringEnabled: true,
+        clusterEps: 2.0,
+        clusterMinPts: 7,
+        minClusterSize: 60,
         nome: 'Galpões Industriais (Profissional)'
       };
       break;
@@ -122,6 +149,10 @@ function aplicarPreset(tipo) {
   CONFIG.contrastBoost = preset.contrastBoost;
   CONFIG.minQualityScore = preset.minQualityScore;
   CONFIG.mergeDistance = 3; // Sempre ativa fusão nos presets
+  CONFIG.clusteringEnabled = preset.clusteringEnabled;
+  CONFIG.clusterEps = preset.clusterEps;
+  CONFIG.clusterMinPts = preset.clusterMinPts;
+  CONFIG.minClusterSize = preset.minClusterSize;
   
   // Atualizar controles UI (sliders e inputs)
   document.getElementById('edgeThreshold').value = preset.edgeThreshold;
@@ -138,6 +169,13 @@ function aplicarPreset(tipo) {
   document.getElementById('contrastBoostInput').value = preset.contrastBoost.toFixed(1);
   document.getElementById('mergeDistance').value = 3;
   document.getElementById('mergeDistanceInput').value = '3.0';
+  document.getElementById('clusteringEnabled').checked = preset.clusteringEnabled;
+  document.getElementById('clusterEps').value = preset.clusterEps;
+  document.getElementById('clusterEpsInput').value = preset.clusterEps.toFixed(1);
+  document.getElementById('clusterMinPts').value = preset.clusterMinPts;
+  document.getElementById('clusterMinPtsInput').value = preset.clusterMinPts;
+  document.getElementById('minClusterSize').value = preset.minClusterSize;
+  document.getElementById('minClusterSizeInput').value = preset.minClusterSize;
   
   alert(`✅ Preset "${preset.nome}" aplicado!\n\n🎯 Configurações profissionais ativadas:\n• Fusão automática de fragmentos\n• Filtros de qualidade otimizados\n• Geometrias simplificadas`);
 }
@@ -151,7 +189,11 @@ function resetarParametros() {
     simplification: 0.00001,
     contrastBoost: 1.3,
     minQualityScore: 35,
-    mergeDistance: 3
+    mergeDistance: 3,
+    clusteringEnabled: true,
+    clusterEps: 2.5,
+    clusterMinPts: 6,
+    minClusterSize: 40
   };
   
   // Atualizar controles UI (sliders e inputs)
@@ -169,6 +211,13 @@ function resetarParametros() {
   document.getElementById('contrastBoostInput').value = 1.3;
   document.getElementById('mergeDistance').value = 3;
   document.getElementById('mergeDistanceInput').value = '3.0';
+  document.getElementById('clusteringEnabled').checked = true;
+  document.getElementById('clusterEps').value = 2.5;
+  document.getElementById('clusterEpsInput').value = '2.5';
+  document.getElementById('clusterMinPts').value = 6;
+  document.getElementById('clusterMinPtsInput').value = 6;
+  document.getElementById('minClusterSize').value = 40;
+  document.getElementById('minClusterSizeInput').value = 40;
   
   alert('✅ Parâmetros restaurados!\n\nTodos os valores foram redefinidos para os padrões recomendados.');
 }
@@ -502,6 +551,166 @@ function aplicarThresholdAdaptativo(imageData) {
   return threshold;
 }
 
+function aplicarClusteringDBSCAN(imageData, width, height, options = {}) {
+  const eps = Math.max(1, Number(options.eps) || 2.5);
+  const minPts = Math.max(2, Number(options.minPts) || 6);
+  const minClusterSize = Math.max(minPts, Number(options.minClusterSize) || 40);
+
+  const data = imageData.data;
+  const points = [];
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      if (data[idx] > 200) {
+        points.push({ x, y });
+      }
+    }
+  }
+
+  if (points.length === 0) {
+    return {
+      enabled: true,
+      totalPoints: 0,
+      keptPoints: 0,
+      removedPoints: 0,
+      clustersFound: 0,
+      validClusters: 0,
+      eps,
+      minPts,
+      minClusterSize
+    };
+  }
+
+  const cellSize = eps;
+  const radiusCells = Math.ceil(eps / cellSize);
+  const eps2 = eps * eps;
+  const grid = new Map();
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const gx = Math.floor(p.x / cellSize);
+    const gy = Math.floor(p.y / cellSize);
+    const key = `${gx},${gy}`;
+
+    if (!grid.has(key)) {
+      grid.set(key, []);
+    }
+    grid.get(key).push(i);
+  }
+
+  const labels = new Int32Array(points.length);
+  labels.fill(-2); // -2: não visitado, -1: ruído, >=0: clusterId
+  const clusterSizes = [];
+
+  function regionQuery(index) {
+    const p = points[index];
+    const gx = Math.floor(p.x / cellSize);
+    const gy = Math.floor(p.y / cellSize);
+    const neighbors = [];
+
+    for (let oy = -radiusCells; oy <= radiusCells; oy++) {
+      for (let ox = -radiusCells; ox <= radiusCells; ox++) {
+        const key = `${gx + ox},${gy + oy}`;
+        const bucket = grid.get(key);
+        if (!bucket) continue;
+
+        for (let b = 0; b < bucket.length; b++) {
+          const candidateIndex = bucket[b];
+          const q = points[candidateIndex];
+          const dx = p.x - q.x;
+          const dy = p.y - q.y;
+          if ((dx * dx + dy * dy) <= eps2) {
+            neighbors.push(candidateIndex);
+          }
+        }
+      }
+    }
+
+    return neighbors;
+  }
+
+  let clusterId = 0;
+  for (let i = 0; i < points.length; i++) {
+    if (labels[i] !== -2) continue;
+
+    const neighbors = regionQuery(i);
+    if (neighbors.length < minPts) {
+      labels[i] = -1;
+      continue;
+    }
+
+    labels[i] = clusterId;
+    const queue = neighbors.slice();
+    let queueIndex = 0;
+
+    while (queueIndex < queue.length) {
+      const current = queue[queueIndex++];
+
+      if (labels[current] === -1) {
+        labels[current] = clusterId;
+      }
+
+      if (labels[current] !== -2) {
+        continue;
+      }
+
+      labels[current] = clusterId;
+      const currentNeighbors = regionQuery(current);
+
+      if (currentNeighbors.length >= minPts) {
+        for (let n = 0; n < currentNeighbors.length; n++) {
+          queue.push(currentNeighbors[n]);
+        }
+      }
+    }
+
+    clusterId++;
+  }
+
+  for (let i = 0; i < labels.length; i++) {
+    if (labels[i] >= 0) {
+      clusterSizes[labels[i]] = (clusterSizes[labels[i]] || 0) + 1;
+    }
+  }
+
+  const validClusters = new Set();
+  for (let id = 0; id < clusterSizes.length; id++) {
+    if ((clusterSizes[id] || 0) >= minClusterSize) {
+      validClusters.add(id);
+    }
+  }
+
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 0;
+    data[i + 1] = 0;
+    data[i + 2] = 0;
+    data[i + 3] = 255;
+  }
+
+  let keptPoints = 0;
+  for (let i = 0; i < points.length; i++) {
+    if (!validClusters.has(labels[i])) continue;
+    const idx = (points[i].y * width + points[i].x) * 4;
+    data[idx] = 255;
+    data[idx + 1] = 255;
+    data[idx + 2] = 255;
+    keptPoints++;
+  }
+
+  return {
+    enabled: true,
+    totalPoints: points.length,
+    keptPoints,
+    removedPoints: points.length - keptPoints,
+    clustersFound: clusterSizes.length,
+    validClusters: validClusters.size,
+    eps,
+    minPts,
+    minClusterSize
+  };
+}
+
 // Inicializa o WASM (Vetorizador)
 async function inicializarWasm() {
   try {
@@ -673,6 +882,24 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     let binData = ctx.getImageData(0, 0, width, height);
     const thresholdUsado = aplicarThresholdAdaptativo(binData);
     console.log(`Threshold adaptativo aplicado: ${thresholdUsado}`);
+
+    if (CONFIG.clusteringEnabled) {
+      loaderText.textContent = 'Agrupando bordas (DBSCAN)...';
+      await yieldToMain();
+
+      const statsCluster = aplicarClusteringDBSCAN(binData, width, height, {
+        eps: CONFIG.clusterEps,
+        minPts: CONFIG.clusterMinPts,
+        minClusterSize: CONFIG.minClusterSize
+      });
+
+      console.log(
+        `DBSCAN: ${statsCluster.totalPoints} pontos, ${statsCluster.keptPoints} mantidos, ` +
+        `${statsCluster.removedPoints} removidos, ${statsCluster.validClusters}/${statsCluster.clustersFound} clusters válidos ` +
+        `(eps=${statsCluster.eps}, minPts=${statsCluster.minPts}, minCluster=${statsCluster.minClusterSize})`
+      );
+    }
+
     ctx.putImageData(binData, 0, 0);
 
     loaderText.textContent = 'Aplicando detecção de contornos...';
