@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import { copyFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url)).slice(0, -1);
 
 export default defineConfig({
   server: {

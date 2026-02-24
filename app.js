@@ -122,16 +122,16 @@ async function inicializarSistemaAprendizado() {
   try {
     await inicializarBancoAprendizado();
     console.log('✅ Banco local de aprendizado inicializado');
-  } catch (error) {
-    console.error('❌ Erro ao inicializar banco local:', error);
+  } catch (err) {
+    console.error('❌ Erro ao inicializar banco local:', err);
   }
 
   // 2. Inicializar fila offline
   try {
     await inicializarFilaOffline();
     console.log('✅ Fila offline inicializada');
-  } catch (error) {
-    console.error('❌ Erro ao inicializar fila offline:', error);
+  } catch {
+    console.error('❌ Erro ao inicializar fila offline');
   }
 
   // 3. Inicializar Firebase/Firestore (Phase 2)
@@ -155,9 +155,29 @@ async function inicializarSistemaAprendizado() {
       // 5. Sincronizar fila pendente (se houver operações offline)
       await sincronizarFilaPendente();
     }
-  } catch (error) {
-    console.error('⚠️ Firebase não inicializado - rodando apenas com IndexedDB local:', error);
+  } catch {
+    console.error('⚠️ Firebase não inicializado - rodando apenas com IndexedDB local');
     firebaseInicializado = false;
+  }
+
+  // 6. Auto-carregar modelo treinado para inferência
+  try {
+    const modeloCarregado = await window.autocarregarModeloML?.();
+    if (modeloCarregado) {
+      console.log('✅ Modelo auto-carregado para inferência automática');
+    }
+  } catch {
+    console.log('⚠️ Nenhum modelo salvo para auto-inferência');
+  }
+
+  // 7. Inicializar sistema de aprendizado contínuo
+  try {
+    const phase5Ok = await window.inicializarPhase5?.();
+    if (phase5Ok) {
+      console.log('✅ Sistema de aprendizado contínuo inicializado');
+    }
+  } catch {
+    console.log('⚠️ Erro ao inicializar aprendizado contínuo');
   }
 
   atualizarIndicadorConexao();
@@ -917,6 +937,9 @@ async function exportarDatasetAprendizado() {
           document.body.removeChild(link);
           
           mostrarNotificacao(`✅ Dataset exportado: ${datasetCompleto.runs.length} runs`, 'success');
+          
+          // Oferecer treinamento
+          treinarComDataset(datasetCompleto);
           return;
         } catch (error) {
           loader.style.display = 'none';
@@ -954,16 +977,137 @@ async function exportarDatasetAprendizado() {
     document.body.removeChild(link);
 
     mostrarNotificacao(`✅ Dataset local exportado: ${runs.length} runs`, 'success');
+    
+    // Oferecer treinamento
+    treinarComDataset(payload);
   } catch (err) {
     console.error('Erro ao exportar dataset de aprendizado:', err);
     alert('❌ Erro ao exportar dataset de aprendizado.');
   }
 }
 
+// Treinar modelo ML com dataset
+async function treinarComDataset(dataset) {
+  if (!window.treinarModeloML) {
+    alert('⚠️ Módulo ML não carregado. Recarregue a página.');
+    return;
+  }
+
+  const treinar = confirm(
+    '🧠 PHASE 3: ML Training\n\n' +
+    `Dataset tem ${dataset.runs?.length || 0} runs e ${dataset.feedback?.length || 0} feedbacks\n\n` +
+    'Quer treinar um modelo Neural Network para:\n' +
+    '• Aprender padrões de qualidade\n' +
+    '• Recomendar ajustes de parâmetros\n' +
+    '• Auto-ajustar configurações\n\n' +
+    'OK = Treinar modelo\n' +
+    'Cancelar = Apenas exportar dados'
+  );
+
+  if (!treinar) return;
+
+  loader.style.display = 'flex';
+  loaderText.textContent = '🧠 Treinando modelo ML...\n\nIsso pode levar 10-30 segundos...';
+
+  try {
+    const sucesso = await window.treinarModeloML(dataset);
+    loader.style.display = 'none';
+
+    if (sucesso) {
+      // Oferta de auto-ajuste
+      const autoajustar = confirm(
+        '✅ Modelo treinado com sucesso!\n\n' +
+        'Quer auto-ajustar os parâmetros\n' +
+        'baseado nas predições do modelo?\n\n' +
+        'OK = Auto-ajustar\n' +
+        'Cancelar = Usar modelo manualmente depois'
+      );
+
+      if (autoajustar) {
+        await window.autoajustarParametrosML();
+      }
+    }
+  } catch (error) {
+    loader.style.display = 'none';
+    console.error('Erro ao treinar modelo:', error);
+    alert('❌ Erro no treinamento: ' + error.message);
+  }
+}
+
+// Carregar e treinar com arquivo JSON
+/* eslint-disable-next-line no-unused-vars */
+async function carregarETreinarModelo() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const texto = await file.text();
+      const dataset = JSON.parse(texto);
+
+      if (!dataset.runs || !dataset.feedback) {
+        alert('❌ Arquivo inválido! Não contém estrutura esperada.');
+        return;
+      }
+
+      treinarComDataset(dataset);
+    } catch (error) {
+      alert('❌ Erro ao carregar arquivo: ' + error.message);
+    }
+  };
+  input.click();
+}
+
 // ==================== HELPER: NOTIFICAÇÕES ====================
 function mostrarNotificacao(mensagem, tipo = 'info') {
   console.log(`[${tipo.toUpperCase()}] ${mensagem}`);
-  // TODO: Adicionar toast notification no futuro
+}
+
+// Salvar ponto de ajuste fino (checkpoint dos parâmetros)
+/* eslint-disable-next-line no-unused-vars */
+async function salvarPontoAjusteFino() {
+  const checkpoint = {
+    timestamp: new Date().toISOString(),
+    parametros: {
+      edgeThreshold: CONFIG.edgeThreshold,
+      morphologySize: CONFIG.morphologySize,
+      minArea: CONFIG.minArea,
+      contrastBoost: CONFIG.contrastBoost,
+      minQualityScore: CONFIG.minQualityScore,
+      simplification: CONFIG.simplification,
+      clusteringEnabled: CONFIG.clusteringEnabled,
+      clusterEps: CONFIG.clusterEps,
+      clusterMinPts: CONFIG.clusterMinPts,
+      minClusterSize: CONFIG.minClusterSize,
+      mergeDistance: CONFIG.mergeDistance
+    },
+    nome: prompt('Nome do checkpoint (ex: "Urban v2.1"):', `checkpoint_${new Date().toISOString().slice(0,10)}`),
+  };
+
+  if (!checkpoint.nome) return; // Cancelado
+
+  try {
+    // Salvar no IndexedDB
+    if (window.idbSet) {
+      await window.idbSet('checkpoints', checkpoint.nome, checkpoint);
+    }
+    
+    const blob = new Blob([JSON.stringify(checkpoint, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `checkpoint_${checkpoint.nome}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    alert(`✅ Checkpoint "${checkpoint.nome}" salvo!\n\nArmazenado localmente e exportado.`);
+  } catch (error) {
+    console.error('Erro ao salvar checkpoint:', error);
+    alert('❌ Erro ao salvar checkpoint.');
+  }
 }
 
 // ========== ALGORITMOS AVANÇADOS ==========
@@ -1813,7 +1957,37 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
           alert("⚠️ Nenhuma edificação detectada\n\nNão foram encontradas construções na área selecionada.\n\nDicas:\n• Escolha uma área com edificações visíveis\n• Ajuste os parâmetros de sensibilidade\n• Reduza o score mínimo de qualidade");
           drawnItems.removeLayer(selectionLayer); // Remove o polígono de seleção manual
         } else {
-          const poligonosVetorizados = L.geoJSON(geojsonConvertido, {
+          // Remove o polígono de seleção manual
+          drawnItems.removeLayer(selectionLayer);
+          
+          // PHASE 4: Aplicar auto-inferência para reduzir falsos positivos
+          let featuresProcessados = geojsonConvertido.features;
+          if (window.aplicarAutoInferenciaAoProcesamento) {
+            try {
+              const featuresDados = geojsonConvertido.features.map(f => ({
+                area: f.properties.area_m2,
+                qualityScore: f.properties.score || 50,
+                featureId: f.properties.id
+              }));
+              
+              const processados = await window.aplicarAutoInferenciaAoProcesamento(featuresDados);
+              
+              // Filtrar features pela lista de processados
+              if (processados && processados.length > 0) {
+                const processadosIds = new Set(processados.map(p => p.featureId));
+                featuresProcessados = geojsonConvertido.features.filter(f => 
+                  processadosIds.has(f.properties.id)
+                );
+                console.log(`Phase 4 aplicado: ${geojsonConvertido.features.length} → ${featuresProcessados.length} features`);
+              }
+            } catch (error) {
+              console.warn('⚠️ Erro ao aplicar Phase 4 auto-inferência:', error);
+              // Continua com features originais se houver erro
+            }
+          }
+
+          // Adiciona os vetores
+          const poligonosVetorizados = L.geoJSON(featuresProcessados, {
             style: function(feature) {
               return getStyleByQuality(feature);
             },
@@ -1821,24 +1995,21 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
               layer.bindPopup(criarPopupFeedback(feature));
             }
           });
-          // Remove o polígono de seleção manual
-          drawnItems.removeLayer(selectionLayer);
-          // Adiciona os vetores
           drawnItems.addLayer(poligonosVetorizados);
           // Guarda referência para atualização de visualização
           window.lastGeoJSONLayer = poligonosVetorizados;
           // Guarda para exportação
-          geojsonFeatures.push(...geojsonConvertido.features);
+          geojsonFeatures.push(...featuresProcessados);
           
           // Atualiza estatísticas na UI
           atualizarEstatisticas();
           
-          const totalArea = geojsonConvertido.features.reduce((sum, f) => sum + parseFloat(f.properties.area_m2 || 0), 0);
-          const highQ = geojsonConvertido.features.filter(f => f.properties.quality === 'alta').length;
-          const medQ = geojsonConvertido.features.filter(f => f.properties.quality === 'media').length;
-          const lowQ = geojsonConvertido.features.filter(f => f.properties.quality === 'baixa').length;
+          const totalArea = featuresProcessados.reduce((sum, f) => sum + parseFloat(f.properties.area_m2 || 0), 0);
+          const highQ = featuresProcessados.filter(f => f.properties.quality === 'alta').length;
+          const medQ = featuresProcessados.filter(f => f.properties.quality === 'media').length;
+          const lowQ = featuresProcessados.filter(f => f.properties.quality === 'baixa').length;
           
-          alert(`✅ Processamento concluído!\n\n📊 ${geojsonConvertido.features.length} polígonos detectados\n📐 Área total: ${totalArea.toFixed(2)} m²\n\n🎯 Qualidade:\n  🟢 Alta: ${highQ}\n  🟡 Média: ${medQ}\n  🔴 Baixa: ${lowQ}`);
+          alert(`✅ Processamento concluído!\n\n📊 ${featuresProcessados.length} polígonos detectados\n📐 Área total: ${totalArea.toFixed(2)} m²\n\n🎯 Qualidade:\n  🟢 Alta: ${highQ}\n  🟡 Média: ${medQ}\n  🔴 Baixa: ${lowQ}`);
         }
 
       } catch (e) {
