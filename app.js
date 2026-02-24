@@ -693,7 +693,6 @@ function ativarEdicaoPoligono(featureId, feature) {
   
   // Procurar o layer correspondente no mapa pelo featureId
   let targetLayer = null;
-  let layerIndex = 0;
   
   if (window.lastGeoJSONLayer) {
     window.lastGeoJSONLayer.eachLayer((layer, index) => {
@@ -702,7 +701,6 @@ function ativarEdicaoPoligono(featureId, feature) {
       
       if (layerFeatureId === featureId) {
         targetLayer = layer;
-        layerIndex = index;
         console.log(`  ✅ Encontrado exato no índice ${index}`);
       }
     });
@@ -1422,10 +1420,10 @@ const MAP_CENTER = [-25.706923, -52.385530];
 const map = L.map('map').setView(MAP_CENTER, 15);
 window.map = map; // Tornar acessível globalmente para edição de polígonos
 
-// Mapa Esri World Imagery com maior claridade em altos zooms
-const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  attribution: 'Tiles &copy; Esri',
-  maxZoom: 23,
+// Mapa Google Satellite - cobertura confiável em altos zooms (não some)
+const satelliteMap = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+  attribution: '&copy; Google Maps',
+  maxZoom: 21,
   maxNativeZoom: 21,
   preferCanvas: true,
   crossOrigin: 'anonymous'
