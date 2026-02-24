@@ -21,9 +21,9 @@ export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   plugins: [
     {
-      name: 'copy-assets',
+      name: 'copy-wasm',
       writeBundle() {
-        // Copy WASM files
+        // Copy WASM files only (Vite bundles JS modules automatically)
         const wasmDir = resolve(__dirname, 'dist/vetoriza/pkg');
         mkdirSync(wasmDir, { recursive: true });
         copyFileSync(
@@ -33,23 +33,6 @@ export default defineConfig({
         copyFileSync(
           resolve(__dirname, 'vetoriza/pkg/vetoriza_bg.wasm'),
           resolve(__dirname, 'dist/vetoriza/pkg/vetoriza_bg.wasm')
-        );
-        // Copy app.js and Firebase modules
-        copyFileSync(
-          resolve(__dirname, 'app.js'),
-          resolve(__dirname, 'dist/app.js')
-        );
-        copyFileSync(
-          resolve(__dirname, 'firebase-config.js'),
-          resolve(__dirname, 'dist/firebase-config.js')
-        );
-        copyFileSync(
-          resolve(__dirname, 'firestore-service.js'),
-          resolve(__dirname, 'dist/firestore-service.js')
-        );
-        copyFileSync(
-          resolve(__dirname, 'offline-queue.js'),
-          resolve(__dirname, 'dist/offline-queue.js')
         );
       }
     }
