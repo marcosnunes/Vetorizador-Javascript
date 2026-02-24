@@ -18,6 +18,7 @@
 
   <header>
     <h2>Mapeador de Imóveis e Benfeitorias</h2>
+    <div id="connection-status" class="status-local">💾 Modo Local</div>
   </header>
 
   <div class="main-container">
@@ -226,6 +227,7 @@
       <div class="control-group">
         <h3>💾 Exportar Dados</h3>
         <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
+        <button onclick="exportarDatasetAprendizado()" style="background: #5a67d8; margin-top: 5px;">🧠 Exportar Dataset ML</button>
         <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar
           Resultados</button>
       </div>

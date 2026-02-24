@@ -12,6 +12,34 @@ header {
   background-color: #333;
   color: white;
   text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 20px;
+}
+
+#connection-status {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.status-online {
+  background-color: #4caf50;
+  color: white;
+}
+
+.status-offline {
+  background-color: #ff9800;
+  color: white;
+}
+
+.status-local {
+  background-color: #2196f3;
+  color: white;
 }
 
 

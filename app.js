@@ -3,11 +3,36 @@ let vetorizar_imagem;
 
 /* global L, leafletImage, turf, wasm_bindgen */
 
+// ==================== IMPORTS DE FIREBASE/FIRESTORE ====================
+import { inicializarFirebase, estaOnline, monitorarConexao } from './firebase-config.js';
+import { 
+  salvarRunFirestore, 
+  salvarFeaturesFirestore, 
+  salvarFeedbackFirestore,
+  exportarDatasetCompleto 
+} from './firestore-service.js';
+import { 
+  inicializarFilaOffline, 
+  adicionarNaFila, 
+  sincronizarFila,
+  contarOperacoesPendentes 
+} from './offline-queue.js';
+
 // --- CONFIGURAÇÃO INICIAL ---
 const loader = document.getElementById('loader-overlay');
 const loaderText = document.getElementById('loader-text');
 let debugMaskLayer = null;
 const geojsonFeatures = [];
+let activeRunId = null;
+let activeRunStartedAt = null;
+
+const LEARNING_DB_NAME = 'vetorizador_learning_db';
+const LEARNING_DB_VERSION = 1;
+let learningDbPromise = null;
+
+// Variáveis de sincronização Firebase
+let firebaseInicializado = false;
+let modoOffline = false;
 
 // --- PARÂMETROS AJUSTÁVEIS ---
 let CONFIG = {
@@ -82,7 +107,116 @@ window.addEventListener('DOMContentLoaded', () => {
     // Listener para atualizar visualização quando checkbox muda
     colorByQuality.addEventListener('change', atualizarVisualizacao);
   }
+
+  // ==================== INICIALIZAÇÃO FIREBASE + FILA OFFLINE ====================
+  inicializarSistemaAprendizado().catch((err) => {
+    console.error('Falha na inicialização do sistema de aprendizado:', err);
+  });
 });
+
+// ==================== FUNÇÃO UNIFICADA DE INICIALIZAÇÃO ====================
+async function inicializarSistemaAprendizado() {
+  console.log('🚀 Inicializando sistema de aprendizado...');
+  
+  // 1. Inicializar IndexedDB local (Phase 1 - sempre necessário)
+  try {
+    await inicializarBancoAprendizado();
+    console.log('✅ Banco local de aprendizado inicializado');
+  } catch (error) {
+    console.error('❌ Erro ao inicializar banco local:', error);
+  }
+
+  // 2. Inicializar fila offline
+  try {
+    await inicializarFilaOffline();
+    console.log('✅ Fila offline inicializada');
+  } catch (error) {
+    console.error('❌ Erro ao inicializar fila offline:', error);
+  }
+
+  // 3. Inicializar Firebase/Firestore (Phase 2)
+  try {
+    const { db, auth } = inicializarFirebase();
+    if (db && auth) {
+      firebaseInicializado = true;
+      console.log('✅ Firebase/Firestore inicializado');
+      
+      // 4. Monitorar conexão e sincronizar quando online
+      monitorarConexao(
+        () => {
+          modoOffline = false;
+          sincronizarFilaPendente();
+        },
+        () => {
+          modoOffline = true;
+        }
+      );
+
+      // 5. Sincronizar fila pendente (se houver operações offline)
+      await sincronizarFilaPendente();
+    }
+  } catch (error) {
+    console.error('⚠️ Firebase não inicializado - rodando apenas com IndexedDB local:', error);
+    firebaseInicializado = false;
+  }
+
+  atualizarIndicadorConexao();
+}
+
+// ==================== SINCRONIZAR FILA PENDENTE ====================
+async function sincronizarFilaPendente() {
+  if (!firebaseInicializado || !estaOnline()) {
+    return;
+  }
+
+  const pendentes = await contarOperacoesPendentes();
+  if (pendentes === 0) {
+    return;
+  }
+
+  console.log(`🔄 Sincronizando ${pendentes} operações pendentes...`);
+  
+  try {
+    const resultado = await sincronizarFila(async (operationType, payload) => {
+      switch (operationType) {
+        case 'run':
+          await salvarRunFirestore(payload.runId, payload.dadosRun);
+          break;
+        case 'features':
+          await salvarFeaturesFirestore(payload.runId, payload.features);
+          break;
+        case 'feedback':
+          await salvarFeedbackFirestore(payload.runId, payload.featureId, payload.feedback);
+          break;
+        default:
+          console.warn(`⚠️ Tipo de operação desconhecido: ${operationType}`);
+      }
+    });
+
+    if (resultado.sucesso > 0) {
+      mostrarNotificacao(`✅ ${resultado.sucesso} operações sincronizadas`, 'success');
+    }
+  } catch (error) {
+    console.error('❌ Erro na sincronização da fila:', error);
+  }
+}
+
+// ==================== ATUALIZAR INDICADOR DE CONEXÃO ====================
+function atualizarIndicadorConexao() {
+  const indicador = document.getElementById('connection-status');
+  if (!indicador) return;
+
+  if (!firebaseInicializado) {
+    indicador.textContent = '💾 Modo Local';
+    indicador.className = 'status-local';
+  } else if (modoOffline || !estaOnline()) {
+    indicador.textContent = '📵 Offline';
+    indicador.className = 'status-offline';
+  } else {
+    indicador.textContent = '🌐 Online';
+    indicador.className = 'status-online';
+  }
+}
 
 // Função para aplicar pré-configurações
 function aplicarPreset(tipo) {
@@ -295,20 +429,326 @@ function atualizarVisualizacao() {
         return getStyleByQuality(feature);
       },
       onEachFeature: function(feature, layer) {
-        const props = feature.properties;
-        layer.bindPopup(`
-          <strong>ID:</strong> ${props.id}<br>
-          <strong>Área:</strong> ${props.area_m2} m²<br>
-          <strong>Score:</strong> ${props.confidence_score}/100<br>
-          <strong>Qualidade:</strong> ${props.quality}<br>
-          <strong>Compacidade:</strong> ${props.compactness}<br>
-          <strong>Vértices:</strong> ${props.vertices}
-        `);
+        layer.bindPopup(criarPopupFeedback(feature));
       }
     });
     
     drawnItems.addLayer(window.lastGeoJSONLayer);
   }
+}
+
+function gerarRunId() {
+  const random = Math.random().toString(36).slice(2, 8);
+  return `run_${Date.now()}_${random}`;
+}
+
+function obterTextoFeedback(status) {
+  switch (status) {
+    case 'aprovado':
+      return '✅ Aprovado';
+    case 'rejeitado':
+      return '❌ Rejeitado';
+    case 'editado':
+      return '✏️ Editado';
+    default:
+      return '⏳ Pendente';
+  }
+}
+
+function criarPopupFeedback(feature) {
+  const props = feature.properties || {};
+  const feedbackStatus = props.feedback_status || 'pendente';
+  const feedbackReason = props.feedback_reason || '-';
+  const featureId = props.id || '';
+
+  return `
+    <strong>ID:</strong> ${props.id}<br>
+    <strong>Área:</strong> ${props.area_m2} m²<br>
+    <strong>Score:</strong> ${props.confidence_score}/100<br>
+    <strong>Qualidade:</strong> ${props.quality}<br>
+    <strong>Compacidade:</strong> ${props.compactness}<br>
+    <strong>Vértices:</strong> ${props.vertices}<br>
+    <strong>Feedback:</strong> ${obterTextoFeedback(feedbackStatus)}<br>
+    <strong>Motivo:</strong> ${feedbackReason}<br>
+    <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
+      <button onclick="marcarFeedbackPoligono('${featureId}', 'aprovado')">✅ Aprovar</button>
+      <button onclick="marcarFeedbackPoligono('${featureId}', 'rejeitado')">❌ Rejeitar</button>
+      <button onclick="marcarFeedbackPoligono('${featureId}', 'editado')">✏️ Editado</button>
+    </div>
+  `;
+}
+
+function inicializarBancoAprendizado() {
+  if (learningDbPromise) return learningDbPromise;
+
+  learningDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(LEARNING_DB_NAME, LEARNING_DB_VERSION);
+
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+
+      if (!db.objectStoreNames.contains('runs')) {
+        db.createObjectStore('runs', { keyPath: 'runId' });
+      }
+
+      if (!db.objectStoreNames.contains('feedback')) {
+        const store = db.createObjectStore('feedback', { keyPath: 'feedbackId' });
+        store.createIndex('runId', 'runId', { unique: false });
+        store.createIndex('featureId', 'featureId', { unique: false });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+  return learningDbPromise;
+}
+
+async function idbPut(storeName, value) {
+  const db = await inicializarBancoAprendizado();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).put(value);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGet(storeName, key) {
+  const db = await inicializarBancoAprendizado();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetAll(storeName) {
+  const db = await inicializarBancoAprendizado();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function salvarRunAprendizado(runPayload) {
+  // Salva localmente no IndexedDB (sempre)
+  await idbPut('runs', runPayload);
+
+  // Tenta salvar no Firestore se online e inicializado
+  if (firebaseInicializado && estaOnline()) {
+    try {
+      // Salva run
+      await salvarRunFirestore(runPayload.runId, runPayload);
+      
+      // Salva features como subcoleção
+      if (runPayload.features && runPayload.features.length > 0) {
+        await salvarFeaturesFirestore(runPayload.runId, runPayload.features);
+      }
+      
+      console.log(`✅ Run ${runPayload.runId.substring(0, 8)} salva no Firestore`);
+    } catch (error) {
+      console.error('❌ Erro ao salvar run no Firestore - adicionando à fila offline:', error);
+      await adicionarNaFila('run', { runId: runPayload.runId, dadosRun: runPayload });
+      if (runPayload.features && runPayload.features.length > 0) {
+        await adicionarNaFila('features', { runId: runPayload.runId, features: runPayload.features });
+      }
+    }
+  } else {
+    // Adiciona à fila offline para sincronização posterior
+    await adicionarNaFila('run', { runId: runPayload.runId, dadosRun: runPayload });
+    if (runPayload.features && runPayload.features.length > 0) {
+      await adicionarNaFila('features', { runId: runPayload.runId, features: runPayload.features });
+    }
+  }
+}
+
+async function salvarFeedbackAprendizado(feedbackPayload) {
+  // Salva localmente no IndexedDB (sempre)
+  await idbPut('feedback', feedbackPayload);
+
+  // Tenta salvar no Firestore se online e inicializado
+  if (firebaseInicializado && estaOnline()) {
+    try {
+      await salvarFeedbackFirestore(
+        feedbackPayload.runId, 
+        feedbackPayload.featureId, 
+        {
+          status: feedbackPayload.feedbackStatus,
+          reason: feedbackPayload.feedbackReason,
+          editedGeometry: feedbackPayload.editedGeometry,
+          timestamp: feedbackPayload.timestamp
+        }
+      );
+      console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
+    } catch (error) {
+      console.error('❌ Erro ao salvar feedback no Firestore - adicionando à fila offline:', error);
+      await adicionarNaFila('feedback', {
+        runId: feedbackPayload.runId,
+        featureId: feedbackPayload.featureId,
+        feedback: {
+          status: feedbackPayload.feedbackStatus,
+          reason: feedbackPayload.feedbackReason,
+          editedGeometry: feedbackPayload.editedGeometry,
+          timestamp: feedbackPayload.timestamp
+        }
+      });
+    }
+  } else {
+    // Adiciona à fila offline para sincronização posterior
+    await adicionarNaFila('feedback', {
+      runId: feedbackPayload.runId,
+      featureId: feedbackPayload.featureId,
+      feedback: {
+        status: feedbackPayload.feedbackStatus,
+        reason: feedbackPayload.feedbackReason,
+        editedGeometry: feedbackPayload.editedGeometry,
+        timestamp: feedbackPayload.timestamp
+      }
+    });
+  }
+}
+
+async function atualizarFeedbackNoRun(runId, featureId, feedbackStatus, feedbackReason) {
+  if (!runId || !featureId) return;
+
+  const run = await idbGet('runs', runId);
+  if (!run || !Array.isArray(run.features)) return;
+
+  const target = run.features.find((f) => f.featureId === featureId);
+  if (!target) return;
+
+  target.feedbackStatus = feedbackStatus;
+  target.feedbackReason = feedbackReason || '';
+  target.feedbackUpdatedAt = new Date().toISOString();
+
+  await idbPut('runs', run);
+}
+
+async function marcarFeedbackPoligono(featureId, status) {
+  const feature = geojsonFeatures.find((f) => f.properties?.id === featureId);
+  if (!feature) {
+    alert('⚠️ Polígono não encontrado para feedback.');
+    return;
+  }
+
+  let feedbackReason = '';
+  if (status === 'rejeitado' || status === 'editado') {
+    feedbackReason = prompt('Informe o motivo (ex.: sombra, rua, fragmentado):', feature.properties.feedback_reason || '') || '';
+  }
+
+  feature.properties.feedback_status = status;
+  feature.properties.feedback_reason = feedbackReason;
+  feature.properties.feedback_updated_at = new Date().toISOString();
+
+  const feedbackPayload = {
+    feedbackId: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    runId: feature.properties.run_id || activeRunId || 'sem_run',
+    featureId: featureId,
+    label: status,
+    reason: feedbackReason,
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    await salvarFeedbackAprendizado(feedbackPayload);
+    await atualizarFeedbackNoRun(
+      feedbackPayload.runId,
+      featureId,
+      status,
+      feedbackReason
+    );
+    atualizarVisualizacao();
+  } catch (err) {
+    console.error('Erro ao salvar feedback no banco local:', err);
+  }
+}
+
+async function exportarDatasetAprendizado() {
+  try {
+    let datasetCompleto;
+
+    // Se Firebase está inicializado e online, exportar do Firestore
+    if (firebaseInicializado && estaOnline()) {
+      const escolha = confirm(
+        '🌐 Firebase detectado!\n\n' +
+        'Escolha a fonte de dados:\n' +
+        'OK = Exportar do Firestore (todos os usuários)\n' +
+        'Cancelar = Exportar apenas dados locais (IndexedDB)'
+      );
+
+      if (escolha) {
+        loader.style.display = 'flex';
+        loaderText.textContent = 'Exportando dataset do Firestore...';
+        try {
+          datasetCompleto = await exportarDatasetCompleto();
+          loader.style.display = 'none';
+          
+          if (!datasetCompleto || !datasetCompleto.runs || datasetCompleto.runs.length === 0) {
+            alert('⚠️ Nenhum dado encontrado no Firestore.');
+            return;
+          }
+
+          const blob = new Blob([JSON.stringify(datasetCompleto, null, 2)], { type: 'application/json' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `dataset_firestore_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          mostrarNotificacao(`✅ Dataset exportado: ${datasetCompleto.runs.length} runs`, 'success');
+          return;
+        } catch (error) {
+          loader.style.display = 'none';
+          console.error('❌ Erro ao exportar do Firestore:', error);
+          alert('❌ Erro ao exportar do Firestore. Exportando dados locais...');
+          // Continua para exportação local
+        }
+      }
+    }
+
+    // Exportação local (IndexedDB)
+    const runs = await idbGetAll('runs');
+    const feedback = await idbGetAll('feedback');
+
+    if (runs.length === 0 && feedback.length === 0) {
+      alert('⚠️ Não há dados de aprendizado para exportar ainda.');
+      return;
+    }
+
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      app: 'vetorizador-edificacoes',
+      version: 'fase2-firestore-offline',
+      source: 'indexeddb-local',
+      runs,
+      feedback
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `dataset_local_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    mostrarNotificacao(`✅ Dataset local exportado: ${runs.length} runs`, 'success');
+  } catch (err) {
+    console.error('Erro ao exportar dataset de aprendizado:', err);
+    alert('❌ Erro ao exportar dataset de aprendizado.');
+  }
+}
+
+// ==================== HELPER: NOTIFICAÇÕES ====================
+function mostrarNotificacao(mensagem, tipo = 'info') {
+  console.log(`[${tipo.toUpperCase()}] ${mensagem}`);
+  // TODO: Adicionar toast notification no futuro
 }
 
 // ========== ALGORITMOS AVANÇADOS ==========
@@ -835,6 +1275,8 @@ map.on(L.Draw.Event.CREATED, (e) => {
 async function processarAreaDesenhada(bounds, selectionLayer) {
   loaderText.textContent = '📸 Capturando imagem da área selecionada...';
   loader.style.display = 'flex';
+  activeRunId = gerarRunId();
+  activeRunStartedAt = new Date().toISOString();
 
   // Usamos os bounds do polígono desenhado para a captura
   leafletImage(map, async (err, mainCanvas) => {
@@ -906,6 +1348,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     const width = roiCanvas.width;
     const height = roiCanvas.height;
     const relatorio = {
+      runId: activeRunId,
       roi: {
         width,
         height,
@@ -1122,6 +1565,30 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
           featuresWasm: geojsonResult.features?.length || 0,
           featuresAposFiltro: geojsonConvertido.features.length
         };
+        try {
+          await salvarRunAprendizado({
+            runId: activeRunId,
+            createdAt: activeRunStartedAt,
+            finishedAt: new Date().toISOString(),
+            config: { ...CONFIG },
+            relatorio,
+            bounds: {
+              north: bounds.getNorth(),
+              south: bounds.getSouth(),
+              east: bounds.getEast(),
+              west: bounds.getWest()
+            },
+            features: geojsonConvertido.features.map((f) => ({
+              featureId: f.properties?.id,
+              geometry: f.geometry,
+              properties: f.properties,
+              feedbackStatus: f.properties?.feedback_status || 'pendente',
+              feedbackReason: f.properties?.feedback_reason || ''
+            }))
+          });
+        } catch (err) {
+          console.error('Erro ao salvar execução no banco local:', err);
+        }
         registrarRelatorioProcessamento(relatorio);
 
         if (geojsonConvertido.features.length === 0) {
@@ -1134,16 +1601,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
               return getStyleByQuality(feature);
             },
             onEachFeature: function(feature, layer) {
-              // Adiciona popup com informações
-              const props = feature.properties;
-              layer.bindPopup(`
-                <strong>ID:</strong> ${props.id}<br>
-                <strong>Área:</strong> ${props.area_m2} m²<br>
-                <strong>Score:</strong> ${props.confidence_score}/100<br>
-                <strong>Qualidade:</strong> ${props.quality}<br>
-                <strong>Compacidade:</strong> ${props.compactness}<br>
-                <strong>Vértices:</strong> ${props.vertices}
-              `);
+              layer.bindPopup(criarPopupFeedback(feature));
             }
           });
           // Remove o polígono de seleção manual
@@ -1312,7 +1770,10 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
             confidence_score: qualityScore.score,
             compactness: qualityScore.compactness,
             vertices: qualityScore.vertices,
-            quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa'
+            quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa',
+            run_id: activeRunId,
+            feedback_status: 'pendente',
+            feedback_reason: ''
           };
           
           featuresFinais.push(cleaned);
@@ -1344,6 +1805,7 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   const finaisComPropriedades = mesclados.map((feature, idx) => {
     const area = turf.area(feature);
     const qualityScore = calcularScoreConfianca(feature);
+    const propsAnteriores = feature.properties || {};
     
     feature.properties = {
       id: `imovel_${geojsonFeatures.length + idx + 1}`,
@@ -1351,7 +1813,10 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
       confidence_score: qualityScore.score,
       compactness: qualityScore.compactness,
       vertices: qualityScore.vertices,
-      quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa'
+      quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa',
+      run_id: propsAnteriores.run_id || activeRunId,
+      feedback_status: propsAnteriores.feedback_status || 'pendente',
+      feedback_reason: propsAnteriores.feedback_reason || ''
     };
     
     return feature;
@@ -1460,6 +1925,8 @@ async function exportarShapefile() {
 
 // Expõe para o botão do HTML
 window.exportarShapefile = exportarShapefile;
+window.exportarDatasetAprendizado = exportarDatasetAprendizado;
 window.aplicarPreset = aplicarPreset;
 window.resetarParametros = resetarParametros;
 window.limparResultados = limparResultados;
+window.marcarFeedbackPoligono = marcarFeedbackPoligono;

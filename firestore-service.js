@@ -1,0 +1,278 @@
+/**
+ * Firestore Data Service
+ * Gerencia persistência de runs, features e feedback em Firestore
+ * Estrutura de coleções:
+ * - runs/{runId} - metadados das execuções
+ *   - features/{featureId} - polígonos detectados
+ *   - feedback/{feedbackId} - avaliações humanas
+ */
+
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  query, 
+  where, 
+  orderBy, 
+  limit,
+  serverTimestamp,
+  writeBatch
+} from 'firebase/firestore';
+import { obterFirestore, obterUsuarioAtual } from './firebase-config.js';
+
+// ==================== SALVAR RUN ====================
+/**
+ * Salva uma nova execução de vetorização
+ * @param {string} runId - UUID da execução
+ * @param {Object} dadosRun - Objeto contendo config, timestamp, bounds, etc
+ */
+export async function salvarRunFirestore(runId, dadosRun) {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  try {
+    const runRef = doc(db, 'runs', runId);
+    const dadosCompletos = {
+      ...dadosRun,
+      userId: userId,
+      timestamp: serverTimestamp(),
+      createdAt: new Date().toISOString() // Fallback para offline
+    };
+
+    await setDoc(runRef, dadosCompletos);
+    console.log(`✅ Run ${runId.substring(0, 8)} salva em Firestore`);
+    return true;
+  } catch (error) {
+    console.error('❌ Erro ao salvar run em Firestore:', error);
+    throw error;
+  }
+}
+
+// ==================== SALVAR FEATURES (BATCH) ====================
+/**
+ * Salva todas as features detectadas de uma run como subcoleção
+ * @param {string} runId - UUID da execução
+ * @param {Array} features - Array de GeoJSON features
+ */
+export async function salvarFeaturesFirestore(runId, features) {
+  const db = obterFirestore();
+  
+  try {
+    const batch = writeBatch(db);
+    const runRef = doc(db, 'runs', runId);
+
+    features.forEach((feature, index) => {
+      const featureId = `${runId}_feature_${index}`;
+      const featureRef = doc(collection(runRef, 'features'), featureId);
+      
+      batch.set(featureRef, {
+        ...feature,
+        featureIndex: index,
+        createdAt: serverTimestamp()
+      });
+    });
+
+    await batch.commit();
+    console.log(`✅ ${features.length} features salvas em Firestore (runId: ${runId.substring(0, 8)})`);
+    return true;
+  } catch (error) {
+    console.error('❌ Erro ao salvar features em Firestore:', error);
+    throw error;
+  }
+}
+
+// ==================== SALVAR FEEDBACK ====================
+/**
+ * Salva feedback do usuário sobre uma feature
+ * @param {string} runId - UUID da execução
+ * @param {string} featureId - ID da feature
+ * @param {Object} feedback - {status, reason, editedGeometry?, timestamp}
+ */
+export async function salvarFeedbackFirestore(runId, featureId, feedback) {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  try {
+    const runRef = doc(db, 'runs', runId);
+    const feedbackRef = doc(collection(runRef, 'feedback'), featureId);
+    
+    const dadosFeedback = {
+      ...feedback,
+      userId: userId,
+      featureId: featureId,
+      timestamp: serverTimestamp(),
+      createdAt: new Date().toISOString() // Fallback para offline
+    };
+
+    await setDoc(feedbackRef, dadosFeedback);
+    console.log(`✅ Feedback salvo em Firestore (featureId: ${featureId})`);
+    return true;
+  } catch (error) {
+    console.error('❌ Erro ao salvar feedback em Firestore:', error);
+    throw error;
+  }
+}
+
+// ==================== LER RUN ====================
+/**
+ * Recupera metadados de uma run específica
+ * @param {string} runId - UUID da execução
+ */
+export async function lerRunFirestore(runId) {
+  const db = obterFirestore();
+
+  try {
+    const runRef = doc(db, 'runs', runId);
+    const runSnap = await getDoc(runRef);
+
+    if (runSnap.exists()) {
+      return { id: runSnap.id, ...runSnap.data() };
+    } else {
+      console.warn(`⚠️ Run ${runId} não encontrada em Firestore`);
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Erro ao ler run de Firestore:', error);
+    throw error;
+  }
+}
+
+// ==================== LER FEATURES DE UMA RUN ====================
+/**
+ * Recupera todas as features de uma run
+ * @param {string} runId - UUID da execução
+ */
+export async function lerFeaturesFirestore(runId) {
+  const db = obterFirestore();
+
+  try {
+    const runRef = doc(db, 'runs', runId);
+    const featuresRef = collection(runRef, 'features');
+    const featuresSnap = await getDocs(featuresRef);
+
+    const features = [];
+    featuresSnap.forEach((doc) => {
+      features.push({ id: doc.id, ...doc.data() });
+    });
+
+    return features;
+  } catch (error) {
+    console.error('❌ Erro ao ler features de Firestore:', error);
+    throw error;
+  }
+}
+
+// ==================== LER FEEDBACK DE UMA RUN ====================
+/**
+ * Recupera todos os feedbacks de uma run
+ * @param {string} runId - UUID da execução
+ */
+export async function lerFeedbackFirestore(runId) {
+  const db = obterFirestore();
+
+  try {
+    const runRef = doc(db, 'runs', runId);
+    const feedbackRef = collection(runRef, 'feedback');
+    const feedbackSnap = await getDocs(feedbackRef);
+
+    const feedbacks = [];
+    feedbackSnap.forEach((doc) => {
+      feedbacks.push({ id: doc.id, ...doc.data() });
+    });
+
+    return feedbacks;
+  } catch (error) {
+    console.error('❌ Erro ao ler feedback de Firestore:', error);
+    throw error;
+  }
+}
+
+// ==================== LISTAR RUNS DO USUÁRIO ====================
+/**
+ * Lista todas as runs do usuário atual (últimas 50)
+ * @param {number} maxResults - Número máximo de resultados (default: 50)
+ */
+export async function listarRunsUsuario(maxResults = 50) {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  if (!userId) {
+    console.warn('⚠️ Nenhum usuário autenticado');
+    return [];
+  }
+
+  try {
+    const runsRef = collection(db, 'runs');
+    const q = query(
+      runsRef,
+      where('userId', '==', userId),
+      orderBy('timestamp', 'desc'),
+      limit(maxResults)
+    );
+
+    const querySnapshot = await getDocs(q);
+    const runs = [];
+    querySnapshot.forEach((doc) => {
+      runs.push({ id: doc.id, ...doc.data() });
+    });
+
+    console.log(`📊 ${runs.length} runs encontradas para o usuário`);
+    return runs;
+  } catch (error) {
+    console.error('❌ Erro ao listar runs do usuário:', error);
+    throw error;
+  }
+}
+
+// ==================== DATASET COMPLETO PARA ML ====================
+/**
+ * Exporta dataset completo: todas as runs com features e feedback
+ * ATENÇÃO: Pode ser pesado - usar com cuidado em produção
+ */
+export async function exportarDatasetCompleto() {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  try {
+    console.log('🔍 Coletando dataset completo...');
+    
+    const runsRef = collection(db, 'runs');
+    const q = query(runsRef, where('userId', '==', userId));
+    const runsSnap = await getDocs(q);
+
+    const dataset = {
+      exportDate: new Date().toISOString(),
+      userId: userId,
+      runs: []
+    };
+
+    // Para cada run, buscar features e feedback
+    for (const runDoc of runsSnap.docs) {
+      const runData = { id: runDoc.id, ...runDoc.data() };
+      
+      // Buscar features
+      const featuresSnap = await getDocs(collection(runDoc.ref, 'features'));
+      const features = [];
+      featuresSnap.forEach(doc => features.push({ id: doc.id, ...doc.data() }));
+
+      // Buscar feedback
+      const feedbackSnap = await getDocs(collection(runDoc.ref, 'feedback'));
+      const feedbacks = [];
+      feedbackSnap.forEach(doc => feedbacks.push({ id: doc.id, ...doc.data() }));
+
+      dataset.runs.push({
+        ...runData,
+        features,
+        feedbacks
+      });
+    }
+
+    console.log(`✅ Dataset exportado: ${dataset.runs.length} runs`);
+    return dataset;
+  } catch (error) {
+    console.error('❌ Erro ao exportar dataset:', error);
+    throw error;
+  }
+}

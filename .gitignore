@@ -5,4 +5,10 @@ dist/
 .vercel
 .env
 
-.vercel
+# Documentação interna (manter apenas README.md público)
+QUICKSTART_FASE2.md
+FASE2_IMPLEMENTACAO_RESUMO.md
+CHECKLIST_DEPLOY_FASE2.md
+ARQUITETURA_FASE2.md
+docs/*.md
+.github/copilot-instructions.md
