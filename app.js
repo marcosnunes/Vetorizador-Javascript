@@ -1430,6 +1430,10 @@ const satelliteMap = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z
 });
 satelliteMap.addTo(map);
 
+// CRÍTICO: Declarar drawnItems ANTES de usar nas customizações
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
 // Customizar tamanho dos vértices de edição (Leaflet.Draw)
 L.EditToolbar.Edit.include({
   options: {
@@ -1447,9 +1451,6 @@ L.Edit.PolyVertexMarker.include({
     radius: 6
   }
 });
-
-const drawnItems = new L.FeatureGroup();
-map.addLayer(drawnItems);
 
 // Tradução para português
 L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar área';
