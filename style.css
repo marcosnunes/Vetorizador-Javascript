@@ -405,12 +405,20 @@ button:disabled {
   display: flex;
   justify-content: center;
   align-items: center;
+  position: relative;
 }
 
 .unified-header h1 {
   margin: 0;
   font-size: 24px;
   font-weight: 600;
+}
+
+.unified-header #connection-status {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .unified-tabs {

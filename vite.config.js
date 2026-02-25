@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, mkdirSync, cpSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -24,7 +24,7 @@ export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   plugins: [
     {
-      name: 'copy-wasm',
+      name: 'copy-static-assets',
       writeBundle() {
         // Copy WASM files only (Vite bundles JS modules automatically)
         const wasmDir = resolve(__dirname, 'dist/vetoriza/pkg');
@@ -36,6 +36,19 @@ export default defineConfig({
         copyFileSync(
           resolve(__dirname, 'vetoriza/pkg/vetoriza_bg.wasm'),
           resolve(__dirname, 'dist/vetoriza/pkg/vetoriza_bg.wasm')
+        );
+
+        // Copy PDF Splitter app to keep iframe route working in dist/preview/production
+        cpSync(
+          resolve(__dirname, 'pdfspliter'),
+          resolve(__dirname, 'dist/pdfspliter'),
+          {
+            recursive: true,
+            filter: (sourcePath) => {
+              const ignored = ['.git', '.github', '.venv', 'node_modules'];
+              return !ignored.some((name) => new RegExp(`[\\\\/]${name}([\\\\/]|$)`).test(sourcePath));
+            }
+          }
         );
       }
     }
