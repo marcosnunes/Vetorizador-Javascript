@@ -23,6 +23,9 @@ async function atualizarContagemExemplos() {
     
     console.log(`📊 Exemplos coletados: ${exemploColetados}`);
 
+    // ✨ Atualizar UI da barra de progresso
+    atualizarUIAprendizadoContinuo(exemploColetados);
+
     // Se atingiu 100 exemplos, sugerir retreinamento
     if (exemploColetados % 100 === 0 && exemploColetados > 0) {
       console.log(`🎉 MARCO: ${exemploColetados} exemplos coletados!`);
@@ -35,6 +38,45 @@ async function atualizarContagemExemplos() {
     return 0;
   }
 }
+
+// ✨ NOVA FUNÇÃO: Atualizar UI com progresso de aprendizado contínuo
+function atualizarUIAprendizadoContinuo(exemplos) {
+  const elementoContagem = document.getElementById('exemplosColetados');
+  const elementoBarra = document.getElementById('progressoAprendizado');
+  const btnTreinarAgora = document.getElementById('btnTreinarAgora');
+  
+  if (!elementoContagem || !elementoBarra) return;
+
+  // Atualizar texto de contagem
+  elementoContagem.textContent = exemplos;
+  
+  // Calcular progresso (0-100)
+  const progresso = Math.min(100, (exemplos % 100));
+  const percentual = (progresso / 100) * 100;
+  
+  // Atualizar barra visual
+  elementoBarra.style.width = percentual + '%';
+  
+  // Se tiver conteúdo, mostrar o número
+  if (percentual > 15) {
+    elementoBarra.textContent = Math.round(progresso) + '/100';
+  } else {
+    elementoBarra.textContent = '';
+  }
+
+  // Mostrar botão "Treinar Agora" quando atingir 100
+  if (exemplos > 0 && exemplos % 100 === 0) {
+    if (btnTreinarAgora) {
+      btnTreinarAgora.style.display = 'block';
+      btnTreinarAgora.textContent = `⚡ Treinar Modelo Agora (${exemplos} exemplos atingidos!)`;
+    }
+  } else {
+    if (btnTreinarAgora) {
+      btnTreinarAgora.style.display = 'none';
+    }
+  }
+}
+
 
 // Sugerir retreinamento automático
 function sugerirRetreinar() {
@@ -426,6 +468,7 @@ async function inicializarPhase5() {
 // ==================== EXPORTAR FUNÇÕES ====================
 
 window.atualizarContagemExemplos = atualizarContagemExemplos;
+window.atualizarUIAprendizadoContinuo = atualizarUIAprendizadoContinuo;
 window.executarRetreninamentoAutomatico = executarRetreninamentoAutomatico;
 window.obterDashboardCompleto = obterDashboardCompleto;
 window.calcularMetricasQualidade = calcularMetricasQualidade;

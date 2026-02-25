@@ -227,37 +227,59 @@
         </div>
       </div>
 
+      <div class="control-group" style="background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px;">
+        <h3>🧠 Phase 5: Aprendizado Contínuo Automático</h3>
+        <p style="font-size: 12px; color: #666; margin: 10px 0;">O modelo treina automaticamente conforme você edita vértices e marca feedback.</p>
+        
+        <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-weight: bold;">Exemplos Coletados:</span>
+            <span id="exemplosColetados" style="font-weight: bold; color: #0ea5e9;">0</span>
+          </div>
+          <div style="background: #e0e0e0; border-radius: 8px; height: 20px; overflow: hidden;">
+            <div id="progressoAprendizado" style="background: linear-gradient(90deg, #0ea5e9, #06b6d4); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">
+            </div>
+          </div>
+          <p style="margin: 6px 0 0 0; font-size: 11px; color: #666;">Objetivo: 100 exemplos para próximo retreinamento</p>
+        </div>
+
+        <button onclick="window.executarRetreninamentoAutomatico && window.executarRetreninamentoAutomatico()" id="btnTreinarAgora" style="background: #0ea5e9; width: 100%; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
+          ⚡ Treinar Modelo Agora (100 exemplos atingidos!)
+        </button>
+
+        <small style="color: #666; display: block; margin-top: 10px;">
+          <strong>Como Funciona:</strong><br>
+          1️⃣ Edite polígonos no mapa<br>
+          2️⃣ Marque com: ✅ / ❌ / ✏️<br>
+          3️⃣ Cada marca = 1 exemplo coletado<br>
+          4️⃣ Na marca 100, será oferecido treinar<br>
+          5️⃣ Modelo melhora automaticamente!
+        </small>
+      </div>
+
       <div class="control-group">
         <h3>💾 Exportar Dados</h3>
         <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
-        <button onclick="exportarDatasetAprendizado()" style="background: #5a67d8; margin-top: 5px;">🧠 Exportar Dataset ML</button>
-        <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar
-          Resultados</button>
+        <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar Resultados</button>
       </div>
 
-      <div class="control-group" style="background: #f0f4ff; border: 2px dashed #5a67d8; border-radius: 8px;">
-        <h3>🤖 Phase 3: Machine Learning Training</h3>
-        <p style="font-size: 12px; color: #666; margin: 10px 0;">Treina um modelo neural network para aprender padrões de qualidade e auto-ajustar parâmetros.</p>
-        
-        <button onclick="carregarETreinarModelo()" style="background: #7c3aed; width: 100%; margin-bottom: 8px; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
-          📂 Carregar Dataset JSON + Treinar
-        </button>
-        
-        <button onclick="window.autoajustarParametrosML && window.autoajustarParametrosML()" style="background: #10b981; width: 100%; margin-bottom: 8px; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
-          🤖 Auto-Ajustar Parâmetros
-        </button>
 
+      <div class="control-group" style="background: #f0f4ff; border: 2px dashed #5a67d8; border-radius: 8px;">
+        <h3>🤖 Ajuste de Parâmetros ML</h3>
+        <p style="font-size: 12px; color: #666; margin: 10px 0;">Salve e carregue configurações otimizadas de parâmetros.</p>
+        
         <button onclick="salvarPontoAjusteFino()" style="background: #f59e0b; width: 100%; margin-bottom: 8px; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
           📍 Salvar Ponto de Ajuste Fino
         </button>
 
+        <button onclick="window.autoajustarParametrosML && window.autoajustarParametrosML()" style="background: #10b981; width: 100%; margin-bottom: 8px; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+          🤖 Auto-Ajustar Parâmetros (com modelo treinado)
+        </button>
+
         <small style="color: #666; display: block; margin-top: 10px;">
-          <strong>Workflow:</strong><br>
-          1️⃣ Colete 100+ exemplos editando polígonos<br>
-          2️⃣ Clique "Exportar Dataset ML" enquanto coleta<br>
-          3️⃣ Clique "Carregar Dataset JSON + Treinar"<br>
-          4️⃣ O modelo será treinado e salvo<br>
-          5️⃣ Use "Auto-Ajustar Parâmetros" para aplicar
+          <strong>Descrição:</strong><br>
+          • Salve configurações ótimas de parâmetros<br>
+          • Use auto-ajuste após treinar modelo
         </small>
       </div>
 

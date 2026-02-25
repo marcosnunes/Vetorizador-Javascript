@@ -651,6 +651,16 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
       feedback: feedbackNormalizado
     });
   }
+
+  // ✨ NOVO: Atualizar contagem de exemplos para aprendizado contínuo
+  // Isso dispara sugestão de retreinamento a cada 100 exemplos
+  if (window.atualizarContagemExemplos) {
+    try {
+      await window.atualizarContagemExemplos();
+    } catch (err) {
+      debugLog('⚠️ Erro ao atualizar contagem de exemplos:', err);
+    }
+  }
 }
 
 async function atualizarFeedbackNoRun(runId, featureId, feedbackStatus, feedbackReason) {
@@ -1127,6 +1137,57 @@ async function salvarPontoAjusteFino() {
   } catch (error) {
     console.error('Erro ao salvar checkpoint:', error);
     alert('❌ Erro ao salvar checkpoint.');
+  }
+}
+
+// ✨ NOVO: Exportar dataset de treinamento (runs + feedback) - Para uso em "Carregar Dataset + Treinar"
+async function exportarDatasetTreinamento() {
+  try {
+    const loader = document.getElementById('loader-overlay');
+    const loaderText = document.getElementById('loader-text');
+    if (loader) loader.style.display = 'flex';
+    if (loaderText) loaderText.textContent = '📊 Exportando dataset de treinamento...';
+
+    // Obter dados do IndexedDB
+    const idbGetAll = window.idbGetAll || (() => []);
+    const runs = await idbGetAll('runs');
+    const feedback = await idbGetAll('feedback');
+
+    if (feedback.length === 0) {
+      alert('⚠️ Nenhum dados de feedback encontrado!\n\nPara treinar o modelo:\n1. Vetorize várias imagens\n2. Marque polígonos como aprovado/rejeitado\n3. Edite geometrias\n4. Experimente treinar depois de coletar dados');
+      if (loader) loader.style.display = 'none';
+      return;
+    }
+
+    // Estrutura esperada pelo carregarETreinarModelo()
+    const dataset = {
+      exportedAt: new Date().toISOString(),
+      app: 'vetorizador-edificacoes',
+      version: 'fase5-continuous-learning',
+      source: 'indexeddb-local',
+      runs,
+      feedback,
+      exemplosTotal: feedback.length,
+      descricao: `Dataset com ${runs.length} vetorizações e ${feedback.length} exemplos de feedback para treinamento`
+    };
+
+    // Download do JSON
+    const blob = new Blob([JSON.stringify(dataset, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `dataset_treinamento_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (loader) loader.style.display = 'none';
+    alert(`✅ Dataset exportado com sucesso!\n\n📊 Conteúdo:\n- ${runs.length} vetorizações\n- ${feedback.length} exemplos de feedback\n\nAgora:\n1. Clique em "Carregar Dataset JSON + Treinar"\n2. Selecione o arquivo baixado\n3. Modelo será treinado automaticamente`);
+
+  } catch (error) {
+    console.error('Erro ao exportar dataset:', error);
+    const loader = document.getElementById('loader-overlay');
+    if (loader) loader.style.display = 'none';
+    alert('❌ Erro ao exportar dataset: ' + error.message);
   }
 }
 
@@ -2371,10 +2432,8 @@ async function exportarShapefile() {
 
 // Expõe para o botão do HTML
 window.exportarShapefile = exportarShapefile;
-window.exportarDatasetAprendizado = exportarDatasetAprendizado;
 window.aplicarPreset = aplicarPreset;
 window.resetarParametros = resetarParametros;
 window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
-window.carregarETreinarModelo = carregarETreinarModelo;
 window.salvarPontoAjusteFino = salvarPontoAjusteFino;
