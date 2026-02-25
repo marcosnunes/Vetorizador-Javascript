@@ -92,6 +92,11 @@ export async function salvarFeaturesFirestore(runId, features) {
         coordinateCount: feature.geometry?.coordinates?.[0]?.length || 0
       };
       
+      // Remover campos undefined
+      Object.keys(featureSaneada).forEach(key => {
+        if (featureSaneada[key] === undefined) delete featureSaneada[key];
+      });
+      
       batch.set(featureRef, {
         ...featureSaneada,
         featureIndex: index,
