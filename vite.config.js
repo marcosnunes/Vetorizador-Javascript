@@ -50,6 +50,12 @@ export default defineConfig({
             }
           }
         );
+
+        // Copy portfolio landing page to root of dist
+        copyFileSync(
+          resolve(__dirname, 'portfolio.html'),
+          resolve(__dirname, 'dist/portfolio.html')
+        );
       }
     }
   ]
