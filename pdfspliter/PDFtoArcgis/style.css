@@ -1,0 +1,412 @@
+/* Exibir botão de instalação apenas em telas de celular */
+/* Botão Instalar App - visual destacado e responsivo */
+#installPwaBtn {
+  display: none;
+  background: linear-gradient(90deg, #ff9800 60%, #fb8c00 100%);
+  color: #fff;
+  font-weight: bold;
+  font-size: 18px;
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+  margin: 18px 32px 0 32px;
+  width: 80%;
+  padding: 14px 0;
+  transition: background 0.3s, box-shadow 0.3s;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+#installPwaBtn:active {
+  background: #fb8c00;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+#installPwaBtn.success {
+  background: #43a047;
+  color: #fff;
+}
+
+#installPwaBtn.error {
+  background: #e53935;
+  color: #fff;
+}
+
+@media (max-width: 600px) {
+  #installPwaBtn {
+    display: block !important;
+    font-size: 17px;
+    padding: 12px 0;
+    margin: 14px 10% 0 10%;
+    width: 80%;
+  }
+}
+
+/* Footer*/
+.app-footer {
+  width: 100%;
+  background: linear-gradient(90deg, #ff9800 60%, #fb8c00 100%);
+  color: white;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 14px 0 10px 0;
+  letter-spacing: 0.5px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.07);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: 40px;
+}
+
+.footer-main {
+  font-size: 1em;
+  font-weight: 500;
+  display: block;
+}
+
+.footer-copy {
+  font-size: 0.95em;
+  opacity: 0.85;
+  display: block;
+}
+
+@media (max-width: 600px) {
+  .app-footer {
+    font-size: 13px;
+    padding: 10px 0 6px 0;
+  }
+
+  .footer-main,
+  .footer-copy {
+    font-size: 0.95em;
+  }
+}
+
+/* Footer */
+
+@media (max-width: 600px) {
+  .app-footer {
+    font-size: 13px;
+    padding: 12px 0 8px 0;
+  }
+}
+
+/* =========================================
+ 1. BASE E LAYOUT GLOBAL
+========================================= */
+body {
+  font-family: sans-serif;
+  margin: 0;
+  background-color: #f8f9fa;
+  color: #333;
+  line-height: 1.6;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0px;
+}
+
+.sectionBlockLayout {
+  padding: 8px;
+}
+
+.container {
+  width: 100%;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 15px;
+  box-sizing: border-box;
+}
+
+.col-md-12 {
+  width: 100%;
+}
+
+.columnBlockLayout {
+  min-width: 250px;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* =========================================
+ 2. HERO SECTION
+========================================= */
+.hero-section {
+    padding: 50px 20px;
+    margin: 0px;
+    display: flex;
+    flex-wrap: wrap;
+    min-height: 400px;
+    background-image: linear-gradient(0deg, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)),
+        url("https://cdn.hubblecontent.osi.office.net/m365content/publish/26f1035c-f169-4e0c-948a-0d5c861becc9/thumbnails/xxlarge.jpg");
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+
+.hero-section h1,
+.hero-section h4,
+.hero-section span#file-selected-name {
+    color: white;
+}
+
+.hero-section span#file-selected-name {
+    color: #ffc107;
+    margin-bottom: 10px;
+    display: block;
+    text-align: center;
+}
+
+.hero-section .columnBlockLayout {
+    margin: 40px 0px;
+    align-items: center;
+}
+
+.hero-section p {
+  font-size: 1.5rem;
+  max-width: 900px;
+  margin-bottom: 30px;
+  line-height: 1.4;
+}
+
+
+.navigation {
+  position: sticky;
+  width: 100%;
+  top: 0;
+  z-index: 1000;
+}
+
+.nav-wrapper {
+  background-color: #ffc107;
+  padding: 10px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-align: right;
+  /* Alinha o conteúdo (span) à direita */
+  height: 60px;
+  /* Define uma altura fixa para a barra */
+  box-sizing: border-box;
+  /* Garante que padding não adicione altura */
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Estilos para o ícone de abrir o menu */
+.open-nav {
+  font-size: 28px;
+  cursor: pointer;
+  color: white;
+  padding-right: 20px;
+}
+
+/* Estilos para o menu lateral (Sidenav) */
+.sidenav {
+  height: 100%;
+  width: 0;
+  /* Começa fechado */
+  position: fixed;
+  z-index: 1001;
+  /* Fica acima de outros conteúdos */
+  top: 0;
+  right: 0;
+  background-color: #ff9800;
+  /* Cor de fundo */
+  overflow-x: hidden;
+  /* Desabilita scroll horizontal */
+  transition: 0.5s;
+  /* Efeito de transição */
+  padding-top: 60px;
+  /* Espaço no topo */
+}
+
+/* Estilos para os links do menu lateral */
+.sidenav a {
+  padding: 8px 8px 8px 32px;
+  text-decoration: none;
+  font-size: 22px;
+  color: white;
+  display: block;
+  transition: 0.3s;
+}
+
+/* Efeito hover nos links */
+.sidenav a:hover {
+  color: #f1f1f1;
+  background-color: #fb8c00;
+}
+
+/* Estilo para o botão de fechar (X) */
+.sidenav .closebtn {
+  position: absolute;
+  top: 0;
+  right: 25px;
+  font-size: 36px;
+  margin-left: 50px;
+}
+
+.nav-wrapper span a {
+  color: white;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0px;
+}
+
+/* =========================================
+ 4. BOTÕES E INPUTS
+========================================= */
+.custom-file-upload {
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 15px 40px;
+  cursor: pointer;
+  background-color: #ffc107;
+  color: #333;
+  border-radius: 50px;
+  margin-bottom: 15px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: bold;
+  transition: background-color 0.3s ease;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+.custom-file-upload:hover {
+  background-color: #ffd54f;
+}
+
+.btn-gold {
+  background-color: #ff9800;
+  color: white;
+  border: none;
+  padding: 15px 25px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  width: 100%;
+  font-size: 1.1rem;
+  transition: 0.2s;
+}
+
+.btn-gold:hover {
+  background-color: #fb8c00;
+}
+
+.btn-gold i {
+  margin-right: 6px;
+}
+
+/* =========================================
+ 5. STATUS, PROGRESSO E TABELA
+========================================= */
+#progressContainer {
+  margin: 20px 0;
+  width: 100%;
+}
+
+progress {
+  width: 100%;
+  height: 15px;
+  accent-color: #ff9800;
+  display: block;
+}
+
+#status {
+  padding: 15px;
+  border-radius: 5px;
+  margin: 15px 0;
+  font-weight: bold;
+  border-left: 5px solid #ccc;
+  width: 100%;
+  box-sizing: border-box;
+  white-space: pre-line;
+}
+
+.status-info {
+  background: #e3f2fd;
+  border-color: #2196f3 !important;
+}
+
+.status-success {
+  background: #e8f5e9;
+  border-color: #4caf50 !important;
+}
+
+.status-warning {
+  background: #fff3e0;
+  border-color: #ff9800 !important;
+}
+
+.status-error {
+  background: #ffebee;
+  border-color: #f44336 !important;
+}
+
+.stat-card {
+  background: #fff8e1;
+  border: 1px solid #ffc107;
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 20px;
+  border: 1px solid #eee;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+th {
+  background-color: #fafafa;
+  color: #666;
+}
+
+.info-section {
+  padding: 8px;
+  margin: 0px;
+  display: flex;
+  flex-wrap: wrap;
+  min-height: auto;
+  background-color: #f8f9fa;
+}
+
+.info-section .columnBlockLayout {
+  margin: 30px 0px;
+  padding: 30px;
+  background-color: white;
+  border-radius: 5px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+}

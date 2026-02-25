@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title data-i18n="home_title">Dividir - Home</title>
+    <link href="/pdfspliter/style.css" rel="Stylesheet">
+    <!-- script.js será incluído ao final do body para evitar duplicidade e garantir carregamento correto -->
+</head>
+    <!-- Manifesto PWA -->
+    <link rel="manifest" href="/pdfspliter/manifest.json">
+    <meta name="theme-color" content="#1976d2">
+    <link rel="apple-touch-icon" href="/pdfspliter/icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+</head>
+
+<body>
+
+    <!-- Estrutura do Menu Lateral (Sidenav) -->
+    <div id="mySidenav" class="sidenav">
+        <button id="installPwaBtn" class="button1">Instalar App</button>
+        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">×</a>
+        <a href="/pdfspliter/Dividir/index.html">Dividir</a>
+        <a href="/pdfspliter/UnirPDF/index.html">Unir PDF</a>
+        <a href="/pdfspliter/DividirApenas/index.html">Dividir Apenas</a>
+        <a href="/pdfspliter/JPGtoPDF/index.html">JPG to PDF</a>
+        <a href="/pdfspliter/PDFtoJPG/index.html">PDF to JPG</a>
+        <a href="/pdfspliter/PDFtoArcgis/index.html">PDF to ArcGIS</a>
+    </div>
+
+    <div class="navigation">
+        <nav>
+            <div class="nav-wrapper">
+                <!-- Ícone do Menu (Hamburger) -->
+                <span class="open-nav" onclick="openNav()">☰</span>
+            </div>
+        </nav>
+    </div>
+
+    <div class="row hero-section" data-component-theme="portalThemeColor8">
+        <div class="container">
+            <div class="col-md-12 columnBlockLayout">
+                <h1 style="text-align: center;" data-i18n="main_title">Processador de PDF</h1>
+                <h4 style="text-align: center;" data-i18n="main_subtitle">Divida e organize seus PDFs! Ideal para
+                    declarações de
+                    IR.</h4>
+                <label class="custom-file-upload" for="pdfUpload" data-i18n="select_pdf">
+                    Selecionar PDF
+                </label>
+                <input accept=".pdf" id="pdfUpload" multiple name="pdfUpload" style="display: none;" type="file" />
+                <span id="file-selected-name" data-i18n="no_file_selected">Nenhum arquivo selecionado</span>
+                <button class="button1" id="processarPDF" data-i18n="process_pdf">Processar PDF</button>
+                <span id="log-messages"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="row info-section sectionBlockLayout">
+        <div class="container">
+            <div class="col-md-12 columnBlockLayout">
+                <h2 data-i18n="instructions">Instruções</h2>
+                <p data-i18n="instructions_text">
+                    1. Clique em "Selecionar PDF" para escolher um ou mais arquivos do seu
+                    computador.<br>
+                    2. O nome do arquivo selecionado aparecerá abaixo do botão.<br>
+                    3. Clique no botão "Processar PDF".<br>
+                    4. Aguarde enquanto o sistema divide o PDF em páginas individuais e tenta
+                    identificar o nome do prestador em
+                    cada uma.<br>
+                    5. As páginas processadas aparecerão na seção "Páginas Processadas" abaixo, com
+                    botões para download. Cada
+                    arquivo será nomeado com o nome do prestador (se encontrado).
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row info-section sectionBlockLayout">
+        <div class="container">
+            <div class="col-md-12 columnBlockLayout">
+                <h2 data-i18n="processed_pages">Páginas Processadas</h2>
+                <div id="pdf-pages-container">
+                    <!-- As páginas processadas aparecerão aqui -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="app-footer">
+        <span class="footer-main">Desenvolvido por Marcos Roberto Nunes Lindolpho</span>
+        <span class="footer-copy">&copy; 2026</span>
+    </footer>
+    <script src="/pdfspliter/Dividir/script.js"></script>
+</body>
+
+</html>

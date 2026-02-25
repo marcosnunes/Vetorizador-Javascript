@@ -4,6 +4,8 @@ node_modules/
 dist/
 .vercel
 .env
+pdfspliter/.venv/
+pdfspliter/PDFtoArcgis/testes/
 
 # Documentação interna (manter apenas README.md público)
 QUICKSTART_FASE2.md
