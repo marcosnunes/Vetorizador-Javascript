@@ -399,55 +399,55 @@ button:disabled {
 }
 
 .unified-header {
-  background-color: #333;
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
   color: white;
-  padding: 10px 20px;
+  padding: 10px 16px;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  position: relative;
-}
-
-.unified-header h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .unified-header #connection-status {
-  position: absolute;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .unified-tabs {
   display: flex;
-  background-color: white;
-  border-bottom: 3px solid #e0e0e0;
-  padding: 0 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .tab-btn {
-  padding: 14px 24px;
-  border: none;
-  background: none;
+  width: auto;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
   cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  color: #666;
-  border-bottom: 3px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
   transition: all 0.3s ease;
+  box-shadow: none;
 }
 
 .tab-btn:hover {
-  background-color: #f9f9f9;
+  background: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
 }
 
 .tab-btn.active {
-  color: var(--tab-active);
-  border-bottom-color: var(--tab-active);
+  color: #0f172a;
+  background: #ffffff;
+  border-color: #ffffff;
 }
 
 .tab-content {

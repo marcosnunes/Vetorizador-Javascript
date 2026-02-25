@@ -18,20 +18,17 @@
 </head>
 
 <body>
-  <!-- HEADER PRINCIPAL -->
+  <!-- HEADER COM GUIAS -->
   <div class="unified-header">
-    <h1>Mapeador de Imóveis e Benfeitorias</h1>
+    <div class="unified-tabs" role="tablist" aria-label="Navegação principal">
+      <button class="tab-btn active" data-tab="vetorizador" onclick="switchTab('vetorizador')">
+        🗺️ Vetorizador de Edificações
+      </button>
+      <button class="tab-btn" data-tab="pdfsplitter" onclick="switchTab('pdfsplitter')">
+        📄 Processador de PDF
+      </button>
+    </div>
     <div id="connection-status" class="status-local">💾 Modo Local</div>
-  </div>
-
-  <!-- TABS DE NAVEGAÇÃO -->
-  <div class="unified-tabs">
-    <button class="tab-btn active" data-tab="vetorizador" onclick="switchTab('vetorizador')">
-      🗺️ Vetorizador de Edificações
-    </button>
-    <button class="tab-btn" data-tab="pdfsplitter" onclick="switchTab('pdfsplitter')">
-      📄 Processador de PDF
-    </button>
   </div>
 
   <!-- CONTEÚDO DAS ABAS -->
@@ -340,6 +337,11 @@
           window.map.invalidateSize();
         }, 100);
       }
+
+      const status = document.getElementById('connection-status');
+      if (status) {
+        status.style.display = tabName === 'vetorizador' ? 'inline-flex' : 'none';
+      }
     }
 
     // Atalhos de teclado
@@ -347,6 +349,8 @@
       if (e.altKey && e.key === '1') switchTab('vetorizador');
       else if (e.altKey && e.key === '2') switchTab('pdfsplitter');
     });
+
+    switchTab('vetorizador');
   </script>
 
 </body>
