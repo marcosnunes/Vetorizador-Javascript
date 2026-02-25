@@ -1,15 +1,59 @@
+/**
+ * ============================================================================
+ * VETORIZADOR DE EDIFICAÇÕES - APLICAÇÃO PRINCIPAL
+ * ============================================================================
+ * 
+ * PROPÓSITO: Detectar e mapear edificações em imagens de satélite usando
+ *           processamento chamada visão computacional clássica + WASM
+ * 
+ * FLUXO PRINCIPAL:
+ *   1. Usuário desenha polígono no mapa (Leaflet)
+ *   2. Canvas capturado → Preprocessamento (Sobel, Otsu, Morfologia)
+ *   3. WASM vetoriza (detecta contornos) → GeoJSON
+ *   4. Conversão píxels→LatLng + filtros de qualidade
+ *   5. Usuário marca feedback (✅/❌/✏️) → armazenado em IndexedDB
+ *   6. A cada 100 exemplos → modelo retreina automaticamente
+ *   7. Exportação em Shapefile ZIP
+ * 
+ * ARQUITETURA MODULAR:
+ *   ├─ app.js (ESTE ARQUIVO)
+ *       ├─ Controles UI & Parâmetros
+ *       ├─ Processamento de imagens
+ *       ├─ Vetorização & Conversão
+ *       └─ Feedback & Edição
+ *   ├─ firebase-config.js
+ *       └─ Inicialização Firebase + Status online/offline
+ *   ├─ firestore-service.js
+ *       └─ Persistência em Firestore (quando online)
+ *   ├─ offline-queue.js
+ *       └─ Fila local IndexedDB (sincroniza quando online)
+ *   ├─ continuous-learning.js (AUTOMÁTICO)
+ *       └─ Contagem de exemplos → retrenamento a 100
+ *   ├─ ml-training.js
+ *       └─ TensorFlow.js para retreinamento de modelo
+ *   └─ auto-inference.js
+ *       └─ Aplicação automática de modelo nas vizualizações
+ * 
+ * NOTAS DE MANUTENÇÃO:
+ *   • Se mudar estrutura do feedback → atualizar firestore-service.js
+ *   • Se adicionar novos parâmetros CONFIG → sincronizar em app.js + UI
+ *   • Se mudar nome de store IndexedDB → atualizar em offline-queue.js
+ *   • Sempre chamar window.atualizarContagemExemplos() após salvar feedback
+ * ============================================================================
+ */
+
 // Importação do WASM via wasm_bindgen (no-modules target)
 let vetorizar_imagem;
 
 /* global L, leafletImage, turf, wasm_bindgen */
 
 // ==================== IMPORTS DE FIREBASE/FIRESTORE ====================
+// CRÍTICO: Ordem de imports importante - Firebase deve inicializar antes dos serviços
 import { inicializarFirebase, estaOnline, monitorarConexao } from './firebase-config.js';
 import { 
   salvarRunFirestore, 
   salvarFeaturesFirestore, 
-  salvarFeedbackFirestore,
-  exportarDatasetCompleto 
+  salvarFeedbackFirestore
 } from './firestore-service.js';
 import { 
   inicializarFilaOffline, 
@@ -36,14 +80,36 @@ let modoOffline = false;
 let sincronizacaoEmAndamento = false;
 
 // --- PARÂMETROS AJUSTÁVEIS ---
+/**
+ * CONFIG = Fonte única da verdade para parâmetros de processamento de imagens
+ * 
+ * FLUXO BIDIRECIONAL:
+ *   Slider/Input em index.html
+ *           ↓
+ *   sincronizarControle() [linha ~640]
+ *           ↓
+ *   CONFIG atualizado
+ *           ↓
+ *   DOM refletido (número exibido)
+ *           ↓
+ *   processarAreaDesenhada() lê CONFIG [linha ~1737]
+ * 
+ * IMPORTANTE para MANUTENÇÃO:
+ * Se adicionar novo parâmetro, atualizar TAMBÉM:
+ *   1. index.html - novo slider/input
+ *   2. sincronizarControle() - bidirecionalidade
+ *   3. aplicarPreset() - incluir em presets [linha ~268]
+ *   4. resetarParametros() - valor padrão
+ *   5. Documentação deste bloco
+ */
 let CONFIG = {
-  edgeThreshold: 90,          // Threshold para Sobel edge detection
-  morphologySize: 5,          // Tamanho do kernel morfológico
-  minArea: 15.0,              // Área mínima em m² (edificação residencial mínima)
-  simplification: 0.00001,    // Tolerância de simplificação
-  contrastBoost: 1.3,         // Multiplicador de contraste
-  minQualityScore: 35,        // Score mínimo para aceitar polígono (0-100)
-  mergeDistance: 3,           // Distância em metros para mesclar polígonos próximos
+  edgeThreshold: 90,          // Sobel: threshold para detecção de bordas (30-200)
+  morphologySize: 5,          // Morfologia: tamanho do kernel (1-7px, > = fecha gaps)
+  minArea: 15.0,              // Filtro: área mínima em m² (edificação mínima)
+  simplification: 0.00001,    // Douglas-Peucker: tolerância (menor = mais vértices)
+  contrastBoost: 1.3,         // Contraste: multiplicador (1.0-2.0, > amplifica bordas)
+  minQualityScore: 35,        // Qualidade: score mínimo (0-100, > rejeita mais polígonos)
+  mergeDistance: 3,           // Fusão: distância entre fragmentos (em metros)
   clusteringEnabled: true,    // Ativa DBSCAN para limpar ruído de borda
   clusterEps: 2.5,            // Raio (px) de vizinhança do DBSCAN
   clusterMinPts: 6,           // Mínimo de pontos vizinhos para core point
@@ -58,7 +124,25 @@ function debugLog(...args) {
   }
 }
 
-// Função para sincronizar slider e input numérico
+/**
+ * Sincroniza bidirecionalidade entre Slider (visual) ↔ INPUT (numérico) ↔ CONFIG (processamento)
+ * 
+ * FLUXO CINÉTICOMÁTICO:
+ *   Slider mudado → input.value = formatter(valor) → CONFIG[key] = valor
+ *   Input mudado → slider.value = valor → CONFIG[key] = valor
+ *   Input blur → input.value = formatter(CONFIG[key])  // Limpa formatação
+ * 
+ * IMPORTANTE:
+ *   • Clamping: Garante valor dentro de [min, max] do slider
+ *   • Formatter: Aplica formatação visual (2 casas decimais, etc)
+ *   • Não dispara processamento aqui - apenas atualiza CONFIG
+ *   • Processamento acontece em processarAreaDesenhada()
+ * 
+ * @param {string} sliderId - ID do slider HTML
+ * @param {string} inputId - ID do input number HTML
+ * @param {string} configKey - Chave em CONFIG para atualidade
+ * @param {Function} formatter - (value) => string para exibição
+ */
 function sincronizarControle(sliderId, inputId, configKey, formatter = (v) => v.toFixed(0)) {
   const slider = document.getElementById(sliderId);
   const input = document.getElementById(inputId);
@@ -613,6 +697,57 @@ async function salvarRunAprendizado(runPayload) {
   }
 }
 
+/**
+ * PONTE APRENDIZADO: Armazena feedback para treinar modelo futuro
+ * 
+ * Chamada por marcarFeedbackPoligono() quando user marca ✅/❌/✏️
+ * 
+ * FLUXO ARMAZENAMENTO:
+ *   1. Normaliza payload (timestamp, status aliases, etc)
+ *   2. Salva em IndexedDB 'feedback' store (PRIMEIRA PRIORIDADE - sempre local)
+ *   3. Tenta Firestore se online (sincroniza com backend)
+ *   4. Se falhar Firestore → Adiciona fila offline (sincroniza depois)
+ *   5. Chama window.atualizarContagemExemplos() ← CRÍTICO PARA APRENDIZADO
+ *   
+ * ENTRADA (feedbackPayload):
+ *   {
+ *     feedbackId: "fb_1234567890_abc",
+ *     runId: "run_123",    // Rastreia qual vectorização gerou essa feature
+ *     featureId: "imovel_1",
+ *     feedbackStatus: "correto" | "rejeitado" | "editado",
+ *     feedbackReason: "sombra",  // opcional, preenchido se rejeitado
+ *     timestamp: "2024-01-01T12:00:00Z"
+ *   }
+ *   
+ * ARMAZENAMENTO LOCAL:
+ *   IndexedDB['feedback'] = {
+ *     feedbackId,
+ *     runId,
+ *     featureId,
+ *     status,
+ *     reason,
+ *     editedGeometry,  // se status="editado"
+ *     timestamp
+ *   }
+ *   
+ * CICLO APRENDIZADO:
+ *   Cada feedback → atualizarContagemExemplos()
+ *                         ↓
+ *                   atualizarUIAprendizadoContinuo(count)
+ *                         ↓
+ *                   Se count % 100 === 0:
+ *                         ↓
+ *                   sugerirRetreinar() → User clica "Treinar Agora"
+ *                         ↓
+ *                   executarRetreninamentoAutomatico()
+ *   
+ * OFFLINE-FIRST:
+ *   • Nunca falha por falta de internet (sempre salva local)
+ *   • Fila offline sincroniza quando online volta
+ *   • Firestore é sync extra, não bloqueador
+ *   
+ * @param {Object} feedbackPayload - Dados do feedback do usuário
+ */
 async function salvarFeedbackAprendizado(feedbackPayload) {
   const feedbackNormalizado = normalizarFeedbackPayload(feedbackPayload);
 
@@ -654,7 +789,7 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
     });
   }
 
-  // ✨ NOVO: Atualizar contagem de exemplos para aprendizado contínuo
+  // ✨ CRÍTICO: Atualizar contagem de exemplos para aprendizado contínuo
   // Isso dispara sugestão de retreinamento a cada 100 exemplos
   if (window.atualizarContagemExemplos) {
     try {
@@ -685,6 +820,44 @@ async function atualizarFeedbackNoRun(runId, featureId, feedbackStatus, feedback
   await idbPut('runs', run);
 }
 
+/**
+ * ENTRADA DO FEEDBACK: User marca ✅/❌/✏️ em polígono detectado
+ * 
+ * FLUXO FEEDBACK → APRENDIZADO:
+ *   User clica polígono na mapa
+ *        ↓
+ *   exibirPopupPoligono() mostra opções
+ *        ↓
+ *   marcarFeedbackPoligono(id, status) ← ESTE PONTO
+ *        ↓
+ *   salvarFeedbackAprendizado(payload) → IndexedDB 'feedback' store
+ *        ↓
+ *   window.atualizarContagemExemplos() [continuous-learning.js]
+ *        ↓
+ *   A cada 100 exemplos → Treina modelo novo
+ *   
+ * TIPOS DE FEEDBACK:
+ *   • "correto" (✅): Polígono está identificado corretamente
+ *   • "rejeitado" (❌): Não é edificação (sombra, rua, noise, fragmentado)
+ *   • "editado" (✏️): User fez ajustes manuais, salva geometria nova
+ *   
+ * PARA CADA FEEDBACK:
+ *   1. Localiza feature em geojsonFeatures[] por ID
+ *   2. Se "editado" → Ativa visual editor (permite mover pontos)
+ *   3. Se "rejeitado" → Solicita motivo via prompt (melhora análise)
+ *   4. Cria payload com metadados (timestamp, runId, status, reason)
+ *   5. Chama salvarFeedbackAprendizado → IndexedDB
+ *   6. Atualiza run original com feedback
+ *   7. Trigger ciclo aprendizado contínuo
+ *   
+ * IMPORTANTE:
+ *   • Fonte de verdade para ML: feedback com maior timestamp é o validado
+ *   • Motivos rejeitados ajudam análise de padrões no futuro
+ *   • Edições são armazenadas como geometrias novas (retraining data)
+ *   
+ * @param {string} featureId - ID do polígono (f_XXX)
+ * @param {string} status - Um de: "correto", "rejeitado", "editado"
+ */
 async function marcarFeedbackPoligono(featureId, status) {
   const feature = geojsonFeatures.find((f) => f.properties?.id === featureId);
   if (!feature) {
@@ -941,263 +1114,13 @@ function ativarEdicaoPoligono(featureId, feature) {
   }, 100); // Pequeno delay para garantir que elementos foram adicionados ao DOM
 }
 
-async function exportarDatasetAprendizado() {
-  try {
-    let datasetCompleto;
-
-    // Se Firebase está inicializado e online, exportar do Firestore
-    if (firebaseInicializado && estaOnline()) {
-      const escolha = confirm(
-        '🌐 Firebase detectado!\n\n' +
-        'Escolha a fonte de dados:\n' +
-        'OK = Exportar do Firestore (todos os usuários)\n' +
-        'Cancelar = Exportar apenas dados locais (IndexedDB)'
-      );
-
-      if (escolha) {
-        loader.style.display = 'flex';
-        loaderText.textContent = 'Exportando dataset do Firestore...';
-        try {
-          datasetCompleto = await exportarDatasetCompleto();
-          loader.style.display = 'none';
-          
-          if (!datasetCompleto || !datasetCompleto.runs || datasetCompleto.runs.length === 0) {
-            alert('⚠️ Nenhum dado encontrado no Firestore.');
-            return;
-          }
-
-          const blob = new Blob([JSON.stringify(datasetCompleto, null, 2)], { type: 'application/json' });
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = `dataset_firestore_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          
-          mostrarNotificacao(`✅ Dataset exportado: ${datasetCompleto.runs.length} runs`, 'success');
-          
-          // Oferecer treinamento
-          treinarComDataset(datasetCompleto);
-          return;
-        } catch (error) {
-          loader.style.display = 'none';
-          console.error('❌ Erro ao exportar do Firestore:', error);
-          alert('❌ Erro ao exportar do Firestore. Exportando dados locais...');
-          // Continua para exportação local
-        }
-      }
-    }
-
-    // Exportação local (IndexedDB)
-    const runs = await idbGetAll('runs');
-    const feedback = await idbGetAll('feedback');
-
-    if (runs.length === 0 && feedback.length === 0) {
-      alert('⚠️ Não há dados de aprendizado para exportar ainda.');
-      return;
-    }
-
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      app: 'vetorizador-edificacoes',
-      version: 'fase2-firestore-offline',
-      source: 'indexeddb-local',
-      runs,
-      feedback
-    };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `dataset_local_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    mostrarNotificacao(`✅ Dataset local exportado: ${runs.length} runs`, 'success');
-    
-    // Oferecer treinamento
-    treinarComDataset(payload);
-  } catch (err) {
-    console.error('Erro ao exportar dataset de aprendizado:', err);
-    alert('❌ Erro ao exportar dataset de aprendizado.');
-  }
-}
-
-// Treinar modelo ML com dataset
-async function treinarComDataset(dataset) {
-  if (!window.treinarModeloML) {
-    alert('⚠️ Módulo ML não carregado. Recarregue a página.');
-    return;
-  }
-
-  const treinar = confirm(
-    '🧠 PHASE 3: ML Training\n\n' +
-    `Dataset tem ${dataset.runs?.length || 0} runs e ${dataset.feedback?.length || 0} feedbacks\n\n` +
-    'Quer treinar um modelo Neural Network para:\n' +
-    '• Aprender padrões de qualidade\n' +
-    '• Recomendar ajustes de parâmetros\n' +
-    '• Auto-ajustar configurações\n\n' +
-    'OK = Treinar modelo\n' +
-    'Cancelar = Apenas exportar dados'
-  );
-
-  if (!treinar) return;
-
-  loader.style.display = 'flex';
-  loaderText.textContent = '🧠 Treinando modelo ML...\n\nIsso pode levar 10-30 segundos...';
-
-  try {
-    const sucesso = await window.treinarModeloML(dataset);
-    loader.style.display = 'none';
-
-    if (sucesso) {
-      // Oferta de auto-ajuste
-      const autoajustar = confirm(
-        '✅ Modelo treinado com sucesso!\n\n' +
-        'Quer auto-ajustar os parâmetros\n' +
-        'baseado nas predições do modelo?\n\n' +
-        'OK = Auto-ajustar\n' +
-        'Cancelar = Usar modelo manualmente depois'
-      );
-
-      if (autoajustar) {
-        await window.autoajustarParametrosML();
-      }
-    }
-  } catch (error) {
-    loader.style.display = 'none';
-    console.error('Erro ao treinar modelo:', error);
-    alert('❌ Erro no treinamento: ' + error.message);
-  }
-}
-
-// Carregar e treinar com arquivo JSON
-async function carregarETreinarModelo() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    try {
-      const texto = await file.text();
-      const dataset = JSON.parse(texto);
-
-      if (!dataset.runs || !dataset.feedback) {
-        alert('❌ Arquivo inválido! Não contém estrutura esperada.');
-        return;
-      }
-
-      treinarComDataset(dataset);
-    } catch (error) {
-      alert('❌ Erro ao carregar arquivo: ' + error.message);
-    }
-  };
-  input.click();
-}
-
 // ==================== HELPER: NOTIFICAÇÕES ====================
 function mostrarNotificacao(mensagem, tipo = 'info') {
   console.log(`[${tipo.toUpperCase()}] ${mensagem}`);
 }
 
-// Salvar ponto de ajuste fino (checkpoint dos parâmetros)
-async function salvarPontoAjusteFino() {
-  const checkpoint = {
-    timestamp: new Date().toISOString(),
-    parametros: {
-      edgeThreshold: CONFIG.edgeThreshold,
-      morphologySize: CONFIG.morphologySize,
-      minArea: CONFIG.minArea,
-      contrastBoost: CONFIG.contrastBoost,
-      minQualityScore: CONFIG.minQualityScore,
-      simplification: CONFIG.simplification,
-      clusteringEnabled: CONFIG.clusteringEnabled,
-      clusterEps: CONFIG.clusterEps,
-      clusterMinPts: CONFIG.clusterMinPts,
-      minClusterSize: CONFIG.minClusterSize,
-      mergeDistance: CONFIG.mergeDistance
-    },
-    nome: prompt('Nome do checkpoint (ex: "Urban v2.1"):', `checkpoint_${new Date().toISOString().slice(0,10)}`),
-  };
-
-  if (!checkpoint.nome) return; // Cancelado
-
-  try {
-    // Salvar no IndexedDB
-    if (window.idbSet) {
-      await window.idbSet('checkpoints', checkpoint.nome, checkpoint);
-    }
-    
-    const blob = new Blob([JSON.stringify(checkpoint, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `checkpoint_${checkpoint.nome}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    alert(`✅ Checkpoint "${checkpoint.nome}" salvo!\n\nArmazenado localmente e exportado.`);
-  } catch (error) {
-    console.error('Erro ao salvar checkpoint:', error);
-    alert('❌ Erro ao salvar checkpoint.');
-  }
-}
-
-// ✨ NOVO: Exportar dataset de treinamento (runs + feedback) - Para uso em "Carregar Dataset + Treinar"
-async function exportarDatasetTreinamento() {
-  try {
-    const loader = document.getElementById('loader-overlay');
-    const loaderText = document.getElementById('loader-text');
-    if (loader) loader.style.display = 'flex';
-    if (loaderText) loaderText.textContent = '📊 Exportando dataset de treinamento...';
-
-    // Obter dados do IndexedDB
-    const idbGetAll = window.idbGetAll || (() => []);
-    const runs = await idbGetAll('runs');
-    const feedback = await idbGetAll('feedback');
-
-    if (feedback.length === 0) {
-      alert('⚠️ Nenhum dados de feedback encontrado!\n\nPara treinar o modelo:\n1. Vetorize várias imagens\n2. Marque polígonos como aprovado/rejeitado\n3. Edite geometrias\n4. Experimente treinar depois de coletar dados');
-      if (loader) loader.style.display = 'none';
-      return;
-    }
-
-    // Estrutura esperada pelo carregarETreinarModelo()
-    const dataset = {
-      exportedAt: new Date().toISOString(),
-      app: 'vetorizador-edificacoes',
-      version: 'fase5-continuous-learning',
-      source: 'indexeddb-local',
-      runs,
-      feedback,
-      exemplosTotal: feedback.length,
-      descricao: `Dataset com ${runs.length} vetorizações e ${feedback.length} exemplos de feedback para treinamento`
-    };
-
-    // Download do JSON
-    const blob = new Blob([JSON.stringify(dataset, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `dataset_treinamento_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    if (loader) loader.style.display = 'none';
-    alert(`✅ Dataset exportado com sucesso!\n\n📊 Conteúdo:\n- ${runs.length} vetorizações\n- ${feedback.length} exemplos de feedback\n\nAgora:\n1. Clique em "Carregar Dataset JSON + Treinar"\n2. Selecione o arquivo baixado\n3. Modelo será treinado automaticamente`);
-
-  } catch (error) {
-    console.error('Erro ao exportar dataset:', error);
-    const loader = document.getElementById('loader-overlay');
-    if (loader) loader.style.display = 'none';
-    alert('❌ Erro ao exportar dataset: ' + error.message);
-  }
-}
-
 // ========== ALGORITMOS AVANÇADOS ==========
+
 
 // Threshold Adaptativo Otsu - encontra melhor threshold automaticamente
 function calcularThresholdOtsu(imageData) {
@@ -1248,7 +1171,57 @@ function calcularThresholdOtsu(imageData) {
   return threshold;
 }
 
-// Calcular score de confiança do polígono
+/**
+ * MOTOR DE QUALIDADE: Score heurístico 0-100 para filtrar falsos positivos
+ * 
+ * Objetivo: Classificar "é edificação?" para cada polígono detectado
+ * 
+ * MÉTODO: Combina 4 fatores ponderados (soma ponderada 0-100)
+ * 
+ * FATORES:
+ *   1. Área (Peso: 35pts)
+ *      • 25-400m²    → +35pts (zona confortável para edificações)
+ *      • 15-800m²    → +20pts (ampliado para incluir outras estruturas)
+ *      • 10-15m²     → +5pts (muito pequeno, penalizado suavemente)
+ *      • <10m² ou >800m² → 0pts (fora da distribuição esperada)
+ *   
+ *   2. Compacidade (Peso: 35pts) - MAIS IMPORTANTE (diferencia sombras)
+ *      • > 0.65      → +35pts (próximo a círculo, muito edificação)
+ *      • > 0.50      → +20pts (razoavelmente compacto)
+ *      • > 0.30      → +5pts (alongado, suspeito de sombra/rua)
+ *      • <= 0.30     → -10pts (linear, PENALIZA forte contra sombras)
+ *      • Fórmula: compactness = (4π × área) / perímetro²
+ *        - Círculo = 1.0 (mais compacto)
+ *        - Linha = 0.0 (menos compacto)
+ *   
+ *   3. Vértices (Peso: 20pts)
+ *      • 4-15 vértices → +20pts (edificação típica)
+ *      • <= 25 vértices → +10pts (ainda razoável)
+ *      • > 40 vértices  → -5pts (RUÍDO: muito complexo)
+ *   
+ *   4. Razão Perímetro/√Área (Peso: 10pts)
+ *      • 3.5-5.5 → +10pts (proporção de edificação)
+ *      • > 8.0   → -10pts (forma muito irregular)
+ *   
+ * RESULTADO (exemplo):
+ *   Quadrado 100m² + compacidade 0.8 + 4 vértices + razão 4.0
+ *   Score = 35 + 35 + 20 + 10 = 100 (perfeito)
+ *   
+ *   Sombra linear 50m² + compacidade 0.2 + 40 vértices + razão 9.0
+ *   Score = 0 + (-10) + (-5) + (-10) = -25 → clamped to 0
+ *   
+ * CLASSIFICAÇÃO:
+ *   • >= 70: Verde "ALTA" (confiança máxima, pronto para uso)
+ *   • 40-69: Amarelo "MÉDIA" (revisar, pode estar correto)
+ *   • < 40:  Vermelho "BAIXA" (provavelmente falso positivo)
+ *   
+ * FILTRO APLICADO:
+ *   Se score < CONFIG.minQualityScore (default 35) → REJEITADO
+ *   Se score >= CONFIG.minQualityScore → APROVADO
+ *   
+ * @param {Object} polygon - Feature GeoJSON com geometry.coordinates
+ * @returns {Object} { score: 0-100, compactness: float, vertices: int }
+ */
 function calcularScoreConfianca(polygon) {
   try {
     const area = turf.area(polygon);
@@ -1314,7 +1287,29 @@ function calcularScoreConfianca(polygon) {
   }
 }
 
-// Limpar geometria: remover buracos internos e corrigir auto-interseções
+/**
+ * CIRURGIA GEOMÉTRICA: Remove artefatos e garante validade do polígono
+ * 
+ * PROBLEMAS CORRIGIDOS:
+ *   1. Buracos internos: Rust contour detection às vezes gera rings adicionais
+ *      → Solução: Mantém apenas outer ring (descarta holes)
+ *   
+ *   2. Auto-interseções: Traços de borda podem criar polígonos self-intersecting
+ *      → Solução: turf.buffer(polygon, 0) "fixa" topologia
+ *      → Se gera MultiPolygon → Escolhe o maior (edificação principal)
+ *   
+ * QUANDO CHAMADO:
+ *   Após calcularScoreConfianca() e ANTES de salvar feature
+ *   Garante que feature é válida para Shapefile export
+ *   
+ * EXEMPLOS:
+ *   • Edificação com pátio interno → remove pátio, mantém perímetro
+ *   • Traço fragmentado em 2 polígonos → Mescla para o maior
+ *   • Polígono com vertices cruzados → buffer(0) corrige topologia
+ *   
+ * @param {Object} polygon - Feature GeoJSON
+ * @returns {Object} cleaned polygon ou original se erro
+ */
 function limparGeometria(polygon) {
   try {
     // Remove buracos internos (mantém apenas outer ring)
@@ -1343,7 +1338,47 @@ function limparGeometria(polygon) {
   }
 }
 
-// Mesclar polígonos próximos (mesma edificação fragmentada)
+/**
+ * FUSÃO INTELIGENTE: Une fragmentos de mesma edificação
+ * 
+ * MOTIVO: Traços imperfeitos para a mesma edificação podem criar múltiplos
+ * polígonos pequenos ao invés de um grande. Esta função os une.
+ * 
+ * ALGORITMO:
+ *   1. Para cada polígono não processado:
+ *        a) Encontra todos os polígonos proximos (distância <= CONFIG.mergeDistance)
+ *        b) Coleta lista "toMerge" com similares
+ *   
+ *   2. Se encontrou vizinhos:
+ *        a) Aplica buffer(distância) para expandir e aproximar
+ *        b) Realiza union() sequencial: resultado = polígono1 ∪ polígono2 ∪ ...
+ *        c) Remove buffer (volta ao tamanho original)
+ *        d) Se gerou MultiPolygon → Separa polígonos por área >= minArea
+ *   
+ *   3. Se não encontrou vizinhos → Mantém original
+ *   
+ * ENTRADA/SAÍDA:
+ *   In:  100 features pequenas fragmentadas (5-15m² cada)
+ *   Out: 20 features maiores unidas (25-40m² cada)
+ *   
+ * IMPORTANTE:
+ *   • Distância usa centerOfMass (centro de gravidade)
+ *   • Buffer/debuffer preserva shape original (cresce e encolhe)
+ *   • Preserva armazenamento total (não cria polígonos fictícios)
+ *   • Config: CONFIG.mergeDistance (metros, default 3)
+ *   
+ * EXEMPLO DE RETORNO:
+ *   toMerge = [
+ *     { area: 12m², vertices: 8 },
+ *     { area: 10m², vertices: 7 }
+ *   ]
+ *   buffer → union → debuffer
+ *   resultado = 1 polígono de ~22m²
+ *   
+ * @param {Array} features - Array de Feature GeoJSON
+ * @param {number} distanciaMetros - Raio de busca para vizinhos (CONFIG.mergeDistance)
+ * @returns {Array} Features unidas/fusionadas
+ */
 function mesclarPoligonosProximos(features, distanciaMetros = 2) {
   if (features.length === 0) return features;
   
@@ -1734,6 +1769,44 @@ map.on(L.Draw.Event.CREATED, (e) => {
 });
 
 // --- LÓGICA PRINCIPAL ---
+/**
+ * CORAÇÃO DO PIPELINE: Processa polígono desenhado → detecção de edificações
+ * 
+ * ENTRADA:
+ *   • bounds: L.LatLngBounds com NW/SE do polígono selecionado
+ *   • selectionLayer: Polígono visual desenhado no mapa
+ *   
+ * FLUXO PROCESSAMENTO (7 etapas em cascata):
+ *   1. CAPTURA: leafletImage(map) → Canvas RGB da tela
+ *   2. RECORTE: Extrai apenas região selecionada (Region of Interest)
+ *   3. MÁSCARA: Aplicargeometria selection layer para remover pixels fora
+ *   4. PREPROCESSAMENTO:
+ *      a) Contraste: Boost por CONFIG.contrastBoost (multiplica RGB + offset)
+ *      b) Sobel: Detecção de bordas com threshold CONFIG.edgeThreshold
+ *      c) Otsu: Binarização adaptativa (preto/branco)
+ *      d) DBSCAN: (opcional) Remove ruído agrupando pixelsbrancos
+ *      e) Morfologia: Dilate/Erode para fechar gaps em bordas
+ *   5. WASM CONTORNO: vetorizar_imagem(base64) → Rust converte para polígonos
+ *   6. CONVERSÃO: Pixels → LatLng usando map bounds, filters cascata
+ *   7. VISUALIZAÇÃO: Renderiza Leaflet GeoJSON com cores de qualidade
+ *   
+ * FILTROS EM CASCATA:
+ *   → Válido (GeoJSON não nulo)
+ *   → DentroDaÁrea (turf.booleanWithin)
+ *   → ÁreaMínima (>= CONFIG.minArea m²)
+ *   → QualidadeEditifício (score >= CONFIG.minQualityScore 0-100)
+ *   → FinalmenteMostrado: Verde/Amarelo/Vermelho por qualidade
+ *   
+ * REGISTRO:
+ *   • Cada run log: runId, ROI dimensions, parametros usados, etapas, DBSCAN stats, resultado final
+ *   • Enviado para Firestore/IndexedDB ao final
+ *   
+ * IMPORTANTE:
+ *   • Função será chamada TODA VEZ que user desenha polígono
+ *   • Não pode ser paralela (compartilha canvas do mapa)
+ *   • Atualiza DOM progressivamente via loader status
+ *   • Ao fim, remove selection layer e permite novo desenho
+ */
 async function processarAreaDesenhada(bounds, selectionLayer) {
   loaderText.textContent = '📸 Capturando imagem da área selecionada...';
   loader.style.display = 'flex';
@@ -1954,10 +2027,10 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         brancos: whitePixels
       });
 
-      // DEBUG: Mostra a máscara de bordas no mapa
-      if (debugMaskLayer) map.removeLayer(debugMaskLayer);
-      debugMaskLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.7 });
-      debugMaskLayer.addTo(map);
+      // DEBUG: Máscara de bordas (comentada para deixar frame transparente)
+      // if (debugMaskLayer) map.removeLayer(debugMaskLayer);
+      // debugMaskLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.7 });
+      // debugMaskLayer.addTo(map);
 
       // Limpeza de ruído (Morfologia) - Closing para preencher gaps
       console.log('Aplicando morphological closing...');
@@ -2001,10 +2074,10 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         brancos: whitePixels
       });
       
-      // DEBUG: Mostra a máscara final
-      if (window.debugMorphLayer) map.removeLayer(window.debugMorphLayer);
-      window.debugMorphLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.9 });
-      window.debugMorphLayer.addTo(map);
+      // DEBUG: Máscara final (comentada para deixar frame transparente)
+      // if (window.debugMorphLayer) map.removeLayer(window.debugMorphLayer);
+      // window.debugMorphLayer = L.imageOverlay(maskCanvas.toDataURL(), bounds, { opacity: 0.9 });
+      // window.debugMorphLayer.addTo(map);
 
       loaderText.textContent = 'Vetorizando polígonos...';
       await yieldToMain();
@@ -2204,6 +2277,50 @@ function applyMorphologicalOperation(ctx, width, height, operationType, kernelSi
   ctx.putImageData(processedData, 0, 0);
 }
 
+/**
+ * FILTRO DIGITAL: Pixels → LatLng com Cascata de Validações
+ * 
+ * Chamada por processarAreaDesenhada() após WASM retornar polígonos
+ * 
+ * ENTRADAS:
+ *   • geojson: Features em pixels (de vetorizar_imagem WASM)
+ *   • canvas: Canvas ROI para dimensões exactas (width, height)
+ *   • mapBounds: L.LatLngBounds para georeferenciação (NW/SE)
+ * 
+ * CASCATA DE FILTROS (ordem crítica):
+ *   0️⃣ Válido     → geometry.type === 'Polygon' && length >= 4
+ *   1️⃣ DentroDaÁrea  → turf.booleanWithin(poly, selectionBounds)
+ *   2️⃣ ÁreaMínima    → area >= CONFIG.minArea m²
+ *   3️⃣ Qualidade     → scoreConfianca >= CONFIG.minQualityScore (0-100)
+ *   4️⃣ Fusão         → Mescla fragmentos próximos (CONFIG.mergeDistance metros)
+ *   5️⃣ PropsFinais   → Adiciona id, area_m2, confidence_score, etc
+ * 
+ * CONVERSÃO MATEMÁTICA (pixel→LatLng):
+ *   lng = west + (pixelX / imgWidth) × (east - west)
+ *   lat = north - (pixelY / imgHeight) × (north - south)  ← nota: MENOS para Y!
+ *   
+ * EXEMPLO REJEIÇÃO:
+ *   → Feature fora bounds → log: "❌ REJEITADA - Fora da área"
+ *   → Feature <15m² → log: "❌ REJEITADA POR ÁREA"
+ *   → Feature score 30 < min 35 → log: "⚠️ REJEITADA POR QUALIDADE"
+ *   
+ * SAÍDA:
+ *   feature.properties = {
+ *     id: "imovel_1",
+ *     area_m2: "245.36",
+ *     confidence_score: 78,
+ *     quality: "alta" | "media" | "baixa",
+ *     run_id: "run_123",
+ *     feedback_status: "pendente",
+ *     ...
+ *   }
+ *   
+ * IMPORTANTE:
+ *   • Cada filtro reduz quantidade (verbose logging para debugging)
+ *   • Turf simplify reduz ruído com tolerância CONFIG.simplification
+ *   • Fusão de próximos melhora visualização (evita fragmentação)
+ *   • Todos os features trazem run_id para rastreamento (aprendizado)
+ */
 function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   const imgWidth = canvas.width;
   const imgHeight = canvas.height;
@@ -2223,6 +2340,14 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   console.log('Dimensões canvas:', imgWidth, 'x', imgHeight);
 
   if (!geojson || !geojson.features) return turf.featureCollection([]);
+
+  // ✨ NOVO: Criar polígono da área de seleção para filtrar features fora dela
+  const selectionBounds = turf.bboxPolygon([
+    mapBounds.getWest(),
+    mapBounds.getSouth(),
+    mapBounds.getEast(),
+    mapBounds.getNorth()
+  ]);
 
   geojson.features.forEach((feature, idx) => {
     // Garante que é polígono
@@ -2265,6 +2390,18 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
       const area = turf.area(simplified);
       if (idx < 3) {
         console.log(`Feature ${idx}: área calculada = ${area.toFixed(6)}m² (original ${coords.length} pontos)`);
+      }
+
+      // ✨ NOVO: Filtro 0 - Verificar se polígono está dentro da área de seleção
+      try {
+        const dentroArea = turf.booleanWithin(simplified, selectionBounds);
+        if (!dentroArea) {
+          console.log(`Feature ${idx}: ❌ REJEITADA - Fora da área de seleção`);
+          return;
+        }
+      } catch (error) {
+        console.warn(`Feature ${idx}: ⚠️ Erro ao verificar bounds:`, error);
+        // Continua mesmo com erro no filtro
       }
 
       // AQUI é onde os filtros são aplicados.
@@ -2345,6 +2482,47 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
 
 
 // --- EXPORTAÇÃO ---
+/**
+ * ENDPOINT DE SAÍDA: Exporta polígonos detectados como Shapefile (ZIP)
+ * 
+ * Chamado por: Botão "💾 Exportar Dados" em index.html
+ * 
+ * FLUXO:
+ *   1. Coleta todos os geojsonFeatures[] (polígonos aprovados)
+ *   2. Monta FeatureCollection com properties (id, area, score, feedback)
+ *   3. Chama shpwrite.zip(geojson) → Gera arquivos Shapefile binários
+ *   4. ⚠️ CRÍTICO: shpwrite retorna BASE64, não binário puro
+ *   5. Decodifica Base64 → Uint8Array com atob()
+ *   6. Cria Blob → Downloadable ZIP file
+ *   7. Dispara download automático para browser
+ *   
+ * ARQUIVOS NO ZIP:
+ *   edificacoes.shp  - Main shapefile (geometria dos polígonos)
+ *   edificacoes.shx  - Shape index (índice para busca rápida)
+ *   edificacoes.dbf  - Attribute database (id, area_m2, confidence_score, etc)
+ *   
+ * PROPERTIES EXPORTADAS:
+ *   id              - ID único do polígono (imovel_1, imovel_2, ...)
+ *   area_m2         - Área em metros quadrados (float)
+ *   confidence_score - Score 0-100 de confiança (int)
+ *   quality         - Qualidade: "alta" | "media" | "baixa"
+ *   compactness     - Compacidade 0-1 (float, > 0.65 = melhor)
+ *   vertices        - Número de pontos do polígono (int)
+ *   feedback_status - "pendente" | "correto" | "rejeitado" | "editado"
+ *   
+ * IMPORTANTE - DECODIFICAÇÃO:
+ *   Se não aplicar atob() na Base64, ZIP file fica CORROMPIDO
+ *   Verificar header: [80, 75, 3, 4] = "PK..." (magic bytes ZIP)
+ *   Sem atob(): header começará com [85, 69, 115, 68] (primeiros chars "UEsD")
+ *   
+ * TESTE DE VALIDADE:
+ *   1. Download recebido como mapeamento_edificacoes.zip
+ *   2. Extração com 7-Zip/WinRAR → Sem erros
+ *   3. Abrir em QGIS/ArcGIS Pro → Visualiza polígonos com atributos
+ *   4. Atributos mostram id, area, score, feedback para cada feature
+ *   
+ * @returns {void} Download iniciado no browser
+ */
 async function exportarShapefile() {
   if (geojsonFeatures.length === 0) {
     alert("⚠️ Não há polígonos para exportar.\n\nDesenhe uma área no mapa e aguarde o processamento.");
