@@ -1733,17 +1733,37 @@ L.drawLocal.edit.toolbar.buttons.editDisabled = 'Sem camadas para editar';
 L.drawLocal.edit.toolbar.buttons.remove = 'Deletar camadas';
 L.drawLocal.edit.toolbar.buttons.removeDisabled = 'Sem camadas para deletar';
 
+/**
+ * LEAFLET-DRAW: Controles de desenho do mapa
+ * 
+ * CONFIGURAÇÃO MINIMALISTA:
+ * • Apenas polígono habilitado (desenhar área de vetorização)
+ * • Edit mode desativado (sem ícones de edição/deletar)
+ * • Marker, polyline, circle, rectangle desativados
+ * • Zoom automático mantido pelo Leaflet
+ * 
+ * RESULTADO: UI limpa com apenas:
+ *   - Zoom +/-  (Leaflet padrão)
+ *   - Desenhar polígono (Draw tool)
+ */
 const drawControl = new L.Control.Draw({
-  edit: { featureGroup: drawnItems },
+  position: 'topleft',
   draw: {
     polygon: {
+      allowIntersection: false,
       shapeOptions: {
         color: '#007bff',
-        fillOpacity: 0.1
+        fillOpacity: 0.1,
+        weight: 2
       }
     },
-    marker: false, polyline: false, circle: false, rectangle: false
-  }
+    marker: false,
+    polyline: false,
+    circle: false,
+    rectangle: false,
+    circlemarker: false
+  },
+  edit: false  // Desativa completamente o modo edição (remove ícones de editar/deletar)
 });
 map.addControl(drawControl);
 
