@@ -626,6 +626,8 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
     timestamp: feedbackNormalizado.timestamp
   });
 
+  console.log('✅ Feedback salvo em IndexedDB:', feedbackPayload);
+
   // Tenta salvar no Firestore se online e inicializado
   if (firebaseInicializado && estaOnline()) {
     try {
@@ -656,10 +658,14 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
   // Isso dispara sugestão de retreinamento a cada 100 exemplos
   if (window.atualizarContagemExemplos) {
     try {
+      console.log('🔄 Chamando atualizarContagemExemplos...');
       await window.atualizarContagemExemplos();
+      console.log('✅ atualizarContagemExemplos completado');
     } catch (err) {
       debugLog('⚠️ Erro ao atualizar contagem de exemplos:', err);
     }
+  } else {
+    console.warn('❌ window.atualizarContagemExemplos não está disponível!');
   }
 }
 
@@ -2436,4 +2442,4 @@ window.aplicarPreset = aplicarPreset;
 window.resetarParametros = resetarParametros;
 window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
-window.salvarPontoAjusteFino = salvarPontoAjusteFino;
+window.idbGetAll = idbGetAll;  // ✨ Para continuous-learning.js

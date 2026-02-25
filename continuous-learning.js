@@ -22,6 +22,7 @@ async function atualizarContagemExemplos() {
     exemploColetados = feedback.length;
     
     console.log(`📊 Exemplos coletados: ${exemploColetados}`);
+    console.log(`📦 Dados feedback recuperados:`, feedback);
 
     // ✨ Atualizar UI da barra de progresso
     atualizarUIAprendizadoContinuo(exemploColetados);
