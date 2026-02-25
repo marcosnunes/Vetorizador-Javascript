@@ -23,13 +23,12 @@
     }
 
     .unified-header {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      background-color: #333;
       color: white;
-      padding: 15px 20px;
+      padding: 10px 20px;
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
 
     .unified-header h1 {
@@ -71,11 +70,13 @@
       display: none;
       width: 100%;
       flex: 1;
+      min-height: 0;
     }
 
     .tab-content.active {
       display: flex;
       flex-direction: column;
+      min-height: 0;
     }
 
     #pdfsplitter-frame {
@@ -86,20 +87,11 @@
       flex: 1;
     }
 
-    header.vetorizador-header {
-      background-color: #333;
-      color: white;
-      text-align: center;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 20px;
-      padding: 10px 20px;
-    }
-
     .main-container {
       display: flex;
       flex: 1;
+      height: 100%;
+      min-height: 0;
       overflow: hidden;
     }
 
@@ -114,14 +106,20 @@
       flex-direction: column;
       flex: 1;
       overflow: hidden;
+      min-height: 0;
+    }
+
+    .controls-panel {
+      height: 100%;
+      overflow-y: auto;
     }
   </style>
 </head>
 
 <body>
-  <!-- HEADER UNIFICADO -->
+  <!-- HEADER PRINCIPAL -->
   <div class="unified-header">
-    <h1>🛠️ Suite de Ferramentas Geoespaciais</h1>
+    <h1>Mapeador de Imóveis e Benfeitorias</h1>
   </div>
 
   <!-- TABS DE NAVEGAÇÃO -->
@@ -141,11 +139,6 @@
       <div id="loader-overlay">
         <p id="loader-text">Vetorizando imagem, por favor aguarde...</p>
       </div>
-
-      <header class="vetorizador-header">
-        <h2>Mapeador de Imóveis e Benfeitorias</h2>
-        <div id="connection-status" class="status-local">💾 Modo Local</div>
-      </header>
 
   <div class="main-container">
     <div class="map-container">
@@ -391,7 +384,7 @@
 
     <!-- ABA 2: PDF SPLITTER -->
     <div id="pdfsplitter-content" class="tab-content">
-      <iframe id="pdfsplitter-frame" src="pdfspliter/index.html"></iframe>
+      <iframe id="pdfsplitter-frame" src="./pdfspliter/index.html"></iframe>
     </div>
   </div>
 
