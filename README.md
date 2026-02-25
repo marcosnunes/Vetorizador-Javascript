@@ -1,338 +1,171 @@
-# 🛠️ Suite de Ferramentas Geoespaciais
+# Ferramenta Vetorizadora + PDFSpliter com PDFtoArcGIS
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Web%20100%25%20Client--Side-brightgreen.svg)
+![Platform](https://img.shields.io/badge/platform-Desktop%20App-brightgreen.svg)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-Rust-orange.svg)
-![ML](https://img.shields.io/badge/ML-TensorFlow.js-ff6f00.svg)
+![Status](https://img.shields.io/badge/status-Active-green.svg)
 
-**Solução integrada e de código aberto para processamento de dados geoespaciais, incluindo detecção automática de edificações via inteligência artificial e processamento avançado de documentos PDF.**
-
----
-
-## 🎯 Características Principais
-
-### 🗺️ **Vetorizador de Edificações**
-
-Detecta e vetoriza edificações automaticamente a partir de imagens de satélite com **IA integrada aos 100 exemplos coletados**.
-
-**Tecnologia:**
-- ✅ **WebAssembly (Rust)** para processamento rápido de imagens
-- ✅ **Detecção de bordas** via Sobel + binarização Otsu adaptativa
-- ✅ **DBSCAN clustering** para filtragem de ruído
-- ✅ **TensorFlow.js** para ML local
-- ✅ **Aprendizado contínuo** - Modelo retreina automaticamente a cada 100 exemplos
-- ✅ **100% Client-Side** - Sem servidores intermediários
-- ✅ **Offline-First** - Firebase Firestore com sincronização automática
-
-**Outputs:**
-- 📦 Shapefile (compatível com ArcGIS, QGIS)
-- 📊 GeoJSON com propriedades (área, qualidade, coordenadas)
-- 📈 Score de qualidade 0-100 para cada polígono
-
-### 📄 **Processador de PDF**
-
-Suite completa para manipulação de arquivos PDF em uma única plataf​orma.
-
-**Ferramentas Incluídas:**
-1. ✂️ **Dividir PDF** - Separa PDFs em páginas individuais
-2. 🔗 **Unir PDF** - Mescla múltiplos PDFs em um
-3. 📌 **Dividir Apenas** - Extrai páginas específicas
-4. 🖼️ **JPG para PDF** - Converte imagens em PDF
-5. 📸 **PDF para JPG** - Extrai páginas como imagens
-6. 🗺️ **PDF para ArcGIS** - Converte para formatos GIS
+Solução corporativa integrada que consolida, em um único aplicativo, a **Ferramenta Vetorizadora de Edificações** e o **PDFSpliter**, com o módulo **PDFtoArcGIS** como elo estratégico entre documentação técnica e inteligência territorial.
 
 ---
 
-## 🚀 Começar Rapidamente
+## Visão Geral
 
-### 1. **Instalação**
+O aplicativo é estruturado em dois blocos de alto impacto operacional:
 
-```bash
-git clone https://github.com/marcosnunes/Vetorizador-Javascript.git
-cd Vetorizador-Javascript
-npm install
-```
+- **Vetorizador de Edificações**: acelera levantamentos geoespaciais com padrão e rastreabilidade.
+- **PDFSpliter**: padroniza e automatiza o ciclo documental, da organização à extração de informações geográficas.
 
-### 2. **Executar Localmente**
+A proposta é centralizar fluxos críticos em um ambiente único, elevando produtividade, governança e previsibilidade operacional.
 
-```bash
-npm run dev
-```
-Acesse: `http://localhost:8080`
+### Posicionamento para Apresentação Organizacional
 
-### 3. **Deploy no Vercel**
+- **Pilar 1 — Vetorizador**: maior velocidade e consistência na produção de dados territoriais.
+- **Pilar 2 — PDFSpliter**: redução de esforço manual e padronização documental em escala.
+- **Destaque Estratégico — PDFtoArcGIS**: converte documentos em informação geoespacial acionável para decisão.
 
-```bash
-npm run build
-vercel deploy
-```
+### Resumo Executivo (30 segundos)
+
+Esta solução integra, em uma única plataforma, duas frentes essenciais da operação: a **Vetorização de Edificações** e o **PDFSpliter**. Com o **PDFtoArcGIS**, documentos técnicos deixam de ser passivo operacional e passam a gerar dados geoespaciais utilizáveis em planejamento, fiscalização e gestão. O ganho direto para a organização é aumento de produtividade, padronização de processos, redução de retrabalho e maior segurança na tomada de decisão.
 
 ---
 
-## 📊 Demonstração
+## Módulos do Aplicativo
 
-### Fluxo do Vetorizador
+### Vetorizador de Edificações
 
-```
-1. Abra o mapa
-2. Selecione um preset (Urbano, Rural, Industrial)
-3. Desenhe uma área no mapa
-4. Aguarde processamento (~2-5 segundos)
-5. Clique nos polígonos detectados para feedback
-6. Exporte como Shapefile ou GeoJSON
-```
+- Produção acelerada de dados territoriais com padrão técnico.
+- Controle de qualidade automatizado com apoio à validação humana.
+- Geração de entregáveis geoespaciais para integração com SIG.
+- Rastreabilidade do processo de análise e revisão.
 
-### Exemplo de Resultado
+### Processador de PDF
 
-| Input | Output |
-|-------|--------|
-| Imagem de satélite 500x500px | 45-120 polígonos detectados |
-| Tempo de processamento | 2-5 segundos |
-| Taxa de precisão | 94-97% (após 100 exemplos de feedback) |
-| Compatibilidade | ArcGIS, QGIS, Google Earth |
+- **Organização Documental**: divisão e consolidação de arquivos com rapidez e padronização.
+- **Conversões Operacionais**: fluxos PDF↔imagem para demandas administrativas e técnicas.
+- **PDFtoArcGIS**: transformação de conteúdo técnico em dados geográficos prontos para uso institucional.
 
 ---
 
-## 💡 Casos de Uso
+## Recursos-Chave
 
-### **Para Empresas**
-- 🏛️ Prefeituras: Atualização cadastral automática
-- 🏦 Bancos: Avaliação de propriedades em massa
-- 🏢 Fundos Imobiliários: Análise de portfolio
-- 📍 Tecnologia: Integração com plataformas GIS
+### Eficiência Operacional e Escala
 
-### **Para Profissionais**
-- 📐 Engenheiros: Levantamento topográfico rápido
-- 🗺️ Cartógrafos: Digitação de mapas acelerada
-- 📊 Analistas: Processamento de grande volume de PDFs
-- 🎓 Pesquisadores: Base de dados de edificações
+- Redução de tempo de ciclo em atividades de vetorização e tratamento documental.
+- Maior capacidade de atendimento sem aumento proporcional de estrutura.
+- Continuidade operacional mesmo em cenários de conectividade limitada.
 
----
+### Qualidade, Padronização e Confiabilidade
 
-## ⚙️ Arquitetura
+- Critérios objetivos de qualidade para reduzir inconsistências e retrabalho.
+- Entregáveis padronizados para consumo institucional e auditoria técnica.
+- Maior confiabilidade dos dados para planejamento e decisões executivas.
 
-### Stack Tecnológico
+### Governança de Melhoria Contínua
 
-```
-┌─ Frontend (JavaScript/HTML5)
-│  ├─ Leaflet.js (mapeamento)
-│  ├─ TensorFlow.js (ML)
-│  └─ Turf.js (geospatial)
-│
-├─ Backend (100% Client-Side)
-│  ├─ WebAssembly (Rust - image processing)
-│  └─ IndexedDB (local storage)
-│
-├─ Cloud (Opcional)
-│  └─ Firebase (Firestore + Authentication)
-│
-└─ Output
-   └─ Shapefile / GeoJSON / PDF
-```
+- Processo estruturado de feedback para evolução controlada da operação.
+- Acúmulo de histórico para gestão de desempenho e aprendizado organizacional.
+- Base de dados preparada para ciclos de aprimoramento e inovação.
 
-### Tecnologias Principais
+### Integração e Aproveitamento do Ecossistema Atual
 
-| Componente | Tecnologia | Propósito |
-|-----------|-----------|----------|
-| **Vetorização** | Rust + WebAssembly | Detecção de bordas rápida |
-| **UI/Mapa** | Leaflet.js | Interação com mapa |
-| **Geoespacial** | Turf.js | Cálculos geoespaciais |
-| **ML** | TensorFlow.js | Modelo retrainável local |
-| **PDF** | PDF.js / JSZip | Processamento de documentos |
-| **Storage** | IndexedDB / Firebase | Persistência de dados |
-| **Build** | Vite | Build tool rápido |
+- Compatibilidade com ferramentas GIS já adotadas pela organização.
+- Integração do fluxo documental com o fluxo geoespacial em uma única jornada.
+- Menor fricção de adoção pelas equipes e maior reaproveitamento de ativos existentes.
 
 ---
 
-## 🎮 Interface
+## Fluxo Operacional
 
-### Vetorizador
-- 🗺️ Mapa interativo com Leaflet
-- 🎯 Controles de zoom e desenho
-- ⚙️ Painel de parâmetros avançados
-- 📊 Dashboard de estatísticas em tempo real
-- 🧠 Indicador de progresso de aprendizado
+### 1) Vetorização
 
-### PDF
-- 📱 Menu lateral com ferramentas
-- 📤 Upload inteligente de arquivos
-- 🔄 Processamento background
-- 💾 Download automático de resultados
+1. Selecione a área de interesse no mapa.
+2. Execute a vetorização automática.
+3. Revise os polígonos por score e qualidade.
+4. Ajuste/valide quando necessário.
+5. Exporte os resultados geoespaciais.
 
----
+### 2) Processamento de PDF
 
-## 📱 Responsividade
-
-✅ **Desktop** - Largura completa, layout otimizado
-✅ **Tablet** - Interface adaptada com abas compactadas
-✅ **Mobile** - Touch-friendly com controles maiores
+1. Escolha o módulo (Dividir, Unir, converter etc.).
+2. Carregue os documentos.
+3. Execute o processamento.
+4. Baixe os arquivos gerados.
 
 ---
 
-## 🔐 Privacidade & Segurança
+## Estrutura Funcional do Projeto
 
-- ✅ 100% processamento local (sem dados enviados a servidores)
-- ✅ Pré-processamento no navegador (IndexedDB local)
-- ✅ Firebase opcional apenas para sincronização
-- ✅ Sem rastreamento de usuário
-- ✅ GDPR compliant
-
----
-
-## 📈 Performance
-
-| Métrica | Valor |
-|---------|-------|
-| **Tempo de inicialização** | <2s |
-| **Processamento de imagem** | 2-5s por área |
-| **Tamanho do bundle** | ~3.2MB (comprimido) |
-| **Memory footprint** | 150-200MB (máximo) |
-| **Suporte simultâneo** | Ilimitado (client-side) |
-
----
-
-## 🛠️ Desenvolvimento
-
-### Estrutura de Arquivos
-
-```
+```text
 .
-├── app.js                    # Lógica principal do vetorizador
-├── index.html                # Interface principal (com abas integradas)
-├── style.css                 # Estilos gerais
-├── continuous-learning.js    # Sistema de aprendizado contínuo
-├── ml-training.js            # Treinamento de modelos
-├── firestore-service.js      # Sincronização Firebase
-├── offline-queue.js          # Fila de operações offline
+├── app.js
+├── index.html
+├── style.css
+├── auto-inference.js
+├── continuous-learning.js
+├── ml-training.js
+├── firebase-config.js
+├── firestore-service.js
+├── offline-queue.js
 ├── vetoriza/
-│  ├── src/lib.rs            # Código Rust para WASM
-│  └── pkg/                   # WASM compilado
-├── pdfspliter/              # Ferramenta de PDF independente
-└── dist/                    # Build para produção
-```
-
-### Workflow de Desenvolvimento
-
-```bash
-# Desenvolvimento
-npm run dev              # Watch mode com Vite
-
-# Build WASM (se modificar Rust)
-cd vetoriza
-wasm-pack build --target no-modules --release
-
-# Build para produção
-npm run build
-
-# Deploy
-vercel deploy --prod
+│   ├── src/
+│   └── pkg/
+└── pdfspliter/
+    ├── Dividir/
+    ├── DividirApenas/
+    ├── UnirPDF/
+    ├── PDFtoJPG/
+    ├── JPGtoPDF/
+    ├── PDFtoArcgis/
+    └── index.html
 ```
 
 ---
 
-## 🔄 Ciclo de Aprendizado
+## Segurança e Privacidade
 
-O sistema implementa aprendizado contínuo automático:
-
-```
-Usuário marca feedback (✅/❌/✏️)
-          ↓
-Armazenado em IndexedDB
-          ↓
-A cada 100 exemplos coletados
-          ↓
-Modelo é retreinado (TensorFlow.js)
-          ↓
-Próxima vetorização usa modelo melhorado
-```
-
-**Resultado:** A cada ciclo, precisão aumenta 2-5% 📈
+- Processamento de arquivos e imagens realizado localmente.
+- Sem dependência obrigatória de upload para processamento básico.
+- Camadas de armazenamento e sincronização quando aplicável.
 
 ---
 
-## 🚀 Deploy
+## Casos de Uso
 
-### Vercel (Recomendado)
-
-```bash
-vercel deploy --prod
-```
-
-### Firebase Hosting
-
-```bash
-firebase init hosting
-firebase deploy
-```
-
-### Seu servidor
-
-```bash
-npm run build
-# Copie pasta /dist para seu servidor web
-```
+- Cadastro e atualização de base imobiliária.
+- Auditoria e análise patrimonial.
+- Preparação de dados para SIG corporativo.
+- Fluxos documentais com divisão, fusão e conversão de PDFs.
+- Extração geoespacial de documentos técnicos.
 
 ---
 
-## 📊 Métricas de Negócio
+## Roadmap
 
-| Métrica | Ganho com Suite |
-|---------|-----------------|
-| Produtividade | +700% |
-| Tempo de treinamento | -95% |
-| Taxa de erro | -75% |
-| Custo operacional | -80% |
-| ROI | 30 dias |
+- Evolução da inferência automática no vetorizador.
+- Melhoria contínua da validação geoespacial no PDF para ArcGIS.
+- Expansão de métricas e observabilidade operacional.
 
 ---
 
-## 🤝 Contribuição
+## Suporte
 
-Contribuições são bem-vindas! 
-
-```bash
-git checkout -b feature/sua-feature
-git commit -m 'Add: nova feature'
-git push origin feature/sua-feature
-```
+- [GitHub Issues](https://github.com/marcosnunes/Vetorizador-Javascript/issues)
 
 ---
 
-## 📝 Licença
+## Contato
 
-MIT License - veja [LICENSE](LICENSE) para detalhes
-
----
-
-## 👤 Autor
-
-**Marcos Roberto Nunes Lindolpho**
-
-- LinkedIn: [marcos-lindolpho](https://linkedin.com/in/marcos-lindolpho)
-- GitHub: [@marcosnunes](https://github.com/marcosnunes)
-- Email: marcos@example.com
+- Email: [marcos.nunes.lph@outlook.com](mailto:marcos.nunes.lph@outlook.com)
+- Telefone: 41 9 98530 7378
+- LinkedIn: [www.linkedin.com/in/marcos-nunes-lph](https://www.linkedin.com/in/marcos-nunes-lph)
 
 ---
 
-## 🎉 Agradecimentos
+## Licença
 
-- Leaflet.js pela excelente biblioteca de mapas
-- Turf.js pela análise geoespacial
-- TensorFlow.js pelo machine learning no navegador
-- Comunidade open source
+MIT
 
 ---
 
-## 📞 Suporte
-
-Enfrente problemas? 
-
-- 📖 Leia a [documentação](./docs/)
-- 🐛 Abra uma [issue no GitHub](https://github.com/marcosnunes/Vetorizador-Javascript/issues)
-- 💬 Encontre ajuda nas [Discussions](https://github.com/marcosnunes/Vetorizador-Javascript/discussions)
-
----
-
-**Suite de Ferramentas Geoespaciais v1.0** 🚀
-
-*Feito com ❤️ para a comunidade de dados geoespaciais*
+Desenvolvido por Marcos Roberto Nunes Lindolpho © 2026

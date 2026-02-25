@@ -172,8 +172,37 @@ function sincronizarControle(sliderId, inputId, configKey, formatter = (v) => v.
   });
 }
 
+function inicializarToggleMenuLateral() {
+  const mainContainer = document.querySelector('#vetorizador-content .main-container');
+  const toggleButton = document.getElementById('sidebar-toggle');
+
+  if (!mainContainer || !toggleButton) return;
+
+  const atualizarEstadoBotao = (colapsado) => {
+    toggleButton.textContent = colapsado ? '▶' : '◀';
+    toggleButton.setAttribute('aria-expanded', String(!colapsado));
+    toggleButton.setAttribute('aria-label', colapsado ? 'Exibir menu lateral' : 'Ocultar menu lateral');
+    toggleButton.title = colapsado ? 'Exibir menu lateral' : 'Ocultar menu lateral';
+  };
+
+  atualizarEstadoBotao(false);
+
+  toggleButton.addEventListener('click', () => {
+    const colapsado = mainContainer.classList.toggle('sidebar-collapsed');
+    atualizarEstadoBotao(colapsado);
+
+    if (window.map) {
+      setTimeout(() => {
+        window.map.invalidateSize();
+      }, 320);
+    }
+  });
+}
+
 // Inicializa listeners dos controles
 window.addEventListener('DOMContentLoaded', () => {
+  inicializarToggleMenuLateral();
+
   sincronizarControle('edgeThreshold', 'edgeThresholdInput', 'edgeThreshold', v => v.toFixed(0));
   sincronizarControle('morphologySize', 'morphologySizeInput', 'morphologySize', v => v.toFixed(0));
   sincronizarControle('minArea', 'minAreaInput', 'minArea', v => v.toFixed(0));

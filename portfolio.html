@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portfólio | Ferramenta Vetorizadora + PDFSpliter</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #131a2e;
+      --panel-2: #19233d;
+      --text: #e6ebff;
+      --muted: #aeb8d9;
+      --accent: #4da3ff;
+      --accent-2: #61d5b8;
+      --border: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+      background: radial-gradient(circle at top right, #1a2546 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    .wrap {
+      width: min(1100px, 92vw);
+      margin: 0 auto;
+      padding: 36px 0 48px;
+    }
+
+    .hero {
+      background: linear-gradient(145deg, rgba(77, 163, 255, 0.12), rgba(97, 213, 184, 0.1));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 14px 28px rgba(0, 0, 0, 0.25);
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(26px, 3.2vw, 40px);
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      margin: 0;
+      font-size: 17px;
+      color: var(--muted);
+      max-width: 880px;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .btn {
+      text-decoration: none;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), #2a7fe0);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 11px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 14px;
+      transition: transform 0.15s ease, filter 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn.secondary {
+      background: linear-gradient(135deg, var(--accent-2), #2cb093);
+    }
+
+    .btn.ghost {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.05);
+    }
+
+    .grid {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+    }
+
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .section {
+      margin-top: 28px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+    }
+
+    .section h3 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+
+    .section p,
+    .section li {
+      color: var(--muted);
+    }
+
+    .section ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    footer {
+      margin-top: 28px;
+      color: #93a2d8;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .portfolio-contact {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px 14px;
+    }
+
+    .portfolio-contact a {
+      color: #c3d4ff;
+      text-decoration: none;
+    }
+
+    .portfolio-contact a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 680px) {
+      .hero {
+        padding: 20px;
+      }
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="badge-row">
+        <span class="badge">Portfólio Institucional</span>
+        <span class="badge">Ferramenta Vetorizadora</span>
+        <span class="badge">PDFSpliter</span>
+        <span class="badge">PDFtoArcGIS</span>
+      </div>
+
+      <h1>Ferramenta Vetorizadora + PDFSpliter com PDFtoArcGIS</h1>
+      <p class="subtitle">
+        Plataforma corporativa para transformar documentação e análise territorial em decisões rápidas, padronizadas e
+        auditáveis. Unifica vetorização geoespacial e automação documental em uma única jornada operacional.
+      </p>
+
+      <div class="cta-row">
+        <a class="btn" href="index.html">Abrir Aplicativo Integrado</a>
+        <a class="btn secondary" href="pdfspliter/index.html">Abrir PDFSpliter</a>
+        <a class="btn ghost" href="pdfspliter/PDFtoArcgis/index.html">Abrir PDFtoArcGIS</a>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Eficiência Operacional</h2>
+        <p>Reduz tempo de ciclo e retrabalho nas frentes de vetorização e tratamento documental.</p>
+      </article>
+      <article class="card">
+        <h2>Padronização e Qualidade</h2>
+        <p>Aplica critérios consistentes de qualidade, com entregáveis confiáveis para uso institucional.</p>
+      </article>
+      <article class="card">
+        <h2>Integração com SIG</h2>
+        <p>Gera saídas compatíveis com ecossistema GIS, conectando documento técnico à inteligência territorial.</p>
+      </article>
+      <article class="card">
+        <h2>Governança e Evolução</h2>
+        <p>Permite rastreabilidade, histórico de operação e base estruturada para melhoria contínua.</p>
+      </article>
+    </section>
+
+    <section class="section">
+      <h3>Resumo Executivo</h3>
+      <p>
+        Esta solução integra duas frentes essenciais: vetorização de edificações e automação documental. Com o
+        PDFtoArcGIS, informações de documentos passam a gerar dados geoespaciais acionáveis para planejamento,
+        fiscalização e gestão. O resultado direto é produtividade, previsibilidade e suporte à decisão em nível
+        organizacional.
+      </p>
+    </section>
+
+    <section class="section">
+      <h3>Principais Casos de Uso</h3>
+      <ul>
+        <li>Cadastro e atualização de base imobiliária.</li>
+        <li>Auditoria territorial e análise patrimonial.</li>
+        <li>Conversão e organização documental em escala.</li>
+        <li>Extração geográfica de documentos técnicos para operação SIG.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <div>Desenvolvido por Marcos Roberto Nunes Lindolpho © 2026</div>
+      <div class="portfolio-contact">
+        <a href="mailto:marcos.nunes.lph@outlook.com">marcos.nunes.lph@outlook.com</a>
+        <a href="tel:+55419985307378">41 9 98530 7378</a>
+        <a href="https://www.linkedin.com/in/marcos-nunes-lph" target="_blank" rel="noopener noreferrer">www.linkedin.com/in/marcos-nunes-lph</a>
+      </div>
+    </footer>
+  </main>
+</body>
+
+</html>

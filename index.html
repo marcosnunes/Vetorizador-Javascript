@@ -18,6 +18,7 @@
 </head>
 
 <body>
+  <div class="header-hover-zone" aria-hidden="true"></div>
   <!-- HEADER COM GUIAS -->
   <div class="unified-header">
     <div class="unified-tabs" role="tablist" aria-label="Navegação principal">
@@ -290,6 +291,11 @@
               Resultados</button>
           </div>
         </div>
+
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Ocultar menu lateral"
+          aria-expanded="true" title="Ocultar/exibir menu lateral">
+          ◀
+        </button>
       </div>
     </div>
 
@@ -299,8 +305,16 @@
     </div>
   </div>
 
-  <footer>
-    <p>Desenvolvido por Marcos Lindolpho</p>
+  <footer class="app-footer">
+    <div class="app-footer-main">
+      <a class="portfolio-link" href="portfolio.html">Portifolio</a>
+      <span>Desenvolvido por Marcos Roberto Nunes Lindolpho © 2026</span>
+    </div>
+    <div class="app-footer-contact">
+      <a href="mailto:marcos.nunes.lph@outlook.com">marcos.nunes.lph@outlook.com</a>
+      <a href="tel:+55419985307378">41 9 98530 7378</a>
+      <a href="https://www.linkedin.com/in/marcos-nunes-lph" target="_blank" rel="noopener noreferrer">www.linkedin.com/in/marcos-nunes-lph</a>
+    </div>
   </footer>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
