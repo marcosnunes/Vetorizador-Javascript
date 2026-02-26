@@ -535,7 +535,20 @@ function extractUtmVerticesByRegex(rawText) {
       continue;
     }
 
-    const rowMatch = line.match(/(?:^|\s)([A-Z0-9.-]{1,12})?\s*(-?\d{5,8}(?:[.,]\d{1,4})?)\s+(?:-?\d{5,8}(?:[.,]\d{1,4})?\s+)?(-?\d{5,8}(?:[.,]\d{1,4})?)(?:\s|$)/i);
+    const rowPatterns = [
+      /(?:^|\s)([A-Z0-9.-]{1,12})\s+(-?\d{6,8}(?:[.,]\d{1,4})?)\s+(-?\d{5,7}(?:[.,]\d{1,4})?)(?:\s|$)/i,
+      /(?:^|\s)([A-Z0-9.-]{1,12})\s+(-?\d{5,7}(?:[.,]\d{1,4})?)\s+(-?\d{6,8}(?:[.,]\d{1,4})?)(?:\s|$)/i,
+      /(?:^|\s)([A-Z0-9.-]{1,12})?\s*(-?\d{5,8}(?:[.,]\d{1,4})?)\s+(?:-?\d{5,8}(?:[.,]\d{1,4})?\s+)?(-?\d{5,8}(?:[.,]\d{1,4})?)(?:\s|$)/i
+    ];
+
+    let rowMatch = null;
+    for (const pattern of rowPatterns) {
+      const candidate = line.match(pattern);
+      if (candidate) {
+        rowMatch = candidate;
+        break;
+      }
+    }
     if (!rowMatch) continue;
 
     const id = (rowMatch[1] || `V${String(autoId).padStart(3, '0')}`).trim();
@@ -1424,6 +1437,37 @@ let fileNameBase = "coordenadas_extracao";
 let pdfOrigemNomeBase = "";
 let pdfOrigemSrc = "";
 
+const PDF_EXTRACTION_PROFILES = [
+  { match: '5346e3e5ca054a65bf3e95f5981e0a39 1', forceOcrAllPages: true, notes: 'Teste escaneado sem camada textual útil' },
+  { match: '57942acd96ac4b908f10582050f067b0 1', forceOcrAllPages: true, notes: 'Teste escaneado sem camada textual útil' },
+  { match: 'me 047 - 8.402 - 113,5619', forceOcrAllPages: true, notes: 'Memorial com baixa extração textual por PDF.js' },
+  { match: 'me 047 - 8.480 - 5,8937', forceOcrAllPages: true, notes: 'Memorial com baixa extração textual por PDF.js' },
+  { match: 'me_171 - m_31644', forceOcrAllPages: true, notes: 'Documento com texto quase todo rasterizado' },
+  { match: 'me_171 - m_31645', forceOcrAllPages: true, notes: 'Documento com texto quase todo rasterizado' },
+  { match: 'memoriais descritivos e plantas assinados 1', forceOcrAllPages: true, notes: 'Coleção de plantas/PDF híbrido com baixa camada textual' },
+  { match: 'memorial mat. 3039', forceOcrAllPages: true, notes: 'Extração textual praticamente nula' }
+];
+
+function normalizeDocName(fileName) {
+  return String(fileName || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\.pdf$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getPdfExtractionProfile(fileName) {
+  const normalized = normalizeDocName(fileName);
+  const matched = PDF_EXTRACTION_PROFILES.find((profile) => normalized.includes(profile.match));
+
+  return {
+    forceOcrAllPages: Boolean(matched?.forceOcrAllPages),
+    notes: matched?.notes || 'Perfil padrão (OCR somente em página sem texto)'
+  };
+}
+
 // Resultados por matrícula no PDF unificado.
 let documentsResults = [];
 let activeDocIndex = -1;
@@ -2189,6 +2233,7 @@ function displayResults() {
 fileInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
+  const extractionProfile = getPdfExtractionProfile(file.name);
 
   // Reset de UI e estado
   fileNameBase = file.name.replace(/\.[^/.]+$/, "");
@@ -2214,6 +2259,9 @@ fileInput.addEventListener("change", async (event) => {
 
   try {
     updateStatus("📄 Carregando PDF...", "info");
+    if (typeof displayLogMessage === 'function') {
+      displayLogMessage(`[PDFtoArcgis][LogUI] 🧭 Perfil de extração: ${extractionProfile.notes}`);
+    }
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer), ignoreEncryption: true }).promise;
     const pagesText = [];
@@ -2234,15 +2282,17 @@ fileInput.addEventListener("change", async (event) => {
         const pageText = await extractPageTextSafely(page, i);
         const preparedPageText = prepareTextForExtraction(pageText).regexBase;
 
-        // OCR apenas quando texto extraído é inexistente/insuficiente
+        // OCR por padrão apenas com texto vazio; perfis calibrados podem forçar OCR
         let safeText = preparedPageText || "";
         const hasSignal = hasCoordinateSignal(safeText);
-        const shouldRunOcr = !safeText.trim() || safeText.trim().length < 80;
+        const shouldRunOcr = extractionProfile.forceOcrAllPages || !safeText.trim();
 
         if (shouldRunOcr) {
           document.getElementById("progressLabel").innerText = `OCR da página ${i}/${pdf.numPages}...`;
           if (typeof displayLogMessage === 'function') {
-            const reason = safeText.trim() ? 'texto insuficiente' : 'texto vazio';
+            const reason = extractionProfile.forceOcrAllPages
+              ? 'perfil calibrado (OCR forçado por documento)'
+              : 'texto vazio';
             displayLogMessage(`[PDFtoArcgis][LogUI] 🔍 Página ${i}: OCR (${reason})`);
           }
           const ocrText = await performOcrOnPage(page, i);
