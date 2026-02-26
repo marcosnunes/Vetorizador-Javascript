@@ -667,7 +667,9 @@ ${text}`;
     }
 
     if (fallback.mode === 'relativo' && fallback.vertices?.length) {
-      relativeResult = { modo: 'relativo', vertices: fallback.measures || [] };
+      if (!relativeResult) {
+        relativeResult = { modo: 'relativo', vertices: fallback.measures || [] };
+      }
       if (typeof displayLogMessage === 'function') {
         displayLogMessage(`[PDFtoArcgis][LogUI] 🛟 Página ${pageNumber}: fallback regex Azimute/Distância`);
       }
@@ -887,8 +889,10 @@ ${text}`;
       }
       
       if (parsed?.modo === "relativo" || parsed?.relative === true) {
-        relativeResult = parsed;
-        break;
+        if (!relativeResult) {
+          relativeResult = parsed;
+        }
+        continue;
       }
 
       const hasLatLon = Array.isArray(parsed?.vertices)
@@ -985,8 +989,6 @@ ${text}`;
     const fullTextFallback = runRegexFallback(pagesText.join('\n\n'));
     applyFallback(fullTextFallback, 'consolidado');
   }
-  
-  if (relativeResult) return relativeResult;
 
   if (latLonResults.length > 0) {
     const mergedLatLon = mergeLatLonFromChunks(latLonResults);
@@ -1018,6 +1020,8 @@ ${text}`;
       vertices: orderedVertices
     };
   }
+
+  if (relativeResult) return relativeResult;
   
   return null;
 }
