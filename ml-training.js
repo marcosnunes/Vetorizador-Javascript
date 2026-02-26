@@ -31,6 +31,10 @@ function obterConfigTreinamento(feature, run) {
   };
 }
 
+function obterRotuloFeedback(feedback) {
+  return feedback?.label || feedback?.status || feedback?.feedbackStatus || 'neutro';
+}
+
 
 // Estrutura do modelo neural
 async function criarModeloML() {
@@ -157,10 +161,12 @@ function prepararDatasetTreinamento(dataset) {
       ]);
 
       // Criar saída: qualidade predita (feedback label)
+      const rotuloFeedback = obterRotuloFeedback(fb);
+
       let qualidadeAlvo = 0.5; // padrão
-      if (fb.label === 'aprovado') qualidadeAlvo = 0.9;      // Muito bom
-      else if (fb.label === 'editado') qualidadeAlvo = 0.7;  // Corrigível
-      else if (fb.label === 'rejeitado') qualidadeAlvo = 0.2; // Ruim
+      if (rotuloFeedback === 'aprovado' || rotuloFeedback === 'correto') qualidadeAlvo = 0.9;      // Muito bom
+      else if (rotuloFeedback === 'editado') qualidadeAlvo = 0.7;                                   // Corrigível
+      else if (rotuloFeedback === 'rejeitado') qualidadeAlvo = 0.2;                                 // Ruim
 
       // Ajustes recomendados baseados em feedback
       const ajustesRecomendados = recomendarAjustes(feature, fb, run);
@@ -190,8 +196,9 @@ function prepararDatasetTreinamento(dataset) {
 
 // Recomendar ajustes baseado em feedback
 function recomendarAjustes(feature, feedback, run) {
-  const multiplier = feedback.label === 'rejeitado' ? 0.8 : 
-                     feedback.label === 'editado' ? 0.95 : 1.0;
+  const rotuloFeedback = obterRotuloFeedback(feedback);
+  const multiplier = rotuloFeedback === 'rejeitado' ? 0.8 : 
+                     rotuloFeedback === 'editado' ? 0.95 : 1.0;
 
   const config = obterConfigTreinamento(feature, run);
 
@@ -221,7 +228,7 @@ async function treinarModeloML(dataset) {
 
   try {
     // Preparar tensores
-    const xs = window.tf.concat(exemplos.map(ex => ex.entrada));
+    const xs = window.tf.stack(exemplos.map(ex => ex.entrada));
     const ys = window.tf.stack(exemplos.map(ex => ex.saida));
 
     // Treinar modelo com callbacks para UI
