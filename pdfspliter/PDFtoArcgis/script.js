@@ -465,7 +465,9 @@ function isValidLatLon(lat, lon) {
 }
 
 function extractUtmVerticesByRegex(rawText) {
-  const text = normalizeExtractionText(rawText);
+  const prepared = prepareTextForExtraction(rawText);
+  const text = normalizeExtractionText(prepared.regexBase);
+  const lineSource = prepared.normalized || '';
   const vertices = [];
   const seen = new Set();
   let autoId = 1;
@@ -513,6 +515,31 @@ function extractUtmVerticesByRegex(rawText) {
   while ((lineMatch = lineRegex.exec(text)) !== null) {
     const id = (lineMatch[1] || `V${String(autoId).padStart(3, '0')}`).trim();
     const pair = inferUtmPair(lineMatch[2], lineMatch[3]);
+    if (!pair) continue;
+
+    const key = `${pair.east.toFixed(3)}|${pair.north.toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    vertices.push({ id, east: pair.east, north: pair.north, ordem: vertices.length + 1 });
+    autoId++;
+  }
+
+  const lines = lineSource
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  for (const line of lines) {
+    if (/^(NORTE|ESTE|COORDENADAS?|AZIMUTE|DIST[ÂA]NCIA|V[ÉE]RTICES?)\b/i.test(line)) {
+      continue;
+    }
+
+    const rowMatch = line.match(/(?:^|\s)([A-Z0-9.-]{1,12})?\s*(-?\d{5,8}(?:[.,]\d{1,4})?)\s+(?:-?\d{5,8}(?:[.,]\d{1,4})?\s+)?(-?\d{5,8}(?:[.,]\d{1,4})?)(?:\s|$)/i);
+    if (!rowMatch) continue;
+
+    const id = (rowMatch[1] || `V${String(autoId).padStart(3, '0')}`).trim();
+    const pair = inferUtmPair(rowMatch[2], rowMatch[3]);
     if (!pair) continue;
 
     const key = `${pair.east.toFixed(3)}|${pair.north.toFixed(3)}`;
@@ -2207,13 +2234,15 @@ fileInput.addEventListener("change", async (event) => {
         const pageText = await extractPageTextSafely(page, i);
         const preparedPageText = prepareTextForExtraction(pageText).regexBase;
 
-        // Se a página estiver vazia/escaneada, apenas mantém o texto vazio (não faz OCR)
+        // OCR apenas quando texto extraído é inexistente/insuficiente
         let safeText = preparedPageText || "";
         const hasSignal = hasCoordinateSignal(safeText);
-        if (!safeText.trim() || !hasSignal) {
+        const shouldRunOcr = !safeText.trim() || safeText.trim().length < 80;
+
+        if (shouldRunOcr) {
           document.getElementById("progressLabel").innerText = `OCR da página ${i}/${pdf.numPages}...`;
           if (typeof displayLogMessage === 'function') {
-            const reason = safeText.trim() ? 'sem padrao de coordenadas' : 'texto vazio';
+            const reason = safeText.trim() ? 'texto insuficiente' : 'texto vazio';
             displayLogMessage(`[PDFtoArcgis][LogUI] 🔍 Página ${i}: OCR (${reason})`);
           }
           const ocrText = await performOcrOnPage(page, i);
@@ -2225,18 +2254,15 @@ fileInput.addEventListener("change", async (event) => {
               displayLogMessage(`[PDFtoArcgis][LogUI] ✅ Página ${i}: OCR ok (${preparedOcrText.length} chars)`);
             }
           } else if (!hasSignal) {
-            safeText = "";
+            safeText = preparedPageText || "";
           }
         } else {
           if (typeof displayLogMessage === 'function') {
             displayLogMessage(`[PDFtoArcgis][LogUI] ✓ Página ${i}: texto ok (${safeText.length} chars)`);
           }
         }
-        if (safeText && !hasCoordinateSignal(safeText)) {
-          safeText = "";
-          if (typeof displayLogMessage === 'function') {
-            displayLogMessage(`[PDFtoArcgis][LogUI] ℹ️ Página ${i}: sem padrao de coordenadas`);
-          }
+        if (safeText && !hasCoordinateSignal(safeText) && typeof displayLogMessage === 'function') {
+          displayLogMessage(`[PDFtoArcgis][LogUI] ℹ️ Página ${i}: texto sem sinal forte de coordenadas (mantido para IA)`);
         }
         if (!safeText.trim()) emptyPages++;
         pagesText.push(safeText);
