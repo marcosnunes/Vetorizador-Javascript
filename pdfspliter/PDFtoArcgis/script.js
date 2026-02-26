@@ -96,11 +96,11 @@ function mergeVerticesFromChunks(chunksResults) {
       if (!Number.isFinite(east) || !Number.isFinite(north)) continue;
       if (!seen.has(key)) {
         seen.add(key);
-        merged.push({ id: v.id || id, este: east, norte: north });
+        merged.push({ id: v.id || id, este: east, norte: north, east, north });
       }
     }
   }
-  return merged;
+  return clusterUtmVertices(merged, 1.2);
 }
 
 function mergeLatLonFromChunks(chunksResults) {
@@ -116,13 +116,128 @@ function mergeLatLonFromChunks(chunksResults) {
       lat = Number(lat);
       lon = Number(lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-      const key = `${lat}|${lon}`;
+      const key = `${lat.toFixed(7)}|${lon.toFixed(7)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push({ id: v.id || '', lat, lon });
     }
   }
-  return merged;
+  return clusterLatLonVertices(merged, 0.8);
+}
+
+function prepareTextForExtraction(rawText) {
+  const source = String(rawText || '').replace(/\r/g, '\n');
+
+  const dehyphenated = source.replace(/([A-Za-zÀ-ÿ0-9])\s*-\s*\n\s*([A-Za-zÀ-ÿ0-9])/g, '$1$2');
+
+  const normalized = dehyphenated
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’`´]/g, "'")
+    .replace(/[º]/g, '°')
+    .replace(/[\t\f]+/g, ' ')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[ ]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const flattened = normalized.replace(/\n+/g, ' ').replace(/[ ]{2,}/g, ' ').trim();
+  const regexBase = `${normalized}\n${flattened}`.trim();
+
+  return { normalized, flattened, regexBase };
+}
+
+function getEastValue(vertex) {
+  const value = vertex?.east ?? vertex?.este;
+  return Number.isFinite(value) ? value : Number(value);
+}
+
+function getNorthValue(vertex) {
+  const value = vertex?.north ?? vertex?.norte;
+  return Number.isFinite(value) ? value : Number(value);
+}
+
+function clusterUtmVertices(vertices, toleranceMeters = 1.2) {
+  if (!Array.isArray(vertices) || vertices.length <= 1) return Array.isArray(vertices) ? vertices : [];
+
+  const clusters = [];
+  for (const vertex of vertices) {
+    const east = getEastValue(vertex);
+    const north = getNorthValue(vertex);
+    if (!Number.isFinite(east) || !Number.isFinite(north)) continue;
+
+    let attached = false;
+    for (const cluster of clusters) {
+      const dx = cluster.east - east;
+      const dy = cluster.north - north;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= toleranceMeters) {
+        const countBefore = cluster.points.length;
+        cluster.points.push(vertex);
+        cluster.east = (cluster.east * countBefore + east) / (countBefore + 1);
+        cluster.north = (cluster.north * countBefore + north) / (countBefore + 1);
+        attached = true;
+        break;
+      }
+    }
+
+    if (!attached) {
+      clusters.push({ east, north, points: [vertex] });
+    }
+  }
+
+  return clusters.map((cluster, index) => {
+    const first = cluster.points[0] || {};
+    return {
+      ...first,
+      id: first.id || `V${String(index + 1).padStart(3, '0')}`,
+      east: cluster.east,
+      north: cluster.north,
+      este: cluster.east,
+      norte: cluster.north,
+      ordem: index + 1
+    };
+  });
+}
+
+function clusterLatLonVertices(vertices, toleranceMeters = 0.8) {
+  if (!Array.isArray(vertices) || vertices.length <= 1) return Array.isArray(vertices) ? vertices : [];
+
+  const metersToDegrees = 1 / 111320;
+  const toleranceDegrees = toleranceMeters * metersToDegrees;
+  const clusters = [];
+
+  for (const vertex of vertices) {
+    const lat = Number(vertex?.lat);
+    const lon = Number(vertex?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    let attached = false;
+    for (const cluster of clusters) {
+      const dx = (cluster.lon - lon) * Math.cos((lat * Math.PI) / 180);
+      const dy = cluster.lat - lat;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= toleranceDegrees) {
+        const countBefore = cluster.points.length;
+        cluster.points.push(vertex);
+        cluster.lat = (cluster.lat * countBefore + lat) / (countBefore + 1);
+        cluster.lon = (cluster.lon * countBefore + lon) / (countBefore + 1);
+        attached = true;
+        break;
+      }
+    }
+
+    if (!attached) {
+      clusters.push({ lat, lon, points: [vertex] });
+    }
+  }
+
+  return clusters.map((cluster, index) => ({
+    ...(cluster.points[0] || {}),
+    id: cluster.points[0]?.id || `V${String(index + 1).padStart(3, '0')}`,
+    lat: cluster.lat,
+    lon: cluster.lon,
+    ordem: index + 1
+  }));
 }
 
 // Extrai o primeiro bloco JSON válido de respostas com markdown ou texto adicional.
@@ -327,7 +442,7 @@ function parseLocaleNumber(value) {
 }
 
 function normalizeExtractionText(rawText) {
-  let text = String(rawText || '').replace(/\r/g, '\n');
+  let text = prepareTextForExtraction(rawText).regexBase;
   text = text.replace(/\n{2,}/g, '\n');
   text = text.toUpperCase();
   text = text.replace(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)|-?\d+,\d+/g, (token) => {
@@ -357,8 +472,18 @@ function extractUtmVerticesByRegex(rawText) {
 
   const patterns = [
     /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)\s*([A-Z0-9.-]{1,12})[\s\S]{0,90}?(?:E(?:STE)?|L(?:ESTE)?|X)\s*[:=]?\s*(-?\d[\d.,]{4,})[\s\S]{0,90}?(?:N(?:ORTE)?|Y)\s*[:=]?\s*(-?\d[\d.,]{5,})/g,
+    /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)\s*([A-Z0-9.-]{1,12})[\s\S]{0,90}?(?:N(?:ORTE)?|Y)\s*[:=]?\s*(-?\d[\d.,]{5,})[\s\S]{0,90}?(?:E(?:STE)?|L(?:ESTE)?|X)\s*[:=]?\s*(-?\d[\d.,]{4,})/g,
     /(?:E(?:STE)?|L(?:ESTE)?|X)\s*[:=]?\s*(-?\d[\d.,]{4,})[\s\S]{0,60}?(?:N(?:ORTE)?|Y)\s*[:=]?\s*(-?\d[\d.,]{5,})/g
   ];
+
+  const inferUtmPair = (firstValue, secondValue) => {
+    const a = parseLocaleNumber(firstValue);
+    const b = parseLocaleNumber(secondValue);
+
+    if (isValidUtmCoordinate(a, b)) return { east: a, north: b };
+    if (isValidUtmCoordinate(b, a)) return { east: b, north: a };
+    return null;
+  };
 
   for (const regex of patterns) {
     regex.lastIndex = 0;
@@ -368,10 +493,10 @@ function extractUtmVerticesByRegex(rawText) {
       const id = hasId ? (match[1] || `V${String(autoId).padStart(3, '0')}`) : `V${String(autoId).padStart(3, '0')}`;
       const eastText = hasId ? match[2] : match[1];
       const northText = hasId ? match[3] : match[2];
-      const east = parseLocaleNumber(eastText);
-      const north = parseLocaleNumber(northText);
-
-      if (!isValidUtmCoordinate(east, north)) continue;
+      const pair = inferUtmPair(eastText, northText);
+      if (!pair) continue;
+      const east = pair.east;
+      const north = pair.north;
 
       const key = `${east.toFixed(3)}|${north.toFixed(3)}`;
       if (seen.has(key)) continue;
@@ -380,6 +505,22 @@ function extractUtmVerticesByRegex(rawText) {
       vertices.push({ id, east, north, ordem: vertices.length + 1 });
       autoId++;
     }
+  }
+
+  const lineRegex = /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)?\s*([A-Z0-9.-]{1,12})?\s*[;\t ]+(-?\d{5,8}(?:[.,]\d+)?)\s*[;\t ]+(-?\d{5,8}(?:[.,]\d+)?)/g;
+  lineRegex.lastIndex = 0;
+  let lineMatch;
+  while ((lineMatch = lineRegex.exec(text)) !== null) {
+    const id = (lineMatch[1] || `V${String(autoId).padStart(3, '0')}`).trim();
+    const pair = inferUtmPair(lineMatch[2], lineMatch[3]);
+    if (!pair) continue;
+
+    const key = `${pair.east.toFixed(3)}|${pair.north.toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    vertices.push({ id, east: pair.east, north: pair.north, ordem: vertices.length + 1 });
+    autoId++;
   }
 
   return vertices;
@@ -426,26 +567,32 @@ function extractAzimuthDistanceByRegex(rawText) {
   const vertices = [];
   let autoId = 1;
 
-  const regex = /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)?\s*([A-Z0-9.-]{0,12})[\s\S]{0,120}?(?:AZIMUTE|RUMO)\s*[:=]?\s*([0-9]{1,3}(?:[.,]\d+)?|[0-9]{1,3}\s*[°º]\s*[0-9]{1,2}\s*['’]\s*[0-9]{1,2}\s*["”]?)[\s\S]{0,120}?(?:DIST[ÂA]NCIA|DISTANCIA)\s*[:=]?\s*([0-9]{1,6}(?:[.,]\d+)?)/g;
+  const patterns = [
+    /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)?\s*([A-Z0-9.-]{0,12})[\s\S]{0,120}?(?:AZ\.?|AZIMUTE|RUMO)\s*[:=]?\s*([0-9]{1,3}(?:[.,]\d+)?|[0-9]{1,3}\s*[°º]\s*[0-9]{1,2}\s*['’]\s*[0-9]{1,2}\s*["”]?)[\s\S]{0,120}?(?:DIST\.?|DIST[ÂA]NCIA|DISTANCIA|D\s*=)\s*[:=]?\s*([0-9]{1,6}(?:[.,]\d+)?)/g,
+    /(?:^|\n|\s)([A-Z0-9.-]{0,12})\s+([0-9]{1,3}(?:[.,]\d+)?|[0-9]{1,3}\s*[°º]\s*[0-9]{1,2}\s*['’]\s*[0-9]{1,2}\s*["”]?)\s+([0-9]{1,6}(?:[.,]\d+)?)(?=\s|\n|$)/g
+  ];
 
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const id = (match[1] || `V${String(autoId).padStart(3, '0')}`).trim();
-    const azText = (match[2] || '').trim();
-    const dist = parseLocaleNumber(match[3]);
-    if (!Number.isFinite(dist) || dist <= 0) continue;
+  for (const regex of patterns) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const id = (match[1] || `V${String(autoId).padStart(3, '0')}`).trim();
+      const azText = (match[2] || '').trim();
+      const dist = parseLocaleNumber(match[3]);
+      if (!Number.isFinite(dist) || dist <= 0) continue;
 
-    const row = { id, distancia: dist };
-    if (/[°º]/.test(azText)) {
-      row.azimute_dms = azText;
-      row.azimute = parseDmsToDegrees(azText);
-    } else {
-      row.azimute = parseLocaleNumber(azText);
+      const row = { id, distancia: dist };
+      if (/[°º]/.test(azText)) {
+        row.azimute_dms = azText;
+        row.azimute = parseDmsToDegrees(azText);
+      } else {
+        row.azimute = parseLocaleNumber(azText);
+      }
+
+      if (!Number.isFinite(row.azimute)) continue;
+      vertices.push(row);
+      autoId++;
     }
-
-    if (!Number.isFinite(row.azimute)) continue;
-    vertices.push(row);
-    autoId++;
   }
 
   return vertices;
@@ -883,6 +1030,14 @@ function orderVerticesByProximity(vertices) {
   const remaining = [...vertices];
   
   // Começar pelo primeiro vértice
+  remaining.sort((a, b) => {
+    const ax = getEastValue(a);
+    const ay = getNorthValue(a);
+    const bx = getEastValue(b);
+    const by = getNorthValue(b);
+    return (ax - bx) || (ay - by);
+  });
+
   let current = remaining.shift();
   ordered.push(current);
   
@@ -892,9 +1047,13 @@ function orderVerticesByProximity(vertices) {
     let minDistance = Infinity;
     
     for (let i = 0; i < remaining.length; i++) {
+      const currE = getEastValue(current);
+      const currN = getNorthValue(current);
+      const nextE = getEastValue(remaining[i]);
+      const nextN = getNorthValue(remaining[i]);
       const dist = Math.sqrt(
-        Math.pow(remaining[i].east - current.east, 2) +
-        Math.pow(remaining[i].north - current.north, 2)
+        Math.pow(nextE - currE, 2) +
+        Math.pow(nextN - currN, 2)
       );
       
       if (dist < minDistance) {
@@ -908,10 +1067,53 @@ function orderVerticesByProximity(vertices) {
   }
   
   // Reindexar ordem
-  return ordered.map((v, idx) => ({
+  const deCrossed = uncrossPolygonPath(ordered);
+
+  return deCrossed.map((v, idx) => ({
     ...v,
+    east: getEastValue(v),
+    north: getNorthValue(v),
+    este: getEastValue(v),
+    norte: getNorthValue(v),
     ordem: idx + 1
   }));
+}
+
+function segmentCross(a, b, c, d) {
+  const orient = (p, q, r) => (q.east - p.east) * (r.north - p.north) - (q.north - p.north) * (r.east - p.east);
+  const p1 = { east: getEastValue(a), north: getNorthValue(a) };
+  const p2 = { east: getEastValue(b), north: getNorthValue(b) };
+  const p3 = { east: getEastValue(c), north: getNorthValue(c) };
+  const p4 = { east: getEastValue(d), north: getNorthValue(d) };
+
+  const o1 = orient(p1, p2, p3);
+  const o2 = orient(p1, p2, p4);
+  const o3 = orient(p3, p4, p1);
+  const o4 = orient(p3, p4, p2);
+
+  return (o1 * o2 < 0) && (o3 * o4 < 0);
+}
+
+function uncrossPolygonPath(vertices) {
+  if (!Array.isArray(vertices) || vertices.length < 4) return vertices;
+
+  const ordered = [...vertices];
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < ordered.length - 3; i++) {
+      for (let j = i + 2; j < ordered.length - 1; j++) {
+        if (segmentCross(ordered[i], ordered[i + 1], ordered[j], ordered[j + 1])) {
+          const middle = ordered.slice(i + 1, j + 1).reverse();
+          ordered.splice(i + 1, j - i, ...middle);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return ordered;
 }
 
 function hasCoordinateSignal(text) {
@@ -932,6 +1134,13 @@ function hasCoordinateSignal(text) {
 
   // Azimuth/Distance narrative
   if (/(azimute|rumo|dist[aâ]ncia)\s*[:=]?\s*\d+/i.test(t)) return true;
+
+  // Abreviações comuns em memoriais
+  if (/(\bAZ\.?\b|\bDIST\.?\b|\bD\s*=\s*\d)/i.test(t)) return true;
+
+  // Formato tabular com ID + dois números (E/N ou N/E sem rótulo)
+  if (/(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)[\s\-:]*[A-Z0-9.-]{0,12}[\s;,:-]{1,30}\d{5,8}(?:[.,]\d+)?[\s;,:-]{1,30}\d{5,8}(?:[.,]\d+)?/i.test(t)) return true;
+  if (/\b\d{5,8}(?:[.,]\d+)?[\s;\t]{1,6}\d{5,8}(?:[.,]\d+)?\b/.test(t)) return true;
 
   return false;
 }
@@ -1010,14 +1219,17 @@ async function performOcrOnPage(page, pageIndex) {
         lang: 'por',
         workerPath: 'vendor/tesseract/worker.min.js',
         corePath: 'vendor/tesseract/tesseract-core.wasm.js',
-        langPath: 'vendor/tesseract/lang-data'
+        langPath: 'vendor/tesseract/lang-data',
+        tessedit_pageseg_mode: '6',
+        preserve_interword_spaces: '1'
       };
       const canvas = document.createElement('canvas');
-      const viewport = page.getViewport({ scale: 2.0 });
+      const viewport = page.getViewport({ scale: 2.6 });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       const ctx = canvas.getContext('2d');
       await page.render({ canvasContext: ctx, viewport }).promise;
+      preprocessCanvasForOcr(canvas);
       const result = await window.Tesseract.recognize(canvas, 'por', ocrOptions);
       const text = result?.data?.text || "";
       return (text && text.length > 10) ? text : "";
@@ -1027,6 +1239,26 @@ async function performOcrOnPage(page, pageIndex) {
   }
 
   return "";
+}
+
+function preprocessCanvasForOcr(canvas) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const luminance = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    const boosted = Math.max(0, Math.min(255, (luminance - 128) * 1.35 + 128));
+    const binary = boosted > 170 ? 255 : 0;
+
+    data[i] = binary;
+    data[i + 1] = binary;
+    data[i + 2] = binary;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
 }
 
 // Navegação lateral e rolagem para resultados.
@@ -1969,9 +2201,10 @@ fileInput.addEventListener("change", async (event) => {
       try {
         const page = await pdf.getPage(i);
         const pageText = await extractPageTextSafely(page, i);
+        const preparedPageText = prepareTextForExtraction(pageText).regexBase;
 
         // Se a página estiver vazia/escaneada, apenas mantém o texto vazio (não faz OCR)
-        let safeText = pageText || "";
+        let safeText = preparedPageText || "";
         const hasSignal = hasCoordinateSignal(safeText);
         if (!safeText.trim() || !hasSignal) {
           document.getElementById("progressLabel").innerText = `OCR da página ${i}/${pdf.numPages}...`;
@@ -1980,11 +2213,12 @@ fileInput.addEventListener("change", async (event) => {
             displayLogMessage(`[PDFtoArcgis][LogUI] 🔍 Página ${i}: OCR (${reason})`);
           }
           const ocrText = await performOcrOnPage(page, i);
-          if (ocrText && ocrText.trim().length > 10 && hasCoordinateSignal(ocrText)) {
-            safeText = ocrText;
+          const preparedOcrText = prepareTextForExtraction(ocrText).regexBase;
+          if (preparedOcrText && preparedOcrText.trim().length > 10 && hasCoordinateSignal(preparedOcrText)) {
+            safeText = preparedOcrText;
             ocrPages++;
             if (typeof displayLogMessage === 'function') {
-              displayLogMessage(`[PDFtoArcgis][LogUI] ✅ Página ${i}: OCR ok (${ocrText.length} chars)`);
+              displayLogMessage(`[PDFtoArcgis][LogUI] ✅ Página ${i}: OCR ok (${preparedOcrText.length} chars)`);
             }
           } else if (!hasSignal) {
             safeText = "";
