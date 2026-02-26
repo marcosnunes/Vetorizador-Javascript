@@ -5,6 +5,32 @@
 
 let modeloTreinado = null;
 
+const DEFAULT_TRAINING_CONFIG = {
+  edgeThreshold: 90,
+  morphologySize: 5,
+  minArea: 15,
+  contrastBoost: 1.3,
+  minQualityScore: 35,
+  simplification: 0.00001
+};
+
+function obterConfigTreinamento(feature, run) {
+  const merged = {
+    ...DEFAULT_TRAINING_CONFIG,
+    ...(run?.config || {}),
+    ...(feature?.config || {})
+  };
+
+  return {
+    edgeThreshold: Number.isFinite(merged.edgeThreshold) ? merged.edgeThreshold : DEFAULT_TRAINING_CONFIG.edgeThreshold,
+    morphologySize: Number.isFinite(merged.morphologySize) ? merged.morphologySize : DEFAULT_TRAINING_CONFIG.morphologySize,
+    minArea: Number.isFinite(merged.minArea) ? merged.minArea : DEFAULT_TRAINING_CONFIG.minArea,
+    contrastBoost: Number.isFinite(merged.contrastBoost) ? merged.contrastBoost : DEFAULT_TRAINING_CONFIG.contrastBoost,
+    minQualityScore: Number.isFinite(merged.minQualityScore) ? merged.minQualityScore : DEFAULT_TRAINING_CONFIG.minQualityScore,
+    simplification: Number.isFinite(merged.simplification) ? merged.simplification : DEFAULT_TRAINING_CONFIG.simplification
+  };
+}
+
 
 // Estrutura do modelo neural
 async function criarModeloML() {
@@ -117,15 +143,17 @@ function prepararDatasetTreinamento(dataset) {
       const feature = run.features.find(f => f.featureId === fb.featureId);
       if (!feature) return;
 
+      const config = obterConfigTreinamento(feature, run);
+
       // Criar entrada: [edgeThreshold, morphologySize, minArea, contrastBoost, minQualityScore, simplification]
       // Normalizar para [0, 1]
       const entrada = window.tf.tensor1d([
-        Math.min(feature.config.edgeThreshold / 200, 1),      // 0-200 → 0-1
-        Math.min(feature.config.morphologySize / 9, 1),       // 0-9 → 0-1
-        Math.min(feature.config.minArea / 100, 1),            // 0-100m² → 0-1
-        Math.min(feature.config.contrastBoost / 2, 1),        // 0-2 → 0-1
-        feature.config.minQualityScore / 100,                 // 0-100 → 0-1
-        Math.min(feature.config.simplification * 100000, 1)   // muito pequeno → 0-1
+        Math.min(config.edgeThreshold / 200, 1),      // 0-200 → 0-1
+        Math.min(config.morphologySize / 9, 1),       // 0-9 → 0-1
+        Math.min(config.minArea / 100, 1),            // 0-100m² → 0-1
+        Math.min(config.contrastBoost / 2, 1),        // 0-2 → 0-1
+        config.minQualityScore / 100,                 // 0-100 → 0-1
+        Math.min(config.simplification * 100000, 1)   // muito pequeno → 0-1
       ]);
 
       // Criar saída: qualidade predita (feedback label)
@@ -135,7 +163,7 @@ function prepararDatasetTreinamento(dataset) {
       else if (fb.label === 'rejeitado') qualidadeAlvo = 0.2; // Ruim
 
       // Ajustes recomendados baseados em feedback
-      const ajustesRecomendados = recomendarAjustes(feature, fb);
+      const ajustesRecomendados = recomendarAjustes(feature, fb, run);
 
       exemplos.push({
         entrada,
@@ -161,16 +189,18 @@ function prepararDatasetTreinamento(dataset) {
 }
 
 // Recomendar ajustes baseado em feedback
-function recomendarAjustes(feature, feedback) {
+function recomendarAjustes(feature, feedback, run) {
   const multiplier = feedback.label === 'rejeitado' ? 0.8 : 
                      feedback.label === 'editado' ? 0.95 : 1.0;
 
+  const config = obterConfigTreinamento(feature, run);
+
   return {
-    edgeThreshold: Math.min(feature.config.edgeThreshold * multiplier / 200, 1),
-    morphologySize: Math.min(feature.config.morphologySize * multiplier / 9, 1),
-    contrastBoost: Math.min(feature.config.contrastBoost * multiplier / 2, 1),
-    minArea: Math.min(feature.config.minArea * multiplier / 100, 1),
-    simplification: Math.min(feature.config.simplification * multiplier * 100000, 1)
+    edgeThreshold: Math.min(config.edgeThreshold * multiplier / 200, 1),
+    morphologySize: Math.min(config.morphologySize * multiplier / 9, 1),
+    contrastBoost: Math.min(config.contrastBoost * multiplier / 2, 1),
+    minArea: Math.min(config.minArea * multiplier / 100, 1),
+    simplification: Math.min(config.simplification * multiplier * 100000, 1)
   };
 }
 

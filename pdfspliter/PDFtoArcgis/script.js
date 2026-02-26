@@ -300,6 +300,179 @@ function buildRelativeVerticesFromMeasures(rawVertices, startE = 0, startN = 0) 
   return vertices;
 }
 
+function parseLocaleNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
+  let text = String(value || '').trim().replace(/\s+/g, '');
+  if (!text) return NaN;
+
+  const hasComma = text.includes(',');
+  const hasDot = text.includes('.');
+
+  if (hasComma && hasDot) {
+    if (text.lastIndexOf(',') > text.lastIndexOf('.')) {
+      text = text.replace(/\./g, '').replace(',', '.');
+    } else {
+      text = text.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    text = text.replace(/\./g, '').replace(',', '.');
+  } else {
+    const dotCount = (text.match(/\./g) || []).length;
+    if (dotCount > 1) {
+      text = text.replace(/\./g, '');
+    }
+  }
+
+  return Number(text);
+}
+
+function normalizeExtractionText(rawText) {
+  let text = String(rawText || '').replace(/\r/g, '\n');
+  text = text.replace(/\n{2,}/g, '\n');
+  text = text.toUpperCase();
+  text = text.replace(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)|-?\d+,\d+/g, (token) => {
+    const numeric = parseLocaleNumber(token);
+    return Number.isFinite(numeric) ? String(numeric) : token;
+  });
+  return text;
+}
+
+function isValidUtmCoordinate(east, north) {
+  return Number.isFinite(east) && Number.isFinite(north)
+    && east >= 150000 && east <= 900000
+    && north >= 6900000 && north <= 10100000;
+}
+
+function isValidLatLon(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon)
+    && lat >= -90 && lat <= 90
+    && lon >= -180 && lon <= 180;
+}
+
+function extractUtmVerticesByRegex(rawText) {
+  const text = normalizeExtractionText(rawText);
+  const vertices = [];
+  const seen = new Set();
+  let autoId = 1;
+
+  const patterns = [
+    /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)\s*([A-Z0-9.-]{1,12})[\s\S]{0,90}?(?:E(?:STE)?|L(?:ESTE)?|X)\s*[:=]?\s*(-?\d[\d.,]{4,})[\s\S]{0,90}?(?:N(?:ORTE)?|Y)\s*[:=]?\s*(-?\d[\d.,]{5,})/g,
+    /(?:E(?:STE)?|L(?:ESTE)?|X)\s*[:=]?\s*(-?\d[\d.,]{4,})[\s\S]{0,60}?(?:N(?:ORTE)?|Y)\s*[:=]?\s*(-?\d[\d.,]{5,})/g
+  ];
+
+  for (const regex of patterns) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const hasId = match.length >= 4;
+      const id = hasId ? (match[1] || `V${String(autoId).padStart(3, '0')}`) : `V${String(autoId).padStart(3, '0')}`;
+      const eastText = hasId ? match[2] : match[1];
+      const northText = hasId ? match[3] : match[2];
+      const east = parseLocaleNumber(eastText);
+      const north = parseLocaleNumber(northText);
+
+      if (!isValidUtmCoordinate(east, north)) continue;
+
+      const key = `${east.toFixed(3)}|${north.toFixed(3)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      vertices.push({ id, east, north, ordem: vertices.length + 1 });
+      autoId++;
+    }
+  }
+
+  return vertices;
+}
+
+function extractLatLonVerticesByRegex(rawText) {
+  const text = normalizeExtractionText(rawText);
+  const vertices = [];
+  const seen = new Set();
+  let autoId = 1;
+
+  const patterns = [
+    /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)\s*([A-Z0-9.-]{1,12})[\s\S]{0,60}?(?:LAT(?:ITUDE)?)\s*[:=]?\s*(-?\d{1,2}(?:[.,]\d+)?)[\s\S]{0,40}?(?:LON(?:GITUDE)?|LONG)\s*[:=]?\s*(-?\d{1,3}(?:[.,]\d+)?)/g,
+    /(?:LAT(?:ITUDE)?)\s*[:=]?\s*(-?\d{1,2}(?:[.,]\d+)?)[\s\S]{0,40}?(?:LON(?:GITUDE)?|LONG)\s*[:=]?\s*(-?\d{1,3}(?:[.,]\d+)?)/g
+  ];
+
+  for (const regex of patterns) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const hasId = match.length >= 4;
+      const id = hasId ? (match[1] || `V${String(autoId).padStart(3, '0')}`) : `V${String(autoId).padStart(3, '0')}`;
+      const latText = hasId ? match[2] : match[1];
+      const lonText = hasId ? match[3] : match[2];
+      const lat = parseLocaleNumber(latText);
+      const lon = parseLocaleNumber(lonText);
+
+      if (!isValidLatLon(lat, lon)) continue;
+
+      const key = `${lat.toFixed(7)}|${lon.toFixed(7)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      vertices.push({ id, lat, lon, ordem: vertices.length + 1 });
+      autoId++;
+    }
+  }
+
+  return vertices;
+}
+
+function extractAzimuthDistanceByRegex(rawText) {
+  const text = normalizeExtractionText(rawText);
+  const vertices = [];
+  let autoId = 1;
+
+  const regex = /(?:V[ÉE]RTICE|VERTICE|PONTO|PT|M[-\s]?)?\s*([A-Z0-9.-]{0,12})[\s\S]{0,120}?(?:AZIMUTE|RUMO)\s*[:=]?\s*([0-9]{1,3}(?:[.,]\d+)?|[0-9]{1,3}\s*[°º]\s*[0-9]{1,2}\s*['’]\s*[0-9]{1,2}\s*["”]?)[\s\S]{0,120}?(?:DIST[ÂA]NCIA|DISTANCIA)\s*[:=]?\s*([0-9]{1,6}(?:[.,]\d+)?)/g;
+
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const id = (match[1] || `V${String(autoId).padStart(3, '0')}`).trim();
+    const azText = (match[2] || '').trim();
+    const dist = parseLocaleNumber(match[3]);
+    if (!Number.isFinite(dist) || dist <= 0) continue;
+
+    const row = { id, distancia: dist };
+    if (/[°º]/.test(azText)) {
+      row.azimute_dms = azText;
+      row.azimute = parseDmsToDegrees(azText);
+    } else {
+      row.azimute = parseLocaleNumber(azText);
+    }
+
+    if (!Number.isFinite(row.azimute)) continue;
+    vertices.push(row);
+    autoId++;
+  }
+
+  return vertices;
+}
+
+function runRegexFallback(rawText) {
+  const utmVertices = extractUtmVerticesByRegex(rawText);
+  if (utmVertices.length >= 3) {
+    return { mode: 'utm', vertices: utmVertices };
+  }
+
+  const latLonVertices = extractLatLonVerticesByRegex(rawText);
+  if (latLonVertices.length >= 3) {
+    return { mode: 'latlon', vertices: latLonVertices };
+  }
+
+  const measures = extractAzimuthDistanceByRegex(rawText);
+  if (measures.length >= 2) {
+    const relativeVertices = buildRelativeVerticesFromMeasures(measures, 0, 0);
+    if (relativeVertices.length >= 3) {
+      return { mode: 'relativo', vertices: relativeVertices, measures };
+    }
+  }
+
+  return null;
+}
+
 // Função IA para processar página por página - v2.5 otimizado
 async function deducePolygonVerticesPerPage(pagesText) {
   const smallPrompt = (text) => `You are a cadastral document parser for Brazilian real estate (SIRGAS2000/UTM).
@@ -327,6 +500,35 @@ ${text}`;
   let relativeResult = null;
   const totalPages = pagesText.length;
   let baseDelay = 5000; // ⬆️ Aumentado de 3s → 5s para evitar 429 rate limit
+
+  const applyFallback = (fallback, pageNumber) => {
+    if (!fallback) return false;
+    if (fallback.mode === 'utm' && fallback.vertices?.length) {
+      results.push({ vertices: fallback.vertices });
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage(`[PDFtoArcgis][LogUI] 🛟 Página ${pageNumber}: fallback regex UTM (${fallback.vertices.length})`);
+      }
+      return true;
+    }
+
+    if (fallback.mode === 'latlon' && fallback.vertices?.length) {
+      latLonResults.push({ vertices: fallback.vertices, crs: 'WGS84' });
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage(`[PDFtoArcgis][LogUI] 🛟 Página ${pageNumber}: fallback regex Lat/Lon (${fallback.vertices.length})`);
+      }
+      return true;
+    }
+
+    if (fallback.mode === 'relativo' && fallback.vertices?.length) {
+      relativeResult = { modo: 'relativo', vertices: fallback.measures || [] };
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage(`[PDFtoArcgis][LogUI] 🛟 Página ${pageNumber}: fallback regex Azimute/Distância`);
+      }
+      return true;
+    }
+
+    return false;
+  };
   
   if (typeof displayLogMessage === 'function') {
     displayLogMessage(`[PDFtoArcgis][LogUI] 📄 IA: ${totalPages} página(s) com texto bruto`);
@@ -377,6 +579,7 @@ ${text}`;
     
     if (!content) {
       console.warn(`[PDFtoArcgis] Página ${i + 1} sem resposta`);
+      applyFallback(runRegexFallback(textToSend), i + 1);
       if (typeof displayLogMessage === 'function') {
         displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Página ${i + 1}: IA não retornou dados`);
       }
@@ -387,6 +590,7 @@ ${text}`;
     const jsonExtracted = extractJSONFromResponse(content);
     if (!jsonExtracted) {
       console.warn(`[PDFtoArcgis] Página ${i + 1}: Não conseguiu extrair JSON da resposta`);
+      applyFallback(runRegexFallback(textToSend), i + 1);
       if (typeof displayLogMessage === 'function') {
         displayLogMessage(`[PDFtoArcgis][LogUI] ⏳ Página ${i + 1}: JSON não encontrado`);
       }
@@ -566,6 +770,7 @@ ${text}`;
       }
     } catch (e) {
       console.error('[PDFtoArcgis][PARSE ERROR][PAGE]', e, content);
+      const recoveredByRegex = applyFallback(runRegexFallback(textToSend), i + 1);
       
       // Tentar novamente com extração mais agressiva
       console.log(`[PDFtoArcgis] 🔄 Tentando recuperar JSON da página ${i + 1}...`);
@@ -618,13 +823,20 @@ ${text}`;
         }
         baseDelay = Math.min(baseDelay + 500, 5000); // Aumentar delay progressivamente até 5s
       } else {
-        // Sem fallback por regex: a IA deve extrair diretamente do texto puro
-        if (typeof displayLogMessage === 'function') {
+        if (!recoveredByRegex && typeof displayLogMessage === 'function') {
           displayLogMessage(`[PDFtoArcgis][LogUI] ❌ Página ${i + 1}: resposta da IA inválida`);
+        }
+        if (typeof displayLogMessage === 'function') {
+          displayLogMessage(`[PDFtoArcgis][LogUI] ⏳ Página ${i + 1}: tentando próxima etapa`);
         }
         baseDelay = Math.min(baseDelay + 1000, 8000); // Aumentar delay agressivamente
       }
     }
+  }
+
+  if (!relativeResult && results.length === 0 && latLonResults.length === 0) {
+    const fullTextFallback = runRegexFallback(pagesText.join('\n\n'));
+    applyFallback(fullTextFallback, 'consolidado');
   }
   
   if (relativeResult) return relativeResult;
