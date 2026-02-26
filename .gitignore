@@ -4,6 +4,10 @@ node_modules/
 dist/
 .vercel
 .env
+.env.*
+!.env.example
+*.token
+*swa*token*
 pdfspliter/.venv/
 pdfspliter/PDFtoArcgis/testes/
 
