@@ -1,13 +1,13 @@
-// Configuração e utilitários globais (Android/Browser)
+// Utilitários compartilhados para execução no Android WebView e no navegador.
 
-// Bibliotecas carregadas dinamicamente
+// Bibliotecas carregadas de forma assíncrona no bootstrap.
 let pdfjsLib = null;
 let PDFLib = null;
 
-// Mapa de promessas de OCR (Android)
+// Mapeia callbacks pendentes de OCR nativo por ID.
 const ocrPromises = {};
 
-// Callback chamado pelo Android ao finalizar OCR
+// Recebe o resultado de OCR enviado pela camada Android.
 function onOcrResult(callbackId, text) {
     if (ocrPromises[callbackId]) {
         console.log(`[JS] Retorno de OCR recebido para ID: ${callbackId}`);
@@ -16,7 +16,7 @@ function onOcrResult(callbackId, text) {
     }
 }
 
-// Solicita OCR ao Android (ou retorna vazio no browser)
+// Solicita OCR ao Android; no navegador comum retorna string vazia.
 function performAndroidOCR(base64Image) {
     return new Promise((resolve) => {
         if (window.Android && window.Android.performOCR) {
@@ -25,32 +25,21 @@ function performAndroidOCR(base64Image) {
             const cleanBase64 = base64Image.replace(/^data:image\/(png|jpg|jpeg);base64,/, "");
             window.Android.performOCR(cleanBase64, callbackId);
         } else {
-            // Fallback para browser comum
+            // Ambiente sem bridge Android.
             resolve("");
         }
     });
 }
 
-// Envia PDF final para Android ou faz download no browser
+// Encaminha o PDF para o Android ou dispara download local no navegador.
 function nativeDownload(fileName, blob) {
     const reader = new FileReader();
     reader.onload = function (event) {
         const base64Data = event.target.result.split(',')[1];
         if (window.Android && typeof window.Android.downloadPdf === 'function') {
             window.Android.downloadPdf(base64Data, fileName);
-
-// --- PWA: Registrar Service Worker ---
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function() {
-        navigator.serviceWorker.register('service-worker.js').then(function(registration) {
-            console.log('[PWA] Service Worker registrado com sucesso:', registration.scope);
-        }, function(err) {
-            console.log('[PWA] Falha ao registrar Service Worker:', err);
-        });
-    });
-}
         } else {
-            // Fallback download navegador
+            // Download local quando não há integração nativa.
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -61,7 +50,7 @@ if ('serviceWorker' in navigator) {
     reader.readAsDataURL(blob);
 }
 
-// UI: log e atualização de nome de arquivo
+// Funções de apoio da UI.
 function displayLogMessage(msg) {
     const el = document.getElementById("log-messages");
     if (el) el.innerText = msg;
@@ -108,7 +97,7 @@ function scrollToResults() {
     }
 }
 
-// Menu lateral e integração Android
+// Controles do menu lateral e integração opcional com Android.
 function openNav() { document.getElementById("mySidenav").style.width = "250px"; }
 function closeNav() { document.getElementById("mySidenav").style.width = "0"; }
 function exitApp() {
@@ -119,8 +108,8 @@ function exitApp() {
 
 
 /* ========================================================
-   2. Lógica de Extração de Nomes (Inteligência Melhorada)
-   ======================================================== */
+    Extração e validação de nomes no conteúdo das páginas
+    ======================================================== */
 
 function extractNameInfo(textToSearch, pageNumber, source = "Texto") {
     if (!textToSearch || textToSearch.length < 5) return { nome: null };
@@ -205,8 +194,8 @@ function isValidName(name) {
 }
 
 /* ========================================================
-   3. Processamento Principal
-   ======================================================== */
+    Pipeline principal de processamento de PDFs
+    ======================================================== */
 
 async function processarPagina(pdfJsDoc, pdfLibDoc, pageNum, pageIndex, total) {
     let nomeIdentificado = null;
@@ -366,21 +355,6 @@ function loadScript(src, cb) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-
-    // Esconde o botão de instalar app se já estiver instalado (PWA/standalone)
-    const installBtn = document.getElementById('installPwaBtn');
-    function isAppInstalled() {
-        return (
-            window.matchMedia('(display-mode: standalone)').matches ||
-            window.matchMedia('(display-mode: minimal-ui)').matches ||
-            window.matchMedia('(display-mode: fullscreen)').matches ||
-            (window.navigator.standalone === true)
-        );
-    }
-    if (installBtn && isAppInstalled()) {
-        installBtn.style.display = 'none';
-    }
-
     const btn = document.getElementById("processarPDF");
     if (btn) {
         btn.disabled = true;
@@ -400,56 +374,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
 
-    // --- PWA: Instalar App (com feedback visual) ---
-    let deferredPrompt = null;
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        if (installBtn) {
-            installBtn.style.display = 'block';
-            installBtn.classList.remove('success', 'error');
-            installBtn.textContent = 'Instalar App';
-        }
-    });
-    if (installBtn) {
-        installBtn.addEventListener('click', async () => {
-            if (deferredPrompt) {
-                try {
-                    deferredPrompt.prompt();
-                    const { outcome } = await deferredPrompt.userChoice;
-                    if (outcome === 'accepted') {
-                        installBtn.classList.add('success');
-                        installBtn.textContent = 'App instalado!';
-                        setTimeout(() => {
-                            installBtn.style.display = 'none';
-                            installBtn.classList.remove('success');
-                            installBtn.textContent = 'Instalar App';
-                        }, 2000);
-                    } else {
-                        installBtn.classList.add('error');
-                        installBtn.textContent = 'Instalação cancelada';
-                        setTimeout(() => {
-                            installBtn.classList.remove('error');
-                            installBtn.textContent = 'Instalar App';
-                        }, 2000);
-                    }
-                } catch (err) {
-                    installBtn.classList.add('error');
-                    installBtn.textContent = 'Erro ao instalar';
-                    setTimeout(() => {
-                        installBtn.classList.remove('error');
-                        installBtn.textContent = 'Instalar App';
-                    }, 2000);
-                }
-                deferredPrompt = null;
-            }
-        });
-    }
-
     const userLang = (navigator.language || navigator.userLanguage).split('-')[0];
     const select = document.getElementById('language-select');
     if (select) {
         select.value = userLang;
     }
-    // ...existing code...
+    // Ponto de extensão para inicialização de i18n, se necessário.
 });

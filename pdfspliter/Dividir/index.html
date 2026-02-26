@@ -6,21 +6,11 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
     <title data-i18n="home_title">Dividir - Home</title>
     <link href="/pdfspliter/style.css" rel="Stylesheet">
-    <!-- script.js será incluído ao final do body para evitar duplicidade e garantir carregamento correto -->
-</head>
-    <!-- Manifesto PWA -->
-    <link rel="manifest" href="/pdfspliter/manifest.json">
-    <meta name="theme-color" content="#1976d2">
-    <link rel="apple-touch-icon" href="/pdfspliter/icon-192.png">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="mobile-web-app-capable" content="yes">
 </head>
 
 <body>
 
-    <!-- Estrutura do Menu Lateral (Sidenav) -->
     <div id="mySidenav" class="sidenav">
-        <button id="installPwaBtn" class="button1">Instalar App</button>
         <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">×</a>
         <a href="/pdfspliter/Dividir/index.html">Dividir</a>
         <a href="/pdfspliter/UnirPDF/index.html">Unir PDF</a>
@@ -33,7 +23,6 @@
     <div class="navigation">
         <nav>
             <div class="nav-wrapper">
-                <!-- Ícone do Menu (Hamburger) -->
                 <span class="open-nav" onclick="openNav()">☰</span>
             </div>
         </nav>
@@ -82,7 +71,7 @@
             <div class="col-md-12 columnBlockLayout">
                 <h2 data-i18n="processed_pages">Páginas Processadas</h2>
                 <div id="pdf-pages-container">
-                    <!-- As páginas processadas aparecerão aqui -->
+                    <!-- Conteúdo preenchido dinamicamente pelo processamento -->
                 </div>
             </div>
         </div>

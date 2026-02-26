@@ -1,6 +1,5 @@
-﻿// PDFtoArcgis - fluxo IA direto (texto bruto -> JSON -> validacao)
-//
-// Garante que displayLogMessage está disponível (importa do global se necessário)
+﻿// Pipeline PDFtoArcgis: texto bruto -> IA -> JSON estruturado -> validação/exportação.
+// Garante que displayLogMessage esteja disponível quando o script roda isoladamente.
 if (typeof displayLogMessage !== 'function' && window.displayLogMessage) {
   var displayLogMessage = window.displayLogMessage;
 }
@@ -16,7 +15,7 @@ async function callOpenAIGPT4Turbo(prompt, retryCount = 0) {
   });
   
   if (!response.ok) {
-    // Retry 429 com backoff exponencial
+    // Trata limite de taxa com retentativa exponencial.
     if (response.status === 429 && retryCount < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
       console.warn(`[PDFtoArcgis] 429 Too Many Requests. Retry ${retryCount + 1}/${MAX_RETRIES} em ${delay}ms...`);
@@ -38,37 +37,28 @@ async function callOpenAIGPT4Turbo(prompt, retryCount = 0) {
   return data;
 }
 
-// Texto bruto segue direto para a IA.
+// Texto bruto segue diretamente para a IA.
 
 
 function repairJsonCoordinates(jsonStr) {
   if (!jsonStr) return jsonStr;
   jsonStr = String(jsonStr).trim();
-  // Remover truncamento (JSON cortado)
+  // Corrige respostas truncadas.
   if (jsonStr.endsWith(',')) jsonStr = jsonStr.slice(0, -1);
   if (!jsonStr.endsWith(']') && !jsonStr.endsWith('}')) {
     if (jsonStr.includes('"vertices"')) jsonStr += ']}';
   }
   
-  // === LÓGICA: Normalizar números brasileiros CORRETAMENTE ===
-  // Padrão: 7.186.708,425 (com ponto de milhar + vírgula decimal)
-  // Precisamos detectar:
-  // 1. Se temos uma sequência tipo XXX.XXX.XXX,XXX (3 dígitos . 3 dígitos . 3 dígitos , decimais)
-  // 2. Isso é número brasileiro: remover . e trocar , por .
-  
-  // Padrão: números com MÚLTIPLOS pontos (ponto de milhar) e vírgula final (decimal)
-  // Exemplo: "7.186.708,425" ou "693.736,178"
+  // Normaliza números no formato brasileiro (milhar com ponto, decimal com vírgula).
   jsonStr = jsonStr.replace(/(\d{1,3})\.(\d{3})\.(\d{3}),(\d+)/g, (match, g1, g2, g3, g4) => {
-    // XXX.XXX.XXX,DDD → XXXXXXXXX.DDD (5-10 dígitos inteiros)
+    // Ex.: 7.186.708,425 -> 7186708.425
     return g1 + g2 + g3 + '.' + g4;
   });
   
-  // Padrão: 2 ou mais dígitos com ponto separando, terminando em vírgula
-  // Exemplo: "693.736,178" → "693736.178"
+  // Ex.: 693.736,178 -> 693736.178
   jsonStr = jsonStr.replace(/(\d{3})\.(\d{3}),(\d+)/g, '$1$2.$3');
   
-  // Padrão: qualquer número com vírgula decimal dentro de JSON
-  // Se for contexto de número (entre : e ,/}), converter vírgula por ponto
+  // Converte vírgula decimal para ponto em chaves numéricas conhecidas.
   jsonStr = jsonStr.replace(/("(?:norte|norte|este|east|north|azimute|distancia|lat|lon|latitude|longitude)"\s*:\s*)(-?\d+),(\d+)/g, '$1$2.$3');
 
   // Corrigir aspas duplas extras em azimute_dms (ex: 133°15'52"")
@@ -90,11 +80,9 @@ function mergeVerticesFromChunks(chunksResults) {
       let east = v.este ?? v.east;
       let north = v.norte ?? v.north;
       
-      // Normalizar números brasileiros CORRETAMENTE:
-      // Padrão: 7.186.708,425 → 7186708.425
-      // Ou: 693.736,178 → 693736.178
+      // Normaliza números brasileiros para formato decimal JS.
       if (typeof east === 'string') {
-        // Remover todos os pontos, depois trocar vírgula por ponto
+        // Remove separadores de milhar e converte decimal para ponto.
         east = east.replace(/\./g, '').replace(/,/g, '.');
       }
       if (typeof north === 'string') {
@@ -137,7 +125,7 @@ function mergeLatLonFromChunks(chunksResults) {
   return merged;
 }
 
-// Extrai JSON de respostas com markdown ou texto extra.
+// Extrai o primeiro bloco JSON válido de respostas com markdown ou texto adicional.
 function extractJSONFromResponse(rawResponse) {
   if (!rawResponse) return null;
 
@@ -191,21 +179,20 @@ function extractJSONFromResponse(rawResponse) {
     return null;
   };
 
-  // Padrão 1: JSON direto (esperado)
+  // Caso 1: JSON direto.
   if (str.startsWith('{') || str.startsWith('[')) {
     const direct = extractFirstJsonBlock(str);
     return direct || str;
   }
 
-  // Padrão 2: JSON dentro de markdown (```json ... ```)
+  // Caso 2: JSON dentro de bloco markdown.
   const mdMatch = str.match(/```json\s*([\s\S]*?)\s*```/);
   if (mdMatch && mdMatch[1]) {
     const mdBlock = extractFirstJsonBlock(mdMatch[1].trim());
     if (mdBlock) return mdBlock;
   }
 
-  // Padrão 3: JSON após texto explicativo
-  // Procura pelo primeiro bloco JSON para evitar respostas com multiplos JSONs
+  // Caso 3: JSON após texto explicativo.
   const extracted = extractFirstJsonBlock(str);
   if (extracted) return extracted;
 
@@ -213,26 +200,25 @@ function extractJSONFromResponse(rawResponse) {
   return null;
 }
 
-// Corrige typos comuns em angulos DMS.
+// Corrige erros comuns de OCR em ângulos DMS.
 function fixDMSTypos(vertex) {
   if (!vertex.azimute_dms) return vertex;
   
   let dms = String(vertex.azimute_dms);
   
-  // Substituir letra B ou O por 0, I por 1, S por 5, etc.
+  // Corrige caracteres confundidos no OCR.
   dms = dms.replace(/[BOl]/gi, (match) => {
     const map = { 'B': '8', 'O': '0', 'l': '1', 'S': '5', 'I': '1' };
     return map[match.toUpperCase()] || match;
   });
   
-  // Verificar se o primeiro número é válido (0-359)
+  // Ajusta graus fora de faixa quando o OCR concatena dígitos.
   const degreeMatch = dms.match(/^(\d+)/);
   if (degreeMatch) {
     const deg = parseInt(degreeMatch[1]);
     if (deg > 360) {
-      // Truncar se > 360 (ex: "3605" → "5" ou "36505" → "5")
       const degStr = String(deg);
-      const corrected = parseInt(degStr.substring(degStr.length - 2)); // Últimos 2 dígitos
+      const corrected = parseInt(degStr.substring(degStr.length - 2));
       if (corrected <= 360) {
         dms = dms.replace(/^(\d+)/, corrected.toString());
       }
@@ -831,17 +817,14 @@ async function performOcrOnPage(page, pageIndex) {
   return "";
 }
 
-// UI: Navegação lateral e rolagem para resultados
+// Navegação lateral e rolagem para resultados.
 function openNav() {
   document.getElementById("mySidenav").style.width = "250px";
-  if (typeof isAppInstalled === 'function' && typeof hideInstallBtn === 'function') {
-    if (isAppInstalled()) hideInstallBtn();
-  }
 }
 function closeNav() { document.getElementById("mySidenav").style.width = "0"; }
 
 
-// === UI: Atualizar painel de validação topológica ===
+// Atualiza o painel de validação topológica.
 function updateValidationUI(topology, corrections = []) {
   const validationBox = document.getElementById("validationBox");
   const validationTitle = document.getElementById("validationTitle");
@@ -855,14 +838,14 @@ function updateValidationUI(topology, corrections = []) {
 
   if (!validationBox) return;
 
-  // Mostrar painel
+  // Exibe painel.
   validationBox.style.display = "block";
 
-  // Limpar listas
+  // Limpa listas.
   if (errorList) errorList.innerHTML = "";
   if (warningList) warningList.innerHTML = "";
 
-  // Atualizar título
+  // Atualiza título.
   if (validationTitle) {
     if (topology.isValid) {
       validationTitle.innerHTML = '<i class="fas fa-check-circle" style="color:#28a745;"></i> Polígono Válido!';
@@ -871,7 +854,7 @@ function updateValidationUI(topology, corrections = []) {
     }
   }
 
-  // Mostrar erros
+  // Renderiza erros.
   if (topology.errors && topology.errors.length > 0 && validationErrors && errorList) {
     validationErrors.style.display = "block";
     topology.errors.forEach(err => {
@@ -883,7 +866,7 @@ function updateValidationUI(topology, corrections = []) {
     validationErrors.style.display = "none";
   }
 
-  // Mostrar avisos
+  // Renderiza avisos.
   if (topology.warnings && topology.warnings.length > 0 && validationWarnings && warningList) {
     validationWarnings.style.display = "block";
     topology.warnings.forEach(warn => {
@@ -895,7 +878,7 @@ function updateValidationUI(topology, corrections = []) {
     validationWarnings.style.display = "none";
   }
 
-  // Mostrar sucesso
+  // Renderiza resumo de sucesso.
   if (topology.isValid && validationSuccess && validationDetails) {
     validationSuccess.style.display = "block";
     
@@ -920,7 +903,7 @@ function updateValidationUI(topology, corrections = []) {
     validationSuccess.style.display = "none";
   }
 
-  // Mostrar/ocultar botão de correção
+  // Controla exibição das ações de correção.
   if (validationActions) {
     if (!topology.isValid && topology.errors.length > 0) {
       validationActions.style.display = "block";
@@ -930,99 +913,16 @@ function updateValidationUI(topology, corrections = []) {
   }
 }
 
-// --- PWA: Instalar App (com feedback visual) ---
-let deferredPrompt = null;
-let installBtn = null;
-
-function hideInstallBtn() {
-  if (installBtn) installBtn.style.display = 'none';
-}
-
-// Detecta se já está instalado (standalone ou appinstalled)
-function isAppInstalled() {
-  // Checa standalone (PWA instalado) e display-mode
-  if (window.matchMedia('(display-mode: standalone)').matches) return true;
-  if (window.navigator.standalone === true) return true;
-  // Checa se já existe service worker controlando e não há prompt
-  if (window.matchMedia('(display-mode: minimal-ui)').matches) return true;
-  // iOS: verifica se está rodando como app
-  if (window.navigator && window.navigator.standalone) return true;
-  // Android Chrome: verifica se não há prompt e já está instalado
-  if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
-  return false;
-}
-
-if (isAppInstalled()) {
-  hideInstallBtn();
-}
-
-window.addEventListener('appinstalled', hideInstallBtn);
-
-window.addEventListener('DOMContentLoaded', function () {
-  installBtn = document.getElementById('installPwaBtn');
-  if (isAppInstalled()) hideInstallBtn();
-});
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  if (isAppInstalled()) {
-    hideInstallBtn();
-    return;
-  }
-  e.preventDefault();
-  deferredPrompt = e;
-  if (installBtn) {
-    installBtn.style.display = 'block';
-    installBtn.classList.remove('success', 'error');
-    installBtn.textContent = 'Instalar App';
-  }
-});
-window.addEventListener('DOMContentLoaded', function () {
-  installBtn = document.getElementById('installPwaBtn');
-  if (installBtn) {
-    installBtn.addEventListener('click', async () => {
-      if (deferredPrompt) {
-        try {
-          deferredPrompt.prompt();
-          const { outcome } = await deferredPrompt.userChoice;
-          if (outcome === 'accepted') {
-            installBtn.classList.add('success');
-            installBtn.textContent = 'App instalado!';
-            setTimeout(() => {
-              installBtn.style.display = 'none';
-              installBtn.classList.remove('success');
-              installBtn.textContent = 'Instalar App';
-            }, 2000);
-          } else {
-            installBtn.classList.add('error');
-            installBtn.textContent = 'Instalação cancelada';
-            setTimeout(() => {
-              installBtn.classList.remove('error');
-              installBtn.textContent = 'Instalar App';
-            }, 2000);
-          }
-        } catch (err) {
-          installBtn.classList.add('error');
-          installBtn.textContent = 'Erro ao instalar';
-          setTimeout(() => {
-            installBtn.classList.remove('error');
-            installBtn.textContent = 'Instalar App';
-          }, 2000);
-        }
-        deferredPrompt = null;
-      }
-    });
-  }
-});
 function scrollToResults() {
   const box = document.getElementById("resultBox");
   if (box && box.style.display !== "none") box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// Configuração do PDF.js para uso local/Android
+// Configuração local do worker do PDF.js.
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "vendor/pdf.worker.min.js";
 
-// UI e estado
+// Referências de UI e estado.
 const fileInput = document.getElementById("fileInput");
 const statusDiv = document.getElementById("status");
 const progressBar = document.getElementById("progressBar");
@@ -1049,11 +949,11 @@ let fileNameBase = "coordenadas_extracao";
 let pdfOrigemNomeBase = "";
 let pdfOrigemSrc = "";
 
-// Resultados por matrícula (PDF unificado): [{docId,pages,projectionKey,manualProjectionKey,projectionInfo,vertices,warnings}]
+// Resultados por matrícula no PDF unificado.
 let documentsResults = [];
 let activeDocIndex = -1;
 
-// Projecoes suportadas (WKT)
+// Projeções suportadas (WKT).
 const PROJECTIONS = {
   SIRGAS2000_25S: {
     name: "SIRGAS 2000 / UTM zone 25S",
@@ -1377,7 +1277,7 @@ function buildPageTextWithLines(textContent) {
   return out;
 }
 
-// Deteccao de CRS
+// Detecção de CRS.
 function inferZoneFromBrazilState(textLower) {
   if (/\b\-pr\b|\bparan[aá]\b/.test(textLower)) return 22;
   if (/\b\-sc\b|\bsanta\s*catarina\b/.test(textLower)) return 22;
@@ -1395,18 +1295,17 @@ function inferZoneFromBrazilState(textLower) {
 function inferCrsByCoordinates(vertices) {
   if (!vertices || vertices.length === 0) return null;
 
-  // Calcula a média das coordenadas extraídas
+  // Calcula média das coordenadas extraídas.
   const avgE = vertices.reduce((sum, v) => sum + v.east, 0) / vertices.length;
   const avgN = vertices.reduce((sum, v) => sum + v.north, 0) / vertices.length;
 
-  // Lógica para o Brasil (UTM Sul)
-  // Norte ~7.1 milhões (Paraná/Santa Catarina/RS)
+  // Regras heurísticas para UTM no sul do Brasil.
   if (avgN > 7000000 && avgN < 8000000) {
-    // Este entre 600k e 800k -> Zona 22S
+    // Este entre 600k e 800k -> zona 22S.
     if (avgE > 600000 && avgE < 800000) {
       return { zone: 22, reason: "Inferido via coordenadas: Padrão compatível com UTM Zona 22S (Sul do Brasil)." };
     }
-    // Este entre 300k e 600k -> Zona 23S (SP/MG)
+    // Este entre 300k e 600k -> zona 23S.
     if (avgE > 300000 && avgE < 600000) {
       return { zone: 23, reason: "Inferido via coordenadas: Padrão compatível com UTM Zona 23S." };
     }
@@ -1446,7 +1345,7 @@ function detectProjectionFromText(fullText, vertices = []) {
     }
   }
 
-  // Fallback 1: Por Estado/UF
+  // Fallback 1: inferência por estado/UF.
   if (!zone) {
     const inferred = inferZoneFromBrazilState(t);
     if (inferred) {
@@ -1456,9 +1355,9 @@ function detectProjectionFromText(fullText, vertices = []) {
     }
   }
 
-  // Fallback 2: Pela matemática das coordenadas (CRUCIAL PARA PIRAQUARA)
+  // Fallback 2: inferência por padrão numérico das coordenadas.
   if (!zone && vertices && vertices.length > 0) {
-    const mathInference = inferCrsByCoordinates(vertices); // Verifique se esta função existe no seu script
+    const mathInference = inferCrsByCoordinates(vertices);
     if (mathInference) {
       zone = mathInference.zone;
       reasonParts.push(mathInference.reason);
@@ -1466,13 +1365,13 @@ function detectProjectionFromText(fullText, vertices = []) {
     }
   }
 
-  // Fallback 3: Padrão final
+  // Fallback 3: valor padrão.
   if (!zone) {
     zone = 22;
     reasonParts.push(`Zona não encontrada; fallback ${zone}S.`);
   }
 
-  // Retorno (Lógica de Datums)
+  // Resolve datum/projeção final.
   if (hasWGS) return { key: "WGS84", confidence: "alta", reason: "Encontrado 'WGS 84'." };
 
   if (hasSAD) {
@@ -1480,7 +1379,7 @@ function detectProjectionFromText(fullText, vertices = []) {
     return { key, confidence: conf, reason: `Encontrado 'SAD-69'. ${reasonParts.join(" ")}` };
   }
 
-  // Se não achou SAD nem WGS, assume SIRGAS 2000 (Padrão IBGE)
+  // Se não houver SAD/WGS explícito, assume SIRGAS 2000.
   return {
     key: `SIRGAS2000_${zone}S`,
     confidence: conf,
@@ -2164,13 +2063,13 @@ async function processExtractUnified(pagesText, projInfo = null) {
   if (downloadBtn) downloadBtn.disabled = false;
   if (saveToFolderBtn) saveToFolderBtn.disabled = false;
 
-  // Seletor de documentos
+  // Atualiza seletor de documentos detectados.
   renderDocSelector();
   
   scrollToResults();
 }
 
-// Exportar CSV
+// Exporta CSV e relatório textual de validação.
 downloadBtn.onclick = () => {
   if (!extractedCoordinates.length) return;
   try {
@@ -2179,7 +2078,7 @@ downloadBtn.onclick = () => {
     const epsg = PROJECTIONS[key]?.epsg || (doc?.relativeInfo?.relative ? "RELATIVO" : "");
     const crsName = doc?.relativeInfo?.relative ? "RELATIVO" : (key ? key.replace(/[^\w]/g, "_") : "CRS");
 
-    // Gerar CSV com diagnóstico profissional
+    // Gera CSV com diagnóstico topológico e de memorial.
     const csv = gerarCsvParaVertices(
       extractedCoordinates,
       epsg,
@@ -2191,11 +2090,11 @@ downloadBtn.onclick = () => {
 
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
-    // Novo: incluir nome do PDF de origem e src no nome do arquivo
+    // Inclui origem do PDF e identificador da fonte no nome do arquivo.
     link.download = `${pdfOrigemNomeBase || fileNameBase}_${crsName}_Validado_${pdfOrigemSrc || "src"}.csv`;
     link.click();
 
-    // Também exportar relatório se houver validação
+    // Exporta relatório textual quando houver validação disponível.
     if (doc?.topology || doc?.memorialValidation) {
       const relatorio = gerarRelatorioValidacao(
         doc.docId,
@@ -2206,19 +2105,19 @@ downloadBtn.onclick = () => {
       );
       const linkRel = document.createElement("a");
       linkRel.href = URL.createObjectURL(new Blob([relatorio], { type: "text/plain;charset=utf-8;" }));
-      // Novo: incluir nome do PDF de origem e src no nome do arquivo
+      // Mantém padrão de nome com origem e identificador da fonte.
       linkRel.download = `${pdfOrigemNomeBase || fileNameBase}_${crsName}_Relatorio_${pdfOrigemSrc || "src"}.txt`;
       linkRel.click();
     }
   } catch (e) {
-    // Se o usuário cancelar o download, não mostrar erro
+    // Ignora cancelamento explícito do usuário.
     if (e && e.name !== "AbortError") {
       updateStatus("Erro ao baixar arquivo: " + e.message, "error");
     }
   }
 };
 
-// Salvar na pasta (SHP + CSV)
+// Salva lote de arquivos (SHP + CSV) em diretório escolhido.
 const toArrayBufferFS = (view) => view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
 
 saveToFolderBtn.onclick = async () => {

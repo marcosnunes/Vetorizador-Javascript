@@ -1,86 +1,10 @@
 // Menu lateral (Sidenav)
 function openNav() {
     document.getElementById("mySidenav").style.width = "250px";
-    if (typeof isAppInstalled === 'function' && typeof hideInstallBtn === 'function') {
-        if (isAppInstalled()) hideInstallBtn();
-    }
 }
 
 function closeNav() {
     document.getElementById("mySidenav").style.width = "0";
-}
-
-// --- PWA: Instalar App (com feedback visual) ---
-let deferredPrompt = null;
-const installBtn = document.getElementById('installPwaBtn');
-function hideInstallBtn() {
-    if (installBtn) installBtn.style.display = 'none';
-}
-function isAppInstalled() {
-    // Checa standalone (PWA instalado) e display-mode
-    if (window.matchMedia('(display-mode: standalone)').matches) return true;
-    if (window.navigator.standalone === true) return true;
-    // Checa se já existe service worker controlando e não há prompt
-    if (window.matchMedia('(display-mode: minimal-ui)').matches) return true;
-    // iOS: verifica se está rodando como app
-    if (window.navigator && window.navigator.standalone) return true;
-    // Android Chrome: verifica se não há prompt e já está instalado
-    if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
-    return false;
-}
-if (isAppInstalled()) {
-    hideInstallBtn();
-}
-window.addEventListener('appinstalled', hideInstallBtn);
-window.addEventListener('DOMContentLoaded', function() {
-    if (isAppInstalled()) hideInstallBtn();
-});
-window.addEventListener('beforeinstallprompt', (e) => {
-    if (isAppInstalled()) {
-        hideInstallBtn();
-        return;
-    }
-    e.preventDefault();
-    deferredPrompt = e;
-    if (installBtn) {
-        installBtn.style.display = 'block';
-        installBtn.classList.remove('success', 'error');
-        installBtn.textContent = 'Instalar App';
-    }
-});
-if (installBtn) {
-    installBtn.addEventListener('click', async () => {
-        if (deferredPrompt) {
-            try {
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                if (outcome === 'accepted') {
-                    installBtn.classList.add('success');
-                    installBtn.textContent = 'App instalado!';
-                    setTimeout(() => {
-                        installBtn.style.display = 'none';
-                        installBtn.classList.remove('success');
-                        installBtn.textContent = 'Instalar App';
-                    }, 2000);
-                } else {
-                    installBtn.classList.add('error');
-                    installBtn.textContent = 'Instalação cancelada';
-                    setTimeout(() => {
-                        installBtn.classList.remove('error');
-                        installBtn.textContent = 'Instalar App';
-                    }, 2000);
-                }
-            } catch (err) {
-                installBtn.classList.add('error');
-                installBtn.textContent = 'Erro ao instalar';
-                setTimeout(() => {
-                    installBtn.classList.remove('error');
-                    installBtn.textContent = 'Instalar App';
-                }, 2000);
-            }
-            deferredPrompt = null;
-        }
-    });
 }
 
 // Carrega jsPDF e pdf-lib de forma assíncrona

@@ -6,14 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gerador de PDF</title>
   <link rel="Stylesheet" href="style.css">
-  <link rel="manifest" href="/pdfspliter/manifest.json">
 </head>
 
 <body>
 
-  <!-- Estrutura do Menu Lateral (Sidenav) -->
   <div id="mySidenav" class="sidenav">
-    <button id="installPwaBtn" class="button1">Instalar App</button>
     <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">×</a>
     <a href="/pdfspliter/Dividir/index.html">Dividir</a>
     <a href="/pdfspliter/UnirPDF/index.html">Unir PDF</a>
@@ -26,7 +23,6 @@
   <div class="navigation">
     <nav>
       <div class="nav-wrapper">
-        <!-- Ícone do Menu (Hamburger) -->
         <span class="open-nav" onclick="openNav()">☰</span>
       </div>
     </nav>
@@ -42,13 +38,13 @@
         </label>
         <input type="file" id="imageUpload" name="imageUpload" multiple accept=".jpg, .jpeg, .png"
           style="display: none;" />
-        <span id="file-selected-name">Nenhum arquivo selecionado</span> <!-- Exibe nome dos arquivos -->
+        <span id="file-selected-name">Nenhum arquivo selecionado</span>
         <button id="generatePdf"
           style="background-color: rgb(255, 152, 0); border-top-width: initial; border-right-width: initial; border-bottom-width: initial; border-left-width: initial; border-top-style: none; border-right-style: none; border-bottom-style: none; border-left-style: none; border-top-color: initial; border-right-color: initial; border-bottom-color: initial; border-left-color: initial; border-image-source: initial; border-image-slice: initial; border-image-width: initial; border-image-outset: initial; border-image-repeat: initial; color: white; padding-top: 10px; padding-right: 20px; padding-bottom: 10px; padding-left: 20px; text-align: center; text-decoration-line: none; text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; display: inline-block; font-size: 16px; margin-top: 4px; margin-right: 2px; margin-bottom: 4px; margin-left: 2px; cursor: pointer; border-top-left-radius: 5px; border-top-right-radius: 5px; border-bottom-right-radius: 5px; border-bottom-left-radius: 5px; transition-behavior: normal; transition-duration: 0.3s; transition-timing-function: ease; transition-delay: 0s; transition-property: background-color;">Gerar
           PDF</button>
-        <span id="log-messages">Pronto para processar. Selecione uma ou mais imagens.</span> <!-- Mensagens de log -->
-        <div id="thumbnails-container"> <!-- Container para miniaturas -->
-          <!-- Miniaturas das imagens aparecerão aqui -->
+        <span id="log-messages">Pronto para processar. Selecione uma ou mais imagens.</span>
+        <div id="thumbnails-container">
+          <!-- Miniaturas renderizadas dinamicamente -->
         </div>
       </div>
     </div>
@@ -72,8 +68,8 @@
     <div class="container">
       <div class="col-md-12 columnBlockLayout">
         <h2>Baixe o seu PDF</h2>
-        <div id="pdf-download-container"> <!-- Container para o link de download -->
-          <!-- O link para download aparecerá aqui -->
+        <div id="pdf-download-container">
+          <!-- Link de download renderizado dinamicamente -->
         </div>
       </div>
     </div>

@@ -7,7 +7,6 @@
   <title>Extrator de Coordenadas para ArcGIS</title>
 
   <link rel="stylesheet" href="style.css" />
-  <link rel="manifest" href="/pdfspliter/manifest.json" />
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css" />
 
   <script src="vendor/shpwrite.js"></script>
@@ -102,10 +101,7 @@
   </script>
 </head>
 <body>
-  <!-- Estrutura do Menu Lateral (Sidenav) -->
-    <!-- Estrutura do Menu Lateral (Sidenav) compatível -->
     <div id="mySidenav" class="sidenav">
-        <button id="installPwaBtn" class="button1">Instalar App</button>
         <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">×</a>
         <a href="/pdfspliter/Dividir/index.html">Dividir</a>
         <a href="/pdfspliter/UnirPDF/index.html">Unir PDF</a>
@@ -118,7 +114,6 @@
   <div class="navigation">
     <nav>
       <div class="nav-wrapper">
-        <!-- Ícone do Menu (Hamburger) -->
         <span class="open-nav" onclick="openNav()">☰</span>
       </div>
     </nav>
@@ -130,14 +125,12 @@
         <h1><i class="fas fa-map-marked-alt"></i> Extrator de Coordenadas</h1>
         <p>Extração de Shapefiles (Polígono + Vértices) para ArcGIS e QGIS.</p>
 
-        <!-- Botão original PDF -->
         <label for="fileInput" class="custom-file-upload">
           <i class="fas fa-upload"></i>
           <span id="fileNameDisplay">Escolher Matrícula (PDF)</span>
         </label>
         <input type="file" id="fileInput" accept=".pdf" style="display:none" />
 
-        <!-- NOVO: Botão SHP ao lado -->
         <label for="shpInput" class="custom-file-upload">
           <i class="fas fa-database"></i>
           <span>Carregar SHP</span>
@@ -171,7 +164,7 @@
           <progress id="progressBar" value="0" max="100" style="width:100%;height:15px;margin-top:5px;"></progress>
         </div>
 
-        <!-- Seletor de matrículas (PDF unificado) -->
+        <!-- Seletor de matrículas detectadas no PDF unificado -->
         <div id="docSelectorBox" class="stat-card" style="display:none; margin-bottom: 15px; text-align:left;">
           <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">Documentos (matrículas) detectados</p>
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;">
@@ -181,7 +174,7 @@
           <small style="color:#666; display:block; margin-top:8px;">CSV baixa somente a matrícula selecionada. “Salvar na Pasta” grava SHP + CSV de todas as matrículas.</small>
         </div>
 
-        <!-- CRS detectado automaticamente -->
+        <!-- Resultado da detecção automática de CRS -->
         <div id="crsDetectedBox" class="stat-card" style="display:none; margin-bottom: 15px; text-align:left;">
           <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">Sistema de Coordenadas (do documento selecionado)</p>
           <h3 id="crsDetectedTitle" style="margin: 8px 0; color: #2c3e50;">—</h3>
@@ -207,7 +200,7 @@
 
         <div id="status" style="display:none;"></div>
 
-        <!-- NOVO: Painel de Validação Topológica -->
+        <!-- Painel de validação topológica -->
         <div id="validationBox" class="stat-card" style="display:none; text-align:left; border-left: 4px solid #ff9800;">
           <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">
             <i class="fas fa-check-circle"></i> Validação Topológica do Polígono
@@ -237,7 +230,7 @@
 
         </div>
 
-        <!-- NOVO: bloco de metadados do memorial -->
+        <!-- Metadados usados na geração do memorial -->
         <div id="memorialMetaBox" class="stat-card" style="display:none; text-align:left;">
           <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">Dados para o Memorial Descritivo</p>
 
