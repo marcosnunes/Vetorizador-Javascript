@@ -525,7 +525,7 @@ body {
 .sidebar-toggle {
   position: absolute;
   top: 50%;
-  right: calc(350px + 8px);
+  right: calc(350px + 18px);
   transform: translateY(-50%);
   width: 22px;
   height: 56px;
