@@ -429,6 +429,23 @@ function aplicarPreset(tipo) {
         nome: 'Galpões Industriais (Profissional)'
       };
       break;
+
+    case 'trapiche':
+      preset = {
+        edgeThreshold: 60,        // Mais sensível para passarelas e píeres estreitos
+        morphologySize: 3,        // Preserva estruturas finas sem engrossar demais
+        minArea: 10.0,            // Aceita telhados menores e trapiches curtos
+        simplification: 0.000005, // Mantém detalhes do contorno
+        contrastBoost: 1.7,       // Realça bordas em água/sombra
+        minQualityScore: 30,      // Menos rígido para não perder estruturas lineares
+        mergeDistance: 2.0,       // Fusão moderada para evitar unir casas distantes
+        clusteringEnabled: true,
+        clusterEps: 1.8,
+        clusterMinPts: 4,
+        minClusterSize: 20,
+        nome: 'Trapiches + Telhados (Alta Sensibilidade)'
+      };
+      break;
       
     default:
       return;
@@ -441,7 +458,7 @@ function aplicarPreset(tipo) {
   CONFIG.simplification = preset.simplification;
   CONFIG.contrastBoost = preset.contrastBoost;
   CONFIG.minQualityScore = preset.minQualityScore;
-  CONFIG.mergeDistance = 3; // Sempre ativa fusão nos presets
+  CONFIG.mergeDistance = preset.mergeDistance ?? 3;
   CONFIG.clusteringEnabled = preset.clusteringEnabled;
   CONFIG.clusterEps = preset.clusterEps;
   CONFIG.clusterMinPts = preset.clusterMinPts;
@@ -460,8 +477,8 @@ function aplicarPreset(tipo) {
   document.getElementById('simplificationInput').value = preset.simplification.toFixed(6);
   document.getElementById('contrastBoost').value = preset.contrastBoost;
   document.getElementById('contrastBoostInput').value = preset.contrastBoost.toFixed(1);
-  document.getElementById('mergeDistance').value = 3;
-  document.getElementById('mergeDistanceInput').value = '3.0';
+  document.getElementById('mergeDistance').value = CONFIG.mergeDistance;
+  document.getElementById('mergeDistanceInput').value = Number(CONFIG.mergeDistance).toFixed(1);
   document.getElementById('clusteringEnabled').checked = preset.clusteringEnabled;
   document.getElementById('clusterEps').value = preset.clusterEps;
   document.getElementById('clusterEpsInput').value = preset.clusterEps.toFixed(1);
