@@ -45,6 +45,47 @@ Esta solução integra, em uma única plataforma, duas frentes essenciais da ope
 - **Conversões Operacionais**: fluxos PDF↔imagem para demandas administrativas e técnicas.
 - **PDFtoArcGIS**: transformação de conteúdo técnico em dados geográficos prontos para uso institucional.
 
+### Diretriz de Arquitetura para PDFtoArcGIS (Azure AI)
+
+- A leitura de PDF e extração de coordenadas será centralizada em **backend Azure**, com IA responsável por interpretar padrões documentais e geográficos.
+- O cliente envia o PDF e recebe como resposta **apenas GeoJSON limpo** no formato de integração do fluxo interno.
+- Não haverá fallback local por regex nem segunda rota de extração no front-end; em caso de falha, o backend retorna mensagem de erro estruturada.
+- Esta decisão atende ao ambiente corporativo com restrições de firewall, priorizando serviços Microsoft já liberados.
+- A adoção de Azure reforça requisitos institucionais de proteção de dados e governança operacional.
+
+### Contrato da API (PDFtoArcGIS)
+
+- Endpoint: `POST /pdfspliter/api/pdf-to-geojson`
+- Entrada:
+  - `pdfBase64` (string, obrigatório): conteúdo do PDF em Base64.
+  - `fileName` (string, opcional): nome do arquivo para rastreabilidade.
+- Saída de sucesso (`200`):
+  - `success: true`
+  - `matricula: string`
+  - `projectionKey: string` (ex.: `SIRGAS2000_22S`)
+  - `warnings: string[]`
+  - `geojson: FeatureCollection` (1 polígono pronto para o fluxo)
+  - `pagesAnalyzed: number`
+- Saída de falha (`4xx/5xx`):
+  - `success: false`
+  - `error: string`
+  - Sem fallback local automático no cliente.
+
+### Variáveis de Ambiente (Azure)
+
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_DEPLOYMENT`
+- `AZURE_OPENAI_API_VERSION` (sugestão: `2024-10-21`)
+- `AZURE_DOCUMENTINTELLIGENCE_ENDPOINT`
+- `AZURE_DOCUMENTINTELLIGENCE_KEY`
+- `AZURE_DOCUMENTINTELLIGENCE_API_VERSION` (sugestão: `2024-11-30`)
+
+### Modelo recomendado (custo x qualidade)
+
+- Padrão inicial: `gpt-4o-mini` (melhor equilíbrio para extração estruturada com custo menor).
+- Upgrade seletivo: `gpt-4.1` para documentos de baixa qualidade/OCR difícil.
+
 ---
 
 ## Recursos-Chave
@@ -127,6 +168,8 @@ Esta solução integra, em uma única plataforma, duas frentes essenciais da ope
 - Processamento de arquivos e imagens realizado localmente.
 - Sem dependência obrigatória de upload para processamento básico.
 - Camadas de armazenamento e sincronização quando aplicável.
+- No módulo PDFtoArcGIS, o processamento evolui para backend Azure com contrato de retorno estrito em GeoJSON.
+- Em falhas, o retorno esperado é mensagem de erro do serviço (sem fluxo alternativo de parsing no cliente).
 
 ---
 

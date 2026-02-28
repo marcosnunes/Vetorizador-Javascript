@@ -4,6 +4,70 @@ if (typeof displayLogMessage !== 'function' && window.displayLogMessage) {
   var displayLogMessage = window.displayLogMessage;
 }
 
+async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
+  const MAX_RETRIES = 3;
+  const INITIAL_DELAY_MS = 1200;
+
+  const payload = JSON.stringify({ pdfBase64, fileName });
+  const candidateRoutes = ['/api/pdf-to-geojson', '/pdfspliter/api/pdf-to-geojson'];
+  let response = null;
+  let lastError = null;
+
+  for (const route of candidateRoutes) {
+    try {
+      const res = await fetch(route, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+
+      if (res.status === 404) {
+        lastError = new Error(`Rota não encontrada: ${route}`);
+        continue;
+      }
+
+      response = res;
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (!response) {
+    throw new Error(lastError?.message || 'Não foi possível acessar a API de extração Azure.');
+  }
+
+  if (!response.ok) {
+    if ((response.status === 429 || response.status >= 500) && retryCount < MAX_RETRIES) {
+      const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return callAzurePdfToGeoJson(pdfBase64, fileName, retryCount + 1);
+    }
+
+    const errPayload = await response.json().catch(() => ({}));
+    const message = errPayload?.error || `Erro HTTP ${response.status} na API Azure`;
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
+function arrayBufferToBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
 async function callOpenAIGPT4Turbo(prompt, retryCount = 0) {
   const MAX_RETRIES = 5;
   const INITIAL_DELAY_MS = 1000;
@@ -2229,6 +2293,78 @@ function displayResults() {
   scrollToResults();
 }
 
+function applyAzureGeoJsonResult(apiResult, sourceFileName) {
+  const geojson = apiResult?.geojson;
+  if (!geojson) {
+    throw new Error('API Azure não retornou GeoJSON.');
+  }
+
+  const nameBase = (sourceFileName || 'coordenadas_extracao').replace(/\.[^/.]+$/, '');
+  const projectionFromApi = String(apiResult?.projectionKey || '').trim();
+
+  let vertices = verticesFromGeoJSON(geojson, projectionFromApi || null);
+  vertices = vertices
+    .map((vertex, idx) => ({
+      id: vertex.id || `V${String(idx + 1).padStart(3, '0')}`,
+      east: Number(vertex.east),
+      north: Number(vertex.north)
+    }))
+    .filter((vertex) => Number.isFinite(vertex.east) && Number.isFinite(vertex.north));
+
+  if (vertices.length < 3) {
+    throw new Error('GeoJSON retornado possui menos de 3 vértices válidos.');
+  }
+
+  vertices = prepararVerticesComMedidas(vertices);
+
+  const inferredByCoords = inferCrsByCoordinates(vertices);
+  const projKey = projectionFromApi ||
+    (inferredByCoords?.zone ? `SIRGAS2000_${inferredByCoords.zone}S` : null) ||
+    getActiveProjectionKey() ||
+    'SIRGAS2000_22S';
+
+  const topology = validatePolygonTopology(vertices, projKey);
+  const warnings = Array.isArray(apiResult?.warnings) ? apiResult.warnings : [];
+  const projectionInfo = {
+    confidence: projectionFromApi ? 'alta' : (inferredByCoords ? 'média' : 'baixa'),
+    reason: projectionFromApi
+      ? 'CRS informado pela IA Azure no retorno do GeoJSON.'
+      : (inferredByCoords?.reason || 'CRS não informado pela IA; aplicado padrão ativo.')
+  };
+
+  documentsResults = [{
+    docId: apiResult?.matricula || nameBase.toUpperCase(),
+    pages: apiResult?.pagesAnalyzed ? `1-${apiResult.pagesAnalyzed}` : '1',
+    projectionKey: projKey,
+    manualProjectionKey: null,
+    projectionInfo,
+    vertices,
+    warnings,
+    topology,
+    memorialValidation: { matches: [], issues: [] },
+    memorialData: { azimutes: [], distances: [] },
+    relativeInfo: null,
+    text: ''
+  }];
+
+  activeDocIndex = 0;
+  window._arcgis_crs_key = projKey;
+  extractedCoordinates = vertices;
+  fileNameBase = apiResult?.matricula ? `MAT_${apiResult.matricula}` : nameBase;
+
+  showDetectedCrsUI(projKey, projectionInfo);
+  updateValidationUI(topology);
+  displayResults();
+  renderDocSelector();
+
+  updateStatus(`✅ IA Azure concluiu: ${vertices.length} coordenadas processadas.`, 'success');
+  progressContainer.style.display = 'none';
+
+  if (typeof displayLogMessage === 'function') {
+    displayLogMessage(`[PDFtoArcgis][LogUI] ✅ GeoJSON recebido da IA Azure (${vertices.length} vértices).`);
+  }
+}
+
 // Processamento do PDF
 fileInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -2258,11 +2394,31 @@ fileInput.addEventListener("change", async (event) => {
   }
 
   try {
-    updateStatus("📄 Carregando PDF...", "info");
+    updateStatus("📄 Enviando PDF para IA Azure...", "info");
     if (typeof displayLogMessage === 'function') {
       displayLogMessage(`[PDFtoArcgis][LogUI] 🧭 Perfil de extração: ${extractionProfile.notes}`);
+      displayLogMessage(`[PDFtoArcgis][LogUI] ☁️ Fluxo único ativo: backend Azure (sem fallback local).`);
     }
+
     const arrayBuffer = await file.arrayBuffer();
+    const pdfBase64 = arrayBufferToBase64(arrayBuffer);
+
+    progressBar.value = 35;
+    document.getElementById("progressLabel").innerText = "Processando PDF na IA Azure...";
+
+    const apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name);
+    progressBar.value = 100;
+
+    if (!apiResult?.success) {
+      throw new Error(apiResult?.error || 'Falha na extração via IA Azure.');
+    }
+
+    const enableLegacyLocalPipeline = false;
+    if (!enableLegacyLocalPipeline) {
+      applyAzureGeoJsonResult(apiResult, file.name);
+      return;
+    }
+
     const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer), ignoreEncryption: true }).promise;
     const pagesText = [];
 

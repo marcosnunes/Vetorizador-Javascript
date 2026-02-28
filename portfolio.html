@@ -247,6 +247,20 @@
     </section>
 
     <section class="section">
+      <h3>Estratégia de IA Corporativa (Azure)</h3>
+      <p>
+        Para o módulo PDFtoArcGIS, a leitura de documentos e extração de coordenadas será centralizada em backend Azure,
+        com IA responsável por compreender os padrões dos PDFs e devolver diretamente o GeoJSON limpo utilizado no fluxo.
+      </p>
+      <ul>
+        <li>Sem parsing por regex no cliente e sem fallback alternativo de extração.</li>
+        <li>Em caso de falha, o retorno previsto é mensagem de erro estruturada do serviço.</li>
+        <li>A arquitetura prioriza serviços Microsoft devido a políticas corporativas de firewall.</li>
+        <li>O uso de Azure atende exigências de proteção de dados e governança institucional.</li>
+      </ul>
+    </section>
+
+    <section class="section">
       <h3>Principais Casos de Uso</h3>
       <ul>
         <li>Cadastro e atualização de base imobiliária.</li>
