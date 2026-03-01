@@ -160,10 +160,9 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
                 minItems: 1,
                 items: {
                   type: 'object',
-                  additionalProperties: true,
+                  additionalProperties: false,
                   properties: {
                     type: { type: 'string', enum: ['Feature'] },
-                    properties: { type: 'object' },
                     geometry: {
                       type: 'object',
                       additionalProperties: false,
