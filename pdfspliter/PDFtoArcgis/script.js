@@ -11,16 +11,22 @@ function getPdfToArcgisConfig() {
 
 function getAzurePdfToGeoJsonRoutes() {
   const cfg = getPdfToArcgisConfig();
-  const defaults = ['/api/pdf-to-geojson'];
   const configuredUrl = String(cfg.azurePdfToGeoJsonUrl || '').trim();
   const configuredUrls = Array.isArray(cfg.azurePdfToGeoJsonUrls)
     ? cfg.azurePdfToGeoJsonUrls.map((url) => String(url || '').trim()).filter(Boolean)
     : [];
 
-  const routes = [
+  const explicitRoutes = [
     ...configuredUrls,
-    ...(configuredUrl ? [configuredUrl] : []),
-    ...defaults
+    ...(configuredUrl ? [configuredUrl] : [])
+  ];
+
+  if (explicitRoutes.length > 0) {
+    return [...new Set(explicitRoutes)];
+  }
+
+  const routes = [
+    '/api/pdf-to-geojson'
   ];
 
   return [...new Set(routes)];

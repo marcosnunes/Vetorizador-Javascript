@@ -7,6 +7,31 @@ function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
 }
 
+function buildCorsHeaders(req) {
+  const env = (globalThis.process && globalThis.process.env)
+    ? globalThis.process.env
+    : {};
+
+  const configuredOrigins = String(env.PDF_TO_GEOJSON_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const requestOrigin = String(req?.headers?.origin || '').trim();
+  const allowAnyOrigin = configuredOrigins.length === 0 || configuredOrigins.includes('*');
+  const allowedOrigin = allowAnyOrigin
+    ? '*'
+    : (configuredOrigins.includes(requestOrigin) ? requestOrigin : configuredOrigins[0]);
+
+  return {
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin'
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -243,6 +268,17 @@ function validateGeoJsonPayload(payload) {
 }
 
 export default async function handler(req, res) {
+  const corsHeaders = buildCorsHeaders(req);
+  res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
+  res.setHeader('Access-Control-Allow-Methods', corsHeaders['Access-Control-Allow-Methods']);
+  res.setHeader('Access-Control-Allow-Headers', corsHeaders['Access-Control-Allow-Headers']);
+  res.setHeader('Access-Control-Max-Age', corsHeaders['Access-Control-Max-Age']);
+  res.setHeader('Vary', corsHeaders.Vary);
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método não permitido' });
   }
