@@ -85,7 +85,7 @@ Esta solução integra, em uma única plataforma, duas frentes essenciais da ope
 
 - O frontend estático de `pdfspliter/PDFtoArcgis` não deve depender de rota serverless local em produção (`/api/*`).
 - Para modo híbrido (Azure + Vercel), defina `window.PDFTOARCGIS_CONFIG.azurePdfToGeoJsonUrl` (ou `azurePdfToGeoJsonUrls`) com a URL pública do backend Azure; o cliente tentará essa URL primeiro e depois fará fallback para `/api/pdf-to-geojson`.
-- O fallback OCR local fica desativado por padrão (`enableLocalOcrFallback: false`) para reduzir carga e evitar dependências legadas.
+- O OCR local (Tesseract) foi removido do carregamento do frontend para manter o fluxo 100% backend Azure.
 
 ### Modelo recomendado (custo x qualidade)
 

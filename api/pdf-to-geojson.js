@@ -129,7 +129,7 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
             type: 'object',
             additionalProperties: false,
             properties: {
-              type: { const: 'FeatureCollection' },
+              type: { type: 'string', enum: ['FeatureCollection'] },
               features: {
                 type: 'array',
                 minItems: 1,
@@ -137,13 +137,13 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
                   type: 'object',
                   additionalProperties: true,
                   properties: {
-                    type: { const: 'Feature' },
+                    type: { type: 'string', enum: ['Feature'] },
                     properties: { type: 'object' },
                     geometry: {
                       type: 'object',
                       additionalProperties: false,
                       properties: {
-                        type: { const: 'Polygon' },
+                        type: { type: 'string', enum: ['Polygon'] },
                         coordinates: {
                           type: 'array',
                           minItems: 1,

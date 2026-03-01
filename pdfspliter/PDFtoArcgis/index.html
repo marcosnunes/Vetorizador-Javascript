@@ -17,8 +17,7 @@
   <script src="vendor/docx.umd.js"></script>
   <script>
     window.PDFTOARCGIS_CONFIG = Object.assign({
-      azurePdfToGeoJsonUrl: "https://vetorizador-javascript.vercel.app/api/pdf-to-geojson",
-      enableLocalOcrFallback: false
+      azurePdfToGeoJsonUrl: "https://vetorizador-javascript.vercel.app/api/pdf-to-geojson"
     }, window.PDFTOARCGIS_CONFIG || {});
   </script>
   <script>
@@ -28,86 +27,6 @@
         return;
       }
       console.warn("[DOCX] Biblioteca nao encontrada. Verifique o arquivo local.");
-    })();
-  </script>
-  <script>
-    (function ensureTesseractLoaded() {
-      if (!window.PDFTOARCGIS_CONFIG || window.PDFTOARCGIS_CONFIG.enableLocalOcrFallback !== true) {
-        console.log("[OCR] Fallback local desativado (modo Azure-only).");
-        return;
-      }
-
-      if (!window.__tesseractReady) {
-        window.__tesseractReady = new Promise(function(resolve, reject) {
-          window.__resolveTesseract = resolve;
-          window.__rejectTesseract = reject;
-        });
-      }
-
-      if (window.Tesseract) {
-        if (!window.__tesseractLogged) {
-          console.log("[OCR] Tesseract.js carregado.");
-          window.__tesseractLogged = true;
-        }
-        if (window.__resolveTesseract) window.__resolveTesseract(true);
-        return;
-      }
-
-      var s = document.createElement("script");
-      s.src = "vendor/tesseract/tesseract.min.js";
-      s.onload = function() {
-        if (window.Tesseract) {
-          if (!window.__tesseractLogged) {
-            console.log("[OCR] Tesseract.js carregado (local).");
-            window.__tesseractLogged = true;
-          }
-          if (window.__resolveTesseract) window.__resolveTesseract(true);
-          return;
-        }
-        console.warn("[OCR] Falha ao carregar Tesseract.js local. Verifique os arquivos locais.");
-        var f = document.createElement("script");
-        f.src = "vendor/tesseract/tesseract.min.js";
-        f.onload = function() {
-          if (window.Tesseract) {
-            if (!window.__tesseractLogged) {
-              console.log("[OCR] Tesseract.js carregado (local).");
-              window.__tesseractLogged = true;
-            }
-            if (window.__resolveTesseract) window.__resolveTesseract(true);
-          } else {
-            console.error("[OCR] Falha ao carregar Tesseract.js.");
-            if (window.__rejectTesseract) window.__rejectTesseract(new Error("Tesseract.js not loaded"));
-          }
-        };
-        f.onerror = function() {
-          console.error("[OCR] Falha ao carregar Tesseract.js (unpkg).");
-          if (window.__rejectTesseract) window.__rejectTesseract(new Error("Tesseract.js load error"));
-        };
-        document.head.appendChild(f);
-      };
-      s.onerror = function() {
-        console.warn("[OCR] Falha ao carregar Tesseract.js local. Verifique os arquivos locais.");
-        var f = document.createElement("script");
-        f.src = "vendor/tesseract/tesseract.min.js";
-        f.onload = function() {
-          if (window.Tesseract) {
-            if (!window.__tesseractLogged) {
-              console.log("[OCR] Tesseract.js carregado (local).");
-              window.__tesseractLogged = true;
-            }
-            if (window.__resolveTesseract) window.__resolveTesseract(true);
-          } else {
-            console.error("[OCR] Falha ao carregar Tesseract.js.");
-            if (window.__rejectTesseract) window.__rejectTesseract(new Error("Tesseract.js not loaded"));
-          }
-        };
-        f.onerror = function() {
-          console.error("[OCR] Falha ao carregar Tesseract.js (unpkg).");
-          if (window.__rejectTesseract) window.__rejectTesseract(new Error("Tesseract.js load error"));
-        };
-        document.head.appendChild(f);
-      };
-      document.head.appendChild(s);
     })();
   </script>
 </head>
