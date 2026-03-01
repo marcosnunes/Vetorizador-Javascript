@@ -86,7 +86,10 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
   const endpoint = sanitizeEndpoint(openAiConfig.endpoint);
   const apiVersion = openAiConfig.apiVersion || DEFAULT_OPENAI_API_VERSION;
 
-  const chatUrl = `${endpoint}/openai/deployments/${encodeURIComponent(openAiConfig.deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+  const hasDirectChatPath = /\/openai\/deployments\/.+\/chat\/completions/i.test(endpoint);
+  const chatUrl = hasDirectChatPath
+    ? endpoint
+    : `${endpoint}/openai/deployments/${encodeURIComponent(openAiConfig.deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
 
   const systemPrompt = [
     'Você é um extrator geoespacial para documentos fundiários/cartoriais brasileiros.',
@@ -244,22 +247,28 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
+  const env = (globalThis.process && globalThis.process.env)
+    ? globalThis.process.env
+    : {};
+
   const openAiConfig = {
-    endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-    apiKey: process.env.AZURE_OPENAI_API_KEY,
-    deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
-    apiVersion: process.env.AZURE_OPENAI_API_VERSION || DEFAULT_OPENAI_API_VERSION
+    endpoint: env.AZURE_OPENAI_ENDPOINT,
+    apiKey: env.AZURE_OPENAI_API_KEY,
+    deployment: env.AZURE_OPENAI_DEPLOYMENT,
+    apiVersion: env.AZURE_OPENAI_API_VERSION || DEFAULT_OPENAI_API_VERSION
   };
+
+  const usesDirectChatEndpoint = /\/openai\/deployments\/.+\/chat\/completions/i.test(String(openAiConfig.endpoint || ''));
 
   const docIntelConfig = {
-    endpoint: process.env.AZURE_DOCUMENTINTELLIGENCE_ENDPOINT,
-    apiKey: process.env.AZURE_DOCUMENTINTELLIGENCE_KEY,
-    apiVersion: process.env.AZURE_DOCUMENTINTELLIGENCE_API_VERSION || DEFAULT_DOCINTEL_API_VERSION
+    endpoint: env.AZURE_DOCUMENTINTELLIGENCE_ENDPOINT,
+    apiKey: env.AZURE_DOCUMENTINTELLIGENCE_KEY,
+    apiVersion: env.AZURE_DOCUMENTINTELLIGENCE_API_VERSION || DEFAULT_DOCINTEL_API_VERSION
   };
 
-  if (!openAiConfig.endpoint || !openAiConfig.apiKey || !openAiConfig.deployment) {
+  if (!openAiConfig.endpoint || !openAiConfig.apiKey || (!usesDirectChatEndpoint && !openAiConfig.deployment)) {
     return res.status(500).json({
-      error: 'Configuração Azure OpenAI incompleta. Defina endpoint, api key e deployment.'
+      error: 'Configuração Azure OpenAI incompleta. Defina endpoint e api key; deployment é obrigatório quando o endpoint não for o chat/completions completo.'
     });
   }
 

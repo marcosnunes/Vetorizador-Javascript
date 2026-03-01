@@ -4,12 +4,39 @@ if (typeof displayLogMessage !== 'function' && window.displayLogMessage) {
   var displayLogMessage = window.displayLogMessage;
 }
 
+function getPdfToArcgisConfig() {
+  const cfg = window.PDFTOARCGIS_CONFIG;
+  return (cfg && typeof cfg === 'object') ? cfg : {};
+}
+
+function getAzurePdfToGeoJsonRoutes() {
+  const cfg = getPdfToArcgisConfig();
+  const defaults = ['/api/pdf-to-geojson'];
+  const configuredUrl = String(cfg.azurePdfToGeoJsonUrl || '').trim();
+  const configuredUrls = Array.isArray(cfg.azurePdfToGeoJsonUrls)
+    ? cfg.azurePdfToGeoJsonUrls.map((url) => String(url || '').trim()).filter(Boolean)
+    : [];
+
+  const routes = [
+    ...configuredUrls,
+    ...(configuredUrl ? [configuredUrl] : []),
+    ...defaults
+  ];
+
+  return [...new Set(routes)];
+}
+
+function isLocalOcrFallbackEnabled() {
+  const cfg = getPdfToArcgisConfig();
+  return cfg.enableLocalOcrFallback === true;
+}
+
 async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
   const MAX_RETRIES = 3;
   const INITIAL_DELAY_MS = 1200;
 
   const payload = JSON.stringify({ pdfBase64, fileName });
-  const candidateRoutes = ['/api/pdf-to-geojson', '/pdfspliter/api/pdf-to-geojson'];
+  const candidateRoutes = getAzurePdfToGeoJsonRoutes();
   let response = null;
   let lastError = null;
 
@@ -34,7 +61,11 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
   }
 
   if (!response) {
-    throw new Error(lastError?.message || 'Não foi possível acessar a API de extração Azure.');
+    const cfg = getPdfToArcgisConfig();
+    const missingEndpointHint = !String(cfg.azurePdfToGeoJsonUrl || '').trim()
+      ? ' Configure window.PDFTOARCGIS_CONFIG.azurePdfToGeoJsonUrl com a URL pública do backend Azure.'
+      : '';
+    throw new Error((lastError?.message || 'Não foi possível acessar a API de extração Azure.') + missingEndpointHint);
   }
 
   if (!response.ok) {
@@ -69,36 +100,10 @@ function arrayBufferToBase64(arrayBuffer) {
 }
 
 async function callOpenAIGPT4Turbo(prompt, retryCount = 0) {
-  const MAX_RETRIES = 5;
-  const INITIAL_DELAY_MS = 1000;
-  
-  const response = await fetch('/pdfspliter/api/llama-3.1-8b-instant', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt })
-  });
-  
-  if (!response.ok) {
-    // Trata limite de taxa com retentativa exponencial.
-    if (response.status === 429 && retryCount < MAX_RETRIES) {
-      const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
-      console.warn(`[PDFtoArcgis] 429 Too Many Requests. Retry ${retryCount + 1}/${MAX_RETRIES} em ${delay}ms...`);
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] Limite de taxa. Aguardando ${(delay/1000).toFixed(1)}s...`);
-      }
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return callOpenAIGPT4Turbo(prompt, retryCount + 1);
-    }
-    
-    if (typeof displayLogMessage === 'function') {
-      displayLogMessage('[PDFtoArcgis] Erro na API IA: ' + response.status);
-    } else {
-      console.error('[PDFtoArcgis] Erro na API IA: ' + response.status);
-    }
-    return null;
+  if (typeof displayLogMessage === 'function') {
+    displayLogMessage('[PDFtoArcgis][LogUI] Pipeline legado de LLM local desativado.');
   }
-  const data = await response.json();
-  return data;
+  return null;
 }
 
 // Texto bruto segue diretamente para a IA.
@@ -1301,6 +1306,10 @@ async function extractPageTextSafely(page, pageIndex) {
 
 // OCR por página (Android primeiro, fallback Tesseract.js)
 async function performOcrOnPage(page, pageIndex) {
+  if (!isLocalOcrFallbackEnabled()) {
+    return "";
+  }
+
   if (window.Android && window.Android.performOCR) {
     try {
       const ocrText = await window.Android.performOCR(pageIndex);
@@ -2384,12 +2393,14 @@ fileInput.addEventListener("change", async (event) => {
   documentsResults = [];
   activeDocIndex = -1;
 
-  const ocrAvailable = (window.Android && window.Android.performOCR) || window.Tesseract;
-  if (!ocrAvailable) {
-    const msg = "⚠️ OCR indisponivel: habilite Tesseract.js no navegador ou OCR do Android.";
-    updateStatus(msg, "warning");
-    if (typeof displayLogMessage === 'function') {
-      displayLogMessage(`[PDFtoArcgis][LogUI] ${msg}`);
+  if (isLocalOcrFallbackEnabled()) {
+    const ocrAvailable = (window.Android && window.Android.performOCR) || window.Tesseract;
+    if (!ocrAvailable) {
+      const msg = "⚠️ OCR indisponivel: habilite Tesseract.js no navegador ou OCR do Android.";
+      updateStatus(msg, "warning");
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage(`[PDFtoArcgis][LogUI] ${msg}`);
+      }
     }
   }
 
@@ -2413,101 +2424,8 @@ fileInput.addEventListener("change", async (event) => {
       throw new Error(apiResult?.error || 'Falha na extração via IA Azure.');
     }
 
-    const enableLegacyLocalPipeline = false;
-    if (!enableLegacyLocalPipeline) {
-      applyAzureGeoJsonResult(apiResult, file.name);
-      return;
-    }
-
-    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer), ignoreEncryption: true }).promise;
-    const pagesText = [];
-
-    // Leitura de todas as paginas
-    let emptyPages = 0;
-    let ocrPages = 0;
-    if (typeof displayLogMessage === 'function') {
-      displayLogMessage(`[PDFtoArcgis][LogUI] 📖 Lendo ${pdf.numPages} página(s)`);
-    }
-    
-    for (let i = 1; i <= pdf.numPages; i++) {
-      progressBar.value = Math.round((i / pdf.numPages) * 100);
-      document.getElementById("progressLabel").innerText = `Lendo página ${i}/${pdf.numPages}...`;
-
-      try {
-        const page = await pdf.getPage(i);
-        const pageText = await extractPageTextSafely(page, i);
-        const preparedPageText = prepareTextForExtraction(pageText).regexBase;
-
-        // OCR por padrão apenas com texto vazio; perfis calibrados podem forçar OCR
-        let safeText = preparedPageText || "";
-        const hasSignal = hasCoordinateSignal(safeText);
-        const shouldRunOcr = extractionProfile.forceOcrAllPages || !safeText.trim();
-
-        if (shouldRunOcr) {
-          document.getElementById("progressLabel").innerText = `OCR da página ${i}/${pdf.numPages}...`;
-          if (typeof displayLogMessage === 'function') {
-            const reason = extractionProfile.forceOcrAllPages
-              ? 'perfil calibrado (OCR forçado por documento)'
-              : 'texto vazio';
-            displayLogMessage(`[PDFtoArcgis][LogUI] 🔍 Página ${i}: OCR (${reason})`);
-          }
-          const ocrText = await performOcrOnPage(page, i);
-          const preparedOcrText = prepareTextForExtraction(ocrText).regexBase;
-          if (preparedOcrText && preparedOcrText.trim().length > 10 && hasCoordinateSignal(preparedOcrText)) {
-            safeText = preparedOcrText;
-            ocrPages++;
-            if (typeof displayLogMessage === 'function') {
-              displayLogMessage(`[PDFtoArcgis][LogUI] ✅ Página ${i}: OCR ok (${preparedOcrText.length} chars)`);
-            }
-          } else if (!hasSignal) {
-            safeText = preparedPageText || "";
-          }
-        } else {
-          if (typeof displayLogMessage === 'function') {
-            displayLogMessage(`[PDFtoArcgis][LogUI] ✓ Página ${i}: texto ok (${safeText.length} chars)`);
-          }
-        }
-        if (safeText && !hasCoordinateSignal(safeText) && typeof displayLogMessage === 'function') {
-          displayLogMessage(`[PDFtoArcgis][LogUI] ℹ️ Página ${i}: texto sem sinal forte de coordenadas (mantido para IA)`);
-        }
-        if (!safeText.trim()) emptyPages++;
-        pagesText.push(safeText);
-      } catch (e) {
-        const msg = `[PDFtoArcgis] Erro ao ler página ${i}: ${e?.message || e}`;
-        if (typeof displayLogMessage === 'function') {
-          displayLogMessage(msg);
-        } else {
-          console.error(msg);
-        }
-        emptyPages++;
-        pagesText.push("");
-        continue;
-      }
-    }
-
-    if (ocrPages > 0) {
-      const msg = `ℹ️ OCR em ${ocrPages} página(s).`;
-      updateStatus(msg, "info");
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] ${msg}`);
-      }
-    }
-    if (emptyPages > 0) {
-      const msg = `⚠️ ${emptyPages} página(s) sem texto detectável. Reexporte com camada de texto.`;
-      updateStatus(msg, "warning");
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] ${msg}`);
-      }
-    }
-
-    // --- LÓGICA DE INFERÊNCIA REVERSA ---
-    const fullText = pagesText.join("\n");
-
-    // Detectar CRS apenas pelo texto (IA faz a extração de vertices)
-    const projInfo = detectProjectionFromText(fullText, []);
-
-    // Agora sim chama o processamento final
-    processExtractUnified(pagesText, projInfo);
+    applyAzureGeoJsonResult(apiResult, file.name);
+    return;
 
   } catch (e) {
     console.error("Erro no processamento:", e);
@@ -2515,241 +2433,6 @@ fileInput.addEventListener("change", async (event) => {
   }
 });
 
-
-
-async function processExtractUnified(pagesText, projInfo = null) {
-  // Estratégia única: Processar página por página
-  let iaObj = null;
-  
-  console.log(`[PDFtoArcgis] Processando ${pagesText.length} página(s) individualmente...`);
-  if (typeof displayLogMessage === 'function') {
-    displayLogMessage(`[PDFtoArcgis][LogUI] 🤖 IA: extraindo coordenadas (texto bruto)`);
-  }
-  iaObj = await deducePolygonVerticesPerPage(pagesText);
-  
-  if (!iaObj) {
-    updateStatus('❌ Falha na extração por IA.', 'error');
-    progressContainer.style.display = "none";
-    return;
-  }
-
-  const rawVertices = Array.isArray(iaObj.vertices) ? iaObj.vertices : [];
-  let relativeMode = iaObj?.modo === "relativo" || iaObj?.relative === true;
-  const hasLatLon = rawVertices.some(v => v?.lat !== undefined || v?.lon !== undefined || v?.latitude !== undefined || v?.longitude !== undefined);
-
-  let vertices = rawVertices.map((v, idx) => ({
-    id: v.id || `V${String(idx + 1).padStart(3, '0')}`,
-    north: typeof v.norte === 'number' ? v.norte : (typeof v.north === 'number' ? v.north : parseFloat((v.norte ?? v.north ?? "").toString().replace(/,/g, "."))),
-    east: typeof v.este === 'number' ? v.este : (typeof v.east === 'number' ? v.east : parseFloat((v.este ?? v.east ?? "").toString().replace(/,/g, "."))),
-    lat: typeof v.lat === 'number' ? v.lat : (typeof v.latitude === 'number' ? v.latitude : parseFloat((v.lat ?? v.latitude ?? "").toString().replace(/,/g, "."))),
-    lon: typeof v.lon === 'number' ? v.lon : (typeof v.longitude === 'number' ? v.longitude : parseFloat((v.lon ?? v.longitude ?? "").toString().replace(/,/g, "."))),
-    azimute: v.azimute,
-    azimute_dms: v.azimute_dms,
-    distancia: v.distancia,
-    ordem: idx + 1
-  }));
-
-  let relativeInfo = null;
-  const warnings = [];
-  let forceProjectionKey = null;
-  let projectionReason = null;
-
-  const hasCoords = vertices.some(v => Number.isFinite(v.north) && Number.isFinite(v.east));
-  const hasMeasures = rawVertices.some(v => v?.azimute !== undefined || v?.azimute_dms || v?.distancia !== undefined);
-  if (!relativeMode && !hasCoords && hasMeasures) relativeMode = true;
-
-  if (relativeMode) {
-    const rebuilt = buildRelativeVerticesFromMeasures(rawVertices, 0, 0);
-    vertices = rebuilt;
-    relativeInfo = { relative: true, start: { east: 0, north: 0 } };
-    forceProjectionKey = "RELATIVO";
-    projectionReason = "Polígono relativo (sem coordenadas absolutas); origem (0,0).";
-    warnings.push("Polígono relativo: sem georreferenciamento absoluto (origem 0,0).");
-  } else if (hasLatLon) {
-    const converted = [];
-    let zone = null;
-    for (const v of vertices) {
-      if (!Number.isFinite(v.lat) || !Number.isFinite(v.lon)) continue;
-      const conv = latLonToUtm(v.lat, v.lon, zone);
-      if (!conv) continue;
-      zone = conv.zone || zone;
-      converted.push({
-        id: v.id,
-        north: conv.north,
-        east: conv.east,
-        ordem: converted.length + 1,
-        azimute: v.azimute,
-        azimute_dms: v.azimute_dms,
-        distancia: v.distancia
-      });
-    }
-    vertices = converted;
-    if (zone) {
-      forceProjectionKey = `SIRGAS2000_${String(zone).padStart(2, '0')}S`;
-      projectionReason = "Lat/Lon convertidas para UTM (SIRGAS2000).";
-    }
-  }
-
-  // Remover vértices inválidos
-  vertices = vertices.filter(v => Number.isFinite(v.north) && Number.isFinite(v.east));
-
-  if (vertices.length < 3) {
-    updateStatus('❌ Menos de 3 vértices válidos extraídos.', 'error');
-    progressContainer.style.display = "none";
-    return;
-  }
-
-  // === RECALCULAR DISTÂNCIAS E AZIMUTES ===
-  vertices = prepararVerticesComMedidas(vertices);
-
-  // CRS: IA + texto + coordenadas
-  const fullText = pagesText.join("\n");
-  const inferredByCoords = forceProjectionKey === "RELATIVO" ? null : inferCrsByCoordinates(vertices);
-  const resolvedProjection = resolveProjectionKeyForOutput(iaObj, projInfo, inferredByCoords);
-  const projKey = forceProjectionKey || resolvedProjection.key || (getActiveProjectionKey() || "SIRGAS2000_22S");
-  window._arcgis_crs_key = projKey;
-  const topologyValidation = validatePolygonTopology(vertices, projKey);
-  
-  // IA fornece azimutes/distâncias (sem regex paralelo)
-  const memorialData = { azimutes: [], distances: [] };
-  const memorialValidation = { matches: [], issues: [] };
-
-  // documentsResults para exportacao
-  documentsResults = [{
-    docId: iaObj.matricula || "SEM_ID",
-    pages: "1-" + pagesText.length,
-    projectionKey: projKey,
-    manualProjectionKey: null,
-    projectionInfo: forceProjectionKey
-      ? { confidence: "baixa", reason: projectionReason || "CRS relativo" }
-      : (resolvedProjection.info || (inferredByCoords
-        ? { confidence: "média", reason: inferredByCoords.reason }
-        : { confidence: "baixa", reason: "CRS não inferido pelas coordenadas; usando seleção atual/padrão" })),
-    vertices: vertices,
-    warnings: warnings,
-    topology: topologyValidation,
-    memorialValidation: memorialValidation,
-    memorialData: memorialData,
-    relativeInfo: relativeInfo,
-    text: fullText
-  }];
-
-  activeDocIndex = 0;
-
-  // UI CRS
-  showDetectedCrsUI(projKey, documentsResults[0].projectionInfo);
-
-  // UI resultados
-  extractedCoordinates = vertices;
-  fileNameBase = iaObj.matricula ? `MAT_${iaObj.matricula}` : "coordenadas_extracao";
-  
-  // Validacao topologica antes de exibir
-  if (typeof displayLogMessage === 'function') {
-    displayLogMessage(`[PDFtoArcgis][LogUI] 🔍 Validando topologia do polígono...`);
-  }
-  
-  const topology = validatePolygonTopology(vertices, projKey);
-  documentsResults[0].topology = topology;
-  
-  // Log de validacao
-  if (topology.isValid) {
-    console.log(`[PDFtoArcgis] ✅ Polígono válido: área ${topology.area.toFixed(2)}m², fechado: ${topology.closed ? 'SIM' : 'NÃO'}`);
-    if (typeof displayLogMessage === 'function') {
-      displayLogMessage(`[PDFtoArcgis][LogUI] ✅ Polígono válido! Área: ${topology.area.toFixed(2)}m²`);
-    }
-  } else {
-    console.warn(`[PDFtoArcgis] ⚠️ Polígono com problemas:`, topology.errors);
-  }
-  
-  if (topology.warnings.length > 0) {
-    console.warn(`[PDFtoArcgis] ⚠️ Avisos:`, topology.warnings);
-  }
-  
-  // UI de validacao
-  updateValidationUI(topology);
-  
-  // Remover duplicatas se houver erro
-  if (!topology.isValid && topology.errors.length > 0) {
-    if (typeof displayLogMessage === 'function') {
-      displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Problemas detectados: ${topology.errors.join(', ')}`);
-    }
-    
-    // Remover vertices muito proximos
-    const uniqueVertices = [];
-    for (const v of vertices) {
-      const isDuplicate = uniqueVertices.some(u => 
-        Math.abs(u.este - v.este) < 0.5 && Math.abs(u.norte - v.norte) < 0.5
-      );
-      if (!isDuplicate) {
-        uniqueVertices.push(v);
-      }
-    }
-    
-    if (uniqueVertices.length < vertices.length) {
-      console.log(`[PDFtoArcgis] 🔧 Removidos ${vertices.length - uniqueVertices.length} vértice(s) duplicado(s)`);
-      extractedCoordinates = uniqueVertices;
-      vertices = uniqueVertices;
-      documentsResults[0].vertices = uniqueVertices;
-      
-      // Revalidar
-      const revalidated = validatePolygonTopology(uniqueVertices, projKey);
-      documentsResults[0].topology = revalidated;
-      updateValidationUI(revalidated);
-      
-      if (revalidated.isValid) {
-        if (typeof displayLogMessage === 'function') {
-          displayLogMessage(`[PDFtoArcgis][LogUI] ✅ Polígono corrigido com sucesso!`);
-        }
-        console.log(`[PDFtoArcgis] ✅ Correção bem-sucedida. Nova área: ${revalidated.area.toFixed(2)}m²`);
-      } else {
-        if (typeof displayLogMessage === 'function') {
-          displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Algumas correções automáticas não resolveram todos os problemas. Verifique o relatório.`);
-        }
-      }
-    }
-  }
-  
-  if (typeof displayLogMessage === 'function') {
-    displayLogMessage(`[PDFtoArcgis][LogUI] 📊 Preparando tabela de vértices para visualização...`);
-  }
-  
-  resultBox.style.display = 'block';
-  countDisplay.textContent = vertices.length;
-  previewTableBody.innerHTML = '';
-  
-  for (const v of vertices) {
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${v.ordem}</td>
-      <td>${v.id || ''}</td>
-      <td>${(v.north || 0).toFixed(3)}</td>
-      <td>${(v.east || 0).toFixed(3)}</td>
-      <td>${v.distCalc || '---'}</td>
-      <td>${v.azCalc || '---'}</td>
-    `;
-    previewTableBody.appendChild(row);
-  }
-  
-  if (typeof displayLogMessage === 'function') {
-    displayLogMessage(`[PDFtoArcgis][LogUI] 🎯 Pronto para exportar arquivos`);
-  }
-
-  // Status final
-  progressContainer.style.display = "none";
-  updateStatus(`✅ IA concluiu: ${vertices.length} coordenadas processadas.`, 'success');
-  if (typeof displayLogMessage === 'function') {
-    displayLogMessage(`[PDFtoArcgis][LogUI] ✨ Pronto! Você pode agora baixar ou salvar os resultados`);
-  }
-  
-  // Reabilitar botoes
-  if (downloadBtn) downloadBtn.disabled = false;
-  if (saveToFolderBtn) saveToFolderBtn.disabled = false;
-
-  // Atualiza seletor de documentos detectados.
-  renderDocSelector();
-  
-  scrollToResults();
-}
 
 // Exporta CSV e relatório textual de validação.
 downloadBtn.onclick = () => {

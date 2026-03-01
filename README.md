@@ -55,7 +55,7 @@ Esta solução integra, em uma única plataforma, duas frentes essenciais da ope
 
 ### Contrato da API (PDFtoArcGIS)
 
-- Endpoint: `POST /pdfspliter/api/pdf-to-geojson`
+- Endpoint: `POST /api/pdf-to-geojson`
 - Entrada:
   - `pdfBase64` (string, obrigatório): conteúdo do PDF em Base64.
   - `fileName` (string, opcional): nome do arquivo para rastreabilidade.
@@ -73,13 +73,19 @@ Esta solução integra, em uma única plataforma, duas frentes essenciais da ope
 
 ### Variáveis de Ambiente (Azure)
 
-- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_ENDPOINT` (aceita endpoint base `https://<recurso>.openai.azure.com` ou URL completa de `chat/completions`)
 - `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_DEPLOYMENT`
+- `AZURE_OPENAI_DEPLOYMENT` (obrigatório quando `AZURE_OPENAI_ENDPOINT` for endpoint base)
 - `AZURE_OPENAI_API_VERSION` (sugestão: `2024-10-21`)
 - `AZURE_DOCUMENTINTELLIGENCE_ENDPOINT`
 - `AZURE_DOCUMENTINTELLIGENCE_KEY`
 - `AZURE_DOCUMENTINTELLIGENCE_API_VERSION` (sugestão: `2024-11-30`)
+
+### Configuração de runtime no cliente (PDFtoArcGIS)
+
+- O frontend estático de `pdfspliter/PDFtoArcgis` não deve depender de rota serverless local em produção (`/api/*`).
+- Para modo híbrido (Azure + Vercel), defina `window.PDFTOARCGIS_CONFIG.azurePdfToGeoJsonUrl` (ou `azurePdfToGeoJsonUrls`) com a URL pública do backend Azure; o cliente tentará essa URL primeiro e depois fará fallback para `/api/pdf-to-geojson`.
+- O fallback OCR local fica desativado por padrão (`enableLocalOcrFallback: false`) para reduzir carga e evitar dependências legadas.
 
 ### Modelo recomendado (custo x qualidade)
 
