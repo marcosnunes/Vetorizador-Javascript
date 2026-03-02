@@ -5,7 +5,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .js"
+    "lint": "eslint . --ext .js",
+    "deploy:azure": "node ./scripts/deploy-azure.mjs"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
