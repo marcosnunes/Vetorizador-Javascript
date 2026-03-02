@@ -96,6 +96,82 @@ function tryParseJsonText(content) {
   return null;
 }
 
+function buildCoordinateFocusedText(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return '';
+
+  const lines = text
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const selected = [];
+  const seen = new Set();
+
+  const hasVertexToken = /\b(?:V(?:É|E)?RTICE|VERTICE|PONTO|PT|M\s*[-.]?\s*\d+|V\s*\d{2,4})\b/i;
+  const hasCoordPair = /-?\d{5,7}[.,]\d+[^\d\n\r]{1,25}-?\d{5,7}[.,]\d+/;
+  const hasAzDist = /\b(?:AZIMUTE|RUMO|DIST[ÂA]NCIA|DIST)\b/i;
+
+  for (const line of lines) {
+    if (!hasVertexToken.test(line) && !hasCoordPair.test(line) && !hasAzDist.test(line)) {
+      continue;
+    }
+
+    const compact = line.replace(/\s+/g, ' ').trim();
+    if (compact.length < 8 || seen.has(compact)) continue;
+    seen.add(compact);
+    selected.push(compact);
+
+    if (selected.length >= 1800) break;
+  }
+
+  return selected.join('\n');
+}
+
+function estimateExpectedVertexCount(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return 0;
+
+  let maxVertexId = 0;
+  const idRegexes = [
+    /\b(?:V(?:É|E)?RTICE|VERTICE|PONTO|PT|M)\s*[-.:]?\s*0*(\d{1,4})\b/gi,
+    /\bV\s*0*(\d{2,4})\b/gi
+  ];
+
+  for (const regex of idRegexes) {
+    regex.lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const n = Number.parseInt(match[1], 10);
+      if (Number.isFinite(n) && n > maxVertexId) {
+        maxVertexId = n;
+      }
+    }
+  }
+
+  const lineRegex = /(?:^|\n)\s*(?:V\s*\d{1,4}|V(?:É|E)?RTICE\s*\d{1,4}|PONTO\s*\d{1,4}|PT\s*\d{1,4}|M\s*[-.]?\s*\d{1,4})?[^\n]{0,140}?-?\d{5,7}[.,]\d+[^\n]{1,30}-?\d{5,7}[.,]\d+[^\n]*(?=\n|$)/gi;
+  const lineHits = text.match(lineRegex) || [];
+
+  return Math.max(maxVertexId, lineHits.length);
+}
+
+function getExtractedVertexCount(payload) {
+  const ring = payload?.geojson?.features?.[0]?.geometry?.coordinates?.[0];
+  if (!Array.isArray(ring) || ring.length === 0) return 0;
+
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  const closed = Array.isArray(first)
+    && Array.isArray(last)
+    && first.length >= 2
+    && last.length >= 2
+    && first[0] === last[0]
+    && first[1] === last[1];
+
+  return closed ? Math.max(0, ring.length - 1) : ring.length;
+}
+
 async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
@@ -187,13 +263,19 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     '14) Se não conseguir extrair com confiabilidade, retornar erro lógico no campo warnings e geometria mínima válida quando possível.'
   ].join('\n');
 
+  const focusedText = buildCoordinateFocusedText(ocrText);
+  const compactOcrText = String(ocrText || '').slice(0, 140000);
+  const compactFocusedText = String(focusedText || '').slice(0, 140000);
+
   const userPrompt = [
     `Arquivo: ${fileName || 'documento.pdf'}`,
     'Extraia matrícula (se existir), CRS provável e geometria do imóvel em GeoJSON.',
     'A geometria deve conter TODOS os vértices do perímetro principal presentes no documento, sem omissões.',
     'Não reduza para amostra; não retorne apenas 30-40 pontos se houver mais de 100 no texto.',
-    'Texto OCR bruto abaixo:',
-    ocrText
+    'Use prioritariamente o trecho focado em coordenadas abaixo para montar o anel completo:',
+    compactFocusedText || '(sem trecho focado disponível)',
+    'Texto OCR bruto completo abaixo (contexto adicional):',
+    compactOcrText
   ].join('\n\n');
 
   const responseFormat = { type: 'json_object' };
@@ -388,22 +470,66 @@ export default async function handler(req, res) {
 
   try {
     const ocrResult = await runDocumentIntelligence(pdfBase64, docIntelConfig);
-    const llmResult = await runAzureOpenAIExtraction(ocrResult.text, openAiConfig, fileName);
-    const normalized = normalizeModelPayload(llmResult);
-    const validated = validateGeoJsonPayload(normalized);
+    const expectedVertices = estimateExpectedVertexCount(ocrResult.text);
+    const minimumAcceptable = expectedVertices >= 20
+      ? Math.floor(expectedVertices * 0.75)
+      : 0;
+
+    let llmResult = await runAzureOpenAIExtraction(ocrResult.text, openAiConfig, fileName);
+    let normalized = normalizeModelPayload(llmResult);
+    let validated = validateGeoJsonPayload(normalized);
+    let extractedVertices = getExtractedVertexCount(validated);
+    const additionalWarnings = [];
+
+    if (minimumAcceptable > 0 && extractedVertices < minimumAcceptable) {
+      const focusedText = buildCoordinateFocusedText(ocrResult.text);
+
+      if (focusedText && focusedText.length > 40) {
+        try {
+          const rescueResult = await runAzureOpenAIExtraction(
+            focusedText,
+            openAiConfig,
+            `${fileName || 'documento.pdf'} [RESGATE]`
+          );
+
+          const rescueNormalized = normalizeModelPayload(rescueResult);
+          const rescueValidated = validateGeoJsonPayload(rescueNormalized);
+          const rescueExtractedVertices = getExtractedVertexCount(rescueValidated);
+
+          if (rescueExtractedVertices > extractedVertices) {
+            validated = rescueValidated;
+            extractedVertices = rescueExtractedVertices;
+            additionalWarnings.push(`Extração de resgate aplicada: ${extractedVertices}/${expectedVertices} vértices.`);
+          } else {
+            additionalWarnings.push(`Extração parcial mantida: ${extractedVertices}/${expectedVertices} vértices.`);
+          }
+        } catch (rescueError) {
+          additionalWarnings.push(`Resgate não melhorou a extração: ${rescueError?.message || 'falha desconhecida'}.`);
+        }
+      } else {
+        additionalWarnings.push(`Extração parcial: ${extractedVertices}/${expectedVertices} vértices (OCR focado insuficiente).`);
+      }
+    }
+
+    const finalWarnings = [
+      ...(Array.isArray(validated.warnings) ? validated.warnings : []),
+      ...additionalWarnings
+    ];
 
     return res.status(200).json({
       success: true,
       matricula: validated.matricula || '',
       projectionKey: validated.projectionKey || '',
-      warnings: Array.isArray(validated.warnings) ? validated.warnings : [],
+      warnings: [...new Set(finalWarnings)],
       geojson: validated.geojson,
-      pagesAnalyzed: Array.isArray(ocrResult.pages) ? ocrResult.pages.length : 0
+      pagesAnalyzed: Array.isArray(ocrResult.pages) ? ocrResult.pages.length : 0,
+      expectedVertices,
+      extractedVertices
     });
   } catch (error) {
     console.error('[pdf-to-geojson] erro:', error);
     const message = error?.message || 'Falha ao processar PDF com IA Azure.';
-    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido/i.test(message);
+    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido|Extração incompleta/i.test(message);
     return res.status(isNonTransient ? 422 : 502).json({
       success: false,
       error: message
