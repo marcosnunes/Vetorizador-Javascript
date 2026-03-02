@@ -236,68 +236,7 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     ocrText
   ].join('\n\n');
 
-  const responseFormat = {
-    type: 'json_schema',
-    json_schema: {
-      name: 'pdf_to_geojson',
-      strict: true,
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          matricula: { type: 'string' },
-          projectionKey: { type: 'string' },
-          warnings: {
-            type: 'array',
-            items: { type: 'string' }
-          },
-          geojson: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              type: { type: 'string', enum: ['FeatureCollection'] },
-              features: {
-                type: 'array',
-                minItems: 1,
-                items: {
-                  type: 'object',
-                  additionalProperties: false,
-                  properties: {
-                    type: { type: 'string', enum: ['Feature'] },
-                    geometry: {
-                      type: 'object',
-                      additionalProperties: false,
-                      properties: {
-                        type: { type: 'string', enum: ['Polygon'] },
-                        coordinates: {
-                          type: 'array',
-                          minItems: 1,
-                          items: {
-                            type: 'array',
-                            minItems: 4,
-                            items: {
-                              type: 'array',
-                              minItems: 2,
-                              maxItems: 2,
-                              items: { type: 'number' }
-                            }
-                          }
-                        }
-                      },
-                      required: ['type', 'coordinates']
-                    }
-                  },
-                  required: ['type', 'geometry']
-                }
-              }
-            },
-            required: ['type', 'features']
-          }
-        },
-        required: ['matricula', 'projectionKey', 'warnings', 'geojson']
-      }
-    }
-  };
+  const responseFormat = { type: 'json_object' };
 
   const openAiResponse = await httpFetch(chatUrl, {
     method: 'POST',
