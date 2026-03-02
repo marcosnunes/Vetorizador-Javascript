@@ -9,6 +9,8 @@ function getPdfToArcgisConfig() {
   return (cfg && typeof cfg === 'object') ? cfg : {};
 }
 
+const ENABLE_TOPOLOGY_VALIDATION = false;
+
 function getAzurePdfToGeoJsonRoutes() {
   const cfg = getPdfToArcgisConfig();
   const configuredUrl = String(cfg.azurePdfToGeoJsonUrl || '').trim();
@@ -195,6 +197,11 @@ function updateValidationUI(topology, corrections = []) {
       validationActions.style.display = "none";
     }
   }
+}
+
+function hideValidationUI() {
+  const validationBox = document.getElementById("validationBox");
+  if (validationBox) validationBox.style.display = "none";
 }
 
 function scrollToResults() {
@@ -1063,7 +1070,9 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 
   vertices = prepararVerticesComMedidas(vertices, projKey);
 
-  const topology = validatePolygonTopology(vertices, projKey);
+  const topology = ENABLE_TOPOLOGY_VALIDATION
+    ? validatePolygonTopology(vertices, projKey)
+    : null;
   const warnings = Array.isArray(apiResult?.warnings) ? apiResult.warnings : [];
   const projectionInfo = {
     confidence: projectionFromApi ? 'alta' : 'baixa',
@@ -1093,7 +1102,11 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
   fileNameBase = apiResult?.matricula ? `MAT_${apiResult.matricula}` : nameBase;
 
   showDetectedCrsUI(projKey, projectionInfo);
-  updateValidationUI(topology);
+  if (ENABLE_TOPOLOGY_VALIDATION && topology) {
+    updateValidationUI(topology);
+  } else {
+    hideValidationUI();
+  }
   displayResults();
   renderDocSelector();
 
@@ -1118,6 +1131,7 @@ fileInput.addEventListener("change", async (event) => {
   progressContainer.style.display = "block";
   resultBox.style.display = "none";
   statusDiv.style.display = "none";
+  hideValidationUI();
   extractedCoordinates = [];
   previewTableBody.innerHTML = "";
   documentsResults = [];
