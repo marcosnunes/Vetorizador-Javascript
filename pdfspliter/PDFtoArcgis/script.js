@@ -295,14 +295,53 @@ function sanitizeFileName(name) {
     .replace(/\s+/g, "_");
 }
 
-
-
 // Calculos para exibicao (distancia/azimute)
-function calcularDistancia(p1, p2) {
+function isGeographicCoordinatePair(p) {
+  return Number.isFinite(p?.east)
+    && Number.isFinite(p?.north)
+    && Math.abs(p.east) <= 180
+    && Math.abs(p.north) <= 90;
+}
+
+function shouldUseGeodesicMath(p1, p2, projectionKey = null) {
+  if (projectionKey === "WGS84") return true;
+  return isGeographicCoordinatePair(p1) && isGeographicCoordinatePair(p2);
+}
+
+function calcularDistancia(p1, p2, options = {}) {
+  const projectionKey = options?.projectionKey || null;
+
+  if (shouldUseGeodesicMath(p1, p2, projectionKey)) {
+    const R = 6371008.8;
+    const lat1 = p1.north * (Math.PI / 180);
+    const lat2 = p2.north * (Math.PI / 180);
+    const dLat = (p2.north - p1.north) * (Math.PI / 180);
+    const dLon = (p2.east - p1.east) * (Math.PI / 180);
+
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
   return Math.sqrt(Math.pow(p2.east - p1.east, 2) + Math.pow(p2.north - p1.north, 2));
 }
 
-function calcularAzimute(p1, p2) {
+function calcularAzimute(p1, p2, options = {}) {
+  const projectionKey = options?.projectionKey || null;
+
+  if (shouldUseGeodesicMath(p1, p2, projectionKey)) {
+    const lat1 = p1.north * (Math.PI / 180);
+    const lat2 = p2.north * (Math.PI / 180);
+    const dLon = (p2.east - p1.east) * (Math.PI / 180);
+
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2)
+      - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    let az = Math.atan2(y, x) * (180 / Math.PI);
+    return az < 0 ? az + 360 : az;
+  }
+
   const dE = p2.east - p1.east;
   const dN = p2.north - p1.north;
   let az = Math.atan2(dE, dN) * (180 / Math.PI);
@@ -505,9 +544,6 @@ function validatePolygonTopology(vertices, projectionKey) {
   };
 }
 
-
-
-
 // Doc selecionado e CRS
 function getSelectedDoc() {
   if (activeDocIndex >= 0 && activeDocIndex < documentsResults.length) return documentsResults[activeDocIndex];
@@ -531,7 +567,6 @@ function showDetectedCrsUI(key, info) {
     if (ok) projectionSelect.value = key;
   }
 }
-
 
 // Reconstrucao de texto por linha
 function buildPageTextWithLines(textContent) {
@@ -792,8 +827,6 @@ function resolveProjectionKeyForOutput(iaObj, projInfo, inferredByCoords) {
   return { key, info: { confidence, reason: reasons.join(" ") } };
 }
 
-
-
 // CSV com metadados
 function gerarCsvParaVertices(vertices, epsg, docId = null, topologyInfo = null, memorialInfo = null, relativeInfo = null) {
   let csv = "\ufeffsep=;\n";
@@ -920,7 +953,6 @@ function gerarRelatorioValidacao(docId, pages, topologyInfo, memorialInfo, warni
   return report;
 }
 
-
 // UI: seletor de documento
 function renderDocSelector() {
   if (!docSelectorBox || !docSelect) return;
@@ -1002,6 +1034,7 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 
   const nameBase = (sourceFileName || 'coordenadas_extracao').replace(/\.[^/.]+$/, '');
   const projectionFromApi = String(apiResult?.projectionKey || '').trim();
+  const projKey = projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S';
 
   let vertices = verticesFromGeoJSON(geojson, null);
   vertices = vertices
@@ -1016,9 +1049,7 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
     throw new Error('GeoJSON retornado possui menos de 3 vértices válidos.');
   }
 
-  vertices = prepararVerticesComMedidas(vertices);
-
-  const projKey = projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S';
+  vertices = prepararVerticesComMedidas(vertices, projKey);
 
   const topology = validatePolygonTopology(vertices, projKey);
   const warnings = Array.isArray(apiResult?.warnings) ? apiResult.warnings : [];
@@ -1552,13 +1583,13 @@ function verticesFromGeoJSON(geojson, keyGuess = null) {
 
   return vertices;
 }
-function prepararVerticesComMedidas(vertices) {
+function prepararVerticesComMedidas(vertices, projectionKey = null) {
   const out = [];
   for (let i = 0; i < vertices.length; i++) {
     const v = { ...vertices[i], ordem: i + 1 };
     if (i < vertices.length - 1) {
-      v.distCalc = fmtMeters2(calcularDistancia(vertices[i], vertices[i + 1]));
-      v.azCalc = toDMS(calcularAzimute(vertices[i], vertices[i + 1]));
+      v.distCalc = fmtMeters2(calcularDistancia(vertices[i], vertices[i + 1], { projectionKey }));
+      v.azCalc = toDMS(calcularAzimute(vertices[i], vertices[i + 1], { projectionKey }));
     } else {
       v.distCalc = "---";
       v.azCalc = "---";
@@ -1652,7 +1683,7 @@ if (shpInput) {
       if (cidadeDetectadaInput) cidadeDetectadaInput.value = shpCityName;
 
       // Medidas para UI
-      shpVertices = prepararVerticesComMedidas(vertsUTM);
+      shpVertices = prepararVerticesComMedidas(vertsUTM, shpCrsKey);
 
       // UI (tabela)
       extractedCoordinates = shpVertices.slice();
@@ -1743,7 +1774,8 @@ if (generateDocxBtn) {
       const precisaMedidas = (v) => v.distCalc === undefined || v.azCalc === undefined;
       if (vertsForDoc.some(precisaMedidas)) {
         vertsForDoc = prepararVerticesComMedidas(
-          vertsForDoc.map(v => ({ east: v.east, north: v.north, id: v.id }))
+          vertsForDoc.map(v => ({ east: v.east, north: v.north, id: v.id })),
+          shpCrsKey || getActiveProjectionKey() || "SIRGAS2000_22S"
         );
       }
 
@@ -1785,7 +1817,7 @@ if (generateDocxBtn) {
 
       let per = 0;
       for (let i = 0; i < vertsForDoc.length - 1; i++) {
-        per += calcularDistancia(vertsForDoc[i], vertsForDoc[i + 1]);
+        per += calcularDistancia(vertsForDoc[i], vertsForDoc[i + 1], { projectionKey: crsKey });
       }
 
       const BRNumber2 = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1806,15 +1838,20 @@ if (generateDocxBtn) {
         return Number.isFinite(n) ? n.toFixed(casas) : "0.00";
       }
 
+      function parsePtBrNumber(value) {
+        if (typeof value === "number") return value;
+        if (typeof value !== "string") return NaN;
+        return Number(value.replace(/\./g, "").replace(",", "."));
+      }
+
       // Incluir todos os segmentos
       const memorialRuns = [];
       for (let i = 0; i < vertsForDoc.length; i++) {
         const vAtual = vertsForDoc[i];
         const vProx = vertsForDoc[(i + 1) % vertsForDoc.length];
-        // Calcula distância e azimute se não existirem
-        let dist = vProx.distCalc;
-        if (!dist || isNaN(Number(dist))) {
-          dist = calcularDistancia(vAtual, vProx);
+        let dist = parsePtBrNumber(vProx.distCalc);
+        if (!Number.isFinite(dist)) {
+          dist = calcularDistancia(vAtual, vProx, { projectionKey: crsKey });
         }
         let azimute = vProx.azCalc;
         if (!azimute) {
