@@ -73,6 +73,29 @@ function extractJsonFromModelContent(rawContent) {
   return '';
 }
 
+function tryParseJsonText(content) {
+  if (typeof content !== 'string') return null;
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      const objectSlice = trimmed.slice(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(objectSlice);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
 async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
@@ -249,16 +272,28 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     throw new Error(`Azure OpenAI falhou: ${openAiResponse.status} - ${getErrorMessage(openAiPayload)}`);
   }
 
-  const content = extractJsonFromModelContent(openAiPayload.choices?.[0]?.message?.content);
-  if (!content) {
-    throw new Error('Azure OpenAI retornou resposta vazia.');
+  const message = openAiPayload.choices?.[0]?.message || {};
+
+  if (message.parsed && typeof message.parsed === 'object') {
+    return message.parsed;
   }
 
-  try {
-    return JSON.parse(content);
-  } catch {
-    throw new Error('Azure OpenAI não retornou JSON válido no formato esperado.');
+  const candidates = [
+    message.content,
+    message.text,
+    openAiPayload.output_text,
+    openAiPayload.response?.output_text
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = extractJsonFromModelContent(candidate);
+    const parsed = tryParseJsonText(normalized);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
   }
+
+  throw new Error('Azure OpenAI não retornou JSON válido no formato esperado.');
 }
 
 function validateGeoJsonPayload(payload) {
@@ -303,7 +338,7 @@ export default async function handler(req, res) {
   res.setHeader('Vary', corsHeaders.Vary);
 
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    return res.status(200).json({ ok: true });
   }
 
   if (req.method !== 'POST') {

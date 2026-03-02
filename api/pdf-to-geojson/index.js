@@ -1,9 +1,13 @@
+/* global require, module, process, Buffer */
+
 const DEFAULT_OPENAI_API_VERSION = '2024-10-21';
 const DEFAULT_DOCINTEL_API_VERSION = '2024-11-30';
 const MAX_DOCINTEL_POLLS = 60;
 const POLL_INTERVAL_MS = 2000;
 const http = require('http');
 const https = require('https');
+
+module.exports = undefined;
 
 function httpFetch(...args) {
   if (typeof fetch === 'function') {
@@ -95,6 +99,29 @@ function extractJsonFromModelContent(rawContent) {
   }
 
   return '';
+}
+
+function tryParseJsonText(content) {
+  if (typeof content !== 'string') return null;
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      const objectSlice = trimmed.slice(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(objectSlice);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
 }
 
 function buildCorsHeaders(req) {
@@ -295,16 +322,28 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     throw new Error(`Azure OpenAI falhou: ${openAiResponse.status} - ${getErrorMessage(openAiPayload)}`);
   }
 
-  const content = extractJsonFromModelContent(openAiPayload.choices?.[0]?.message?.content);
-  if (!content) {
-    throw new Error('Azure OpenAI retornou resposta vazia.');
+  const message = openAiPayload.choices?.[0]?.message || {};
+
+  if (message.parsed && typeof message.parsed === 'object') {
+    return message.parsed;
   }
 
-  try {
-    return JSON.parse(content);
-  } catch {
-    throw new Error('Azure OpenAI não retornou JSON válido no formato esperado.');
+  const candidates = [
+    message.content,
+    message.text,
+    openAiPayload.output_text,
+    openAiPayload.response?.output_text
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = extractJsonFromModelContent(candidate);
+    const parsed = tryParseJsonText(normalized);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
   }
+
+  throw new Error('Azure OpenAI não retornou JSON válido no formato esperado.');
 }
 
 function validateGeoJsonPayload(payload) {
@@ -345,9 +384,9 @@ module.exports = async function (context, req) {
 
   if (req.method === 'OPTIONS') {
     context.res = {
-      status: 204,
+      status: 200,
       headers: corsHeaders,
-      body: ''
+      body: { ok: true }
     };
     return;
   }
