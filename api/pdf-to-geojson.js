@@ -100,7 +100,7 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
 
-  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=${encodeURIComponent(apiVersion)}`;
+  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=${encodeURIComponent(apiVersion)}`;
 
   const analyzeResponse = await fetch(analyzeUrl, {
     method: 'POST',
@@ -179,12 +179,19 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     '6) NÃO inferir, suavizar, reordenar, aproximar ou interpolar coordenadas; use apenas valores explícitos no texto OCR.',
     '7) Preserve a ordem dos vértices conforme o memorial/documento.',
     '8) Se o documento usar vírgula decimal, converta apenas para ponto decimal, sem alterar magnitude.',
-    '9) Se não conseguir extrair com confiabilidade, retornar erro lógico no campo warnings e geometria mínima válida quando possível.'
+    '9) Captura TOTAL: extraia todos os vértices encontrados (não resumir, não amostrar, não truncar lista).',
+    '10) Se houver sequência de identificação de vértices (ex.: V001..V130, P1..Pn, M-01..M-xx), a quantidade de pontos no anel deve refletir toda a sequência útil encontrada no texto.',
+    '11) Priorize linhas/tabulações que contenham pares numéricos de coordenadas (N/Y com E/X), mesmo quando existirem colunas extras (azimute, distância, confrontante, observações).',
+    '12) Ignore repetições de cabeçalho/rodapé e repetições exatas da mesma linha OCR; mantenha apenas a sequência real dos vértices.',
+    '13) Se houver múltiplos blocos de coordenadas, escolha o bloco principal do perímetro do imóvel com maior cardinalidade de vértices.',
+    '14) Se não conseguir extrair com confiabilidade, retornar erro lógico no campo warnings e geometria mínima válida quando possível.'
   ].join('\n');
 
   const userPrompt = [
     `Arquivo: ${fileName || 'documento.pdf'}`,
     'Extraia matrícula (se existir), CRS provável e geometria do imóvel em GeoJSON.',
+    'A geometria deve conter TODOS os vértices do perímetro principal presentes no documento, sem omissões.',
+    'Não reduza para amostra; não retorne apenas 30-40 pontos se houver mais de 100 no texto.',
     'Texto OCR bruto abaixo:',
     ocrText
   ].join('\n\n');
@@ -203,7 +210,7 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
         { role: 'user', content: userPrompt }
       ],
       temperature: 0,
-      max_tokens: 4000,
+      max_tokens: 8000,
       response_format: responseFormat
     })
   });
