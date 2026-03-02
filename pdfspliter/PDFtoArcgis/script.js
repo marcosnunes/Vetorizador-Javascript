@@ -1182,7 +1182,7 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
   const nameBase = (sourceFileName || 'coordenadas_extracao').replace(/\.[^/.]+$/, '');
   const projectionFromApi = String(apiResult?.projectionKey || '').trim();
 
-  let vertices = verticesFromGeoJSON(geojson, projectionFromApi || null);
+  let vertices = verticesFromGeoJSON(geojson, null);
   vertices = vertices
     .map((vertex, idx) => ({
       id: vertex.id || `V${String(idx + 1).padStart(3, '0')}`,
@@ -1197,19 +1197,15 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 
   vertices = prepararVerticesComMedidas(vertices);
 
-  const inferredByCoords = inferCrsByCoordinates(vertices);
-  const projKey = projectionFromApi ||
-    (inferredByCoords?.zone ? `SIRGAS2000_${inferredByCoords.zone}S` : null) ||
-    getActiveProjectionKey() ||
-    'SIRGAS2000_22S';
+  const projKey = projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S';
 
   const topology = validatePolygonTopology(vertices, projKey);
   const warnings = Array.isArray(apiResult?.warnings) ? apiResult.warnings : [];
   const projectionInfo = {
-    confidence: projectionFromApi ? 'alta' : (inferredByCoords ? 'média' : 'baixa'),
+    confidence: projectionFromApi ? 'alta' : 'baixa',
     reason: projectionFromApi
       ? 'CRS informado pela IA Azure no retorno do GeoJSON.'
-      : (inferredByCoords?.reason || 'CRS não informado pela IA; aplicado padrão ativo.')
+      : 'CRS não informado pela IA; aplicado CRS ativo da interface.'
   };
 
   documentsResults = [{
@@ -1733,29 +1729,7 @@ function verticesFromGeoJSON(geojson, keyGuess = null) {
     vertices = [{ id: "V001", east: xy[0], north: xy[1] }];
   }
 
-  if (keyGuess && (keyGuess.startsWith("SIRGAS2000_") || keyGuess.startsWith("SAD69_"))) {
-    const zone = parseInt(keyGuess.match(/_(\d{2})S$/)?.[1] || "22", 10);
-    const projStr = `+proj=utm +zone=${zone} +south +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`;
-    const inDegrees = vertices.some(v => Math.abs(v.east) <= 180 && Math.abs(v.north) <= 90);
-    if (inDegrees) {
-      vertices = vertices.map(v => {
-        const xy = proj4(proj4.WGS84, projStr, [v.east, v.north]); // [E,N]
-        return { ...v, east: xy[0], north: xy[1] };
-      });
-    }
-  }
-
-  const cleaned = [];
-  for (const p of vertices) {
-    const last = cleaned[cleaned.length - 1];
-    if (!last || last.east !== p.east || last.north !== p.north) cleaned.push(p);
-  }
-  if (cleaned.length >= 3) {
-    const first = cleaned[0], last = cleaned[cleaned.length - 1];
-    const distClose = Math.hypot(last.east - first.east, last.north - first.north);
-    if (distClose > 0.01) cleaned.push({ ...first, id: `V${String(cleaned.length + 1).padStart(3, '0')}` });
-  }
-  return cleaned;
+  return vertices;
 }
 function prepararVerticesComMedidas(vertices) {
   const out = [];
