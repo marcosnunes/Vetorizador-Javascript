@@ -2,6 +2,55 @@ const DEFAULT_OPENAI_API_VERSION = '2024-10-21';
 const DEFAULT_DOCINTEL_API_VERSION = '2024-11-30';
 const MAX_DOCINTEL_POLLS = 60;
 const POLL_INTERVAL_MS = 2000;
+const http = require('http');
+const https = require('https');
+
+function httpFetch(...args) {
+  if (typeof fetch === 'function') {
+    return fetch(...args);
+  }
+
+  const [url, options = {}] = args;
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const client = parsedUrl.protocol === 'https:' ? https : http;
+    const req = client.request(parsedUrl, {
+      method: options.method || 'GET',
+      headers: options.headers || {}
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        const textBody = buffer.toString('utf8');
+        const headers = res.headers || {};
+
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode || 0,
+          headers: {
+            get: (name) => {
+              const value = headers[String(name || '').toLowerCase()];
+              if (Array.isArray(value)) return value[0] || null;
+              return value ?? null;
+            }
+          },
+          text: async () => textBody,
+          json: async () => {
+            if (!textBody) return {};
+            return JSON.parse(textBody);
+          }
+        });
+      });
+    });
+
+    req.on('error', reject);
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
 
 function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
@@ -48,7 +97,7 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
 
   const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=${encodeURIComponent(apiVersion)}`;
 
-  const analyzeResponse = await fetch(analyzeUrl, {
+  const analyzeResponse = await httpFetch(analyzeUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -70,7 +119,7 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   for (let attempt = 0; attempt < MAX_DOCINTEL_POLLS; attempt++) {
     await sleep(POLL_INTERVAL_MS);
 
-    const pollResponse = await fetch(operationLocation, {
+    const pollResponse = await httpFetch(operationLocation, {
       method: 'GET',
       headers: {
         'Ocp-Apim-Subscription-Key': docIntelConfig.apiKey
@@ -195,7 +244,7 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     }
   };
 
-  const openAiResponse = await fetch(chatUrl, {
+  const openAiResponse = await httpFetch(chatUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
