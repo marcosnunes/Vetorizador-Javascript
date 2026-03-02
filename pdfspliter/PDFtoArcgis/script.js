@@ -830,6 +830,7 @@ function resolveProjectionKeyForOutput(iaObj, projInfo, inferredByCoords) {
 // CSV com metadados
 function gerarCsvParaVertices(vertices, epsg, docId = null, topologyInfo = null, memorialInfo = null, relativeInfo = null) {
   let csv = "\ufeffsep=;\n";
+  const memorialMatches = Array.isArray(memorialInfo?.matches) ? memorialInfo.matches : [];
 
   // Cabeçalho profissional com metadados
   csv += `# MATRÍCULA;${docId || "N/A"}\n`;
@@ -845,9 +846,9 @@ function gerarCsvParaVertices(vertices, epsg, docId = null, topologyInfo = null,
     csv += `# AREA_M2;${topologyInfo.area.toFixed(2)}\n`;
     csv += `# POLYGON_CLOSED;${topologyInfo.closed ? "SIM" : "NÃO"}\n`;
   }
-  if (memorialInfo && memorialInfo.matches.length > 0) {
-    const coherentMatches = memorialInfo.matches.filter(m => m.coherent).length;
-    csv += `# MEMORIAL_COHERENCE;${coherentMatches}/${memorialInfo.matches.length}\n`;
+  if (memorialMatches.length > 0) {
+    const coherentMatches = memorialMatches.filter(m => m?.coherent).length;
+    csv += `# MEMORIAL_COHERENCE;${coherentMatches}/${memorialMatches.length}\n`;
   }
   csv += `#\n`;
 
@@ -875,8 +876,8 @@ function gerarCsvParaVertices(vertices, epsg, docId = null, topologyInfo = null,
     let quality = "✓ OK";
     let notes = "";
     // Verificar coerência com memorial se disponível
-    if (memorialInfo && memorialInfo.matches[i]) {
-      const match = memorialInfo.matches[i];
+    if (memorialMatches[i]) {
+      const match = memorialMatches[i];
       if (!match.coherent) {
         quality = "⚠ AVISO";
         notes = `Az ${match.azDiff.toFixed(1)}° diff`;
@@ -911,43 +912,54 @@ function gerarRelatorioValidacao(docId, pages, topologyInfo, memorialInfo, warni
   report += `Páginas: ${safePages}\n`;
   report += `${"=".repeat(60)}\n\n`;
 
+  const memorialMatches = Array.isArray(memorialInfo?.matches) ? memorialInfo.matches : [];
+  const memorialIssues = Array.isArray(memorialInfo?.issues) ? memorialInfo.issues : [];
+  const safeWarnings = Array.isArray(warnings) ? warnings : [];
+
   if (topologyInfo) {
+    const intersections = Array.isArray(topologyInfo.intersectionPairs)
+      ? topologyInfo.intersectionPairs
+      : (Array.isArray(topologyInfo.intersections) ? topologyInfo.intersections : []);
+    const topoErrors = Array.isArray(topologyInfo.errors) ? topologyInfo.errors : [];
+    const topoWarnings = Array.isArray(topologyInfo.warnings) ? topologyInfo.warnings : [];
+    const safeArea = Number.isFinite(topologyInfo.area) ? topologyInfo.area : 0;
+
     report += `VALIDAÇÃO TOPOLÓGICA:\n`;
     report += `  Polígono válido: ${topologyInfo.isValid ? "✓ SIM" : "✗ NÃO"}\n`;
-    report += `  Área: ${topologyInfo.area.toFixed(2)} m²\n`;
+    report += `  Área: ${safeArea.toFixed(2)} m²\n`;
     report += `  Fechado: ${topologyInfo.closed ? "✓ SIM" : "✗ NÃO"}\n`;
-    report += `  Auto-intersecções: ${topologyInfo.intersections.length > 0 ? `✗ ${topologyInfo.intersections.length} encontradas` : "✓ Nenhuma"}\n`;
+    report += `  Auto-intersecções: ${intersections.length > 0 ? `✗ ${intersections.length} encontradas` : "✓ Nenhuma"}\n`;
     report += `  Sentido: ${topologyInfo.isCCW ? "Anti-horário (CCW)" : "Horário (CW)"}\n\n`;
 
-    if (topologyInfo.errors.length > 0) {
+    if (topoErrors.length > 0) {
       report += `  ERROS DETECTADOS:\n`;
-      topologyInfo.errors.forEach(e => report += `    • ${e}\n`);
+      topoErrors.forEach(e => report += `    • ${e}\n`);
       report += `\n`;
     }
 
-    if (topologyInfo.warnings.length > 0) {
+    if (topoWarnings.length > 0) {
       report += `  AVISOS:\n`;
-      topologyInfo.warnings.forEach(w => report += `    • ${w}\n`);
+      topoWarnings.forEach(w => report += `    • ${w}\n`);
       report += `\n`;
     }
   }
 
-  if (memorialInfo && memorialInfo.matches.length > 0) {
+  if (memorialMatches.length > 0) {
     report += `VALIDAÇÃO COM MEMORIAL (Azimutes/Distâncias):\n`;
-    const coherent = memorialInfo.matches.filter(m => m.coherent).length;
-    report += `  Correspondência: ${coherent}/${memorialInfo.matches.length} edges coerentes\n`;
-    report += `  Confiança: ${Math.round(coherent / memorialInfo.matches.length * 100)}%\n\n`;
+    const coherent = memorialMatches.filter(m => m?.coherent).length;
+    report += `  Correspondência: ${coherent}/${memorialMatches.length} edges coerentes\n`;
+    report += `  Confiança: ${Math.round(coherent / memorialMatches.length * 100)}%\n\n`;
 
-    if (memorialInfo.issues.length > 0) {
+    if (memorialIssues.length > 0) {
       report += `  DISCREPÂNCIAS ENCONTRADAS:\n`;
-      memorialInfo.issues.forEach(issue => report += `    • ${issue}\n`);
+      memorialIssues.forEach(issue => report += `    • ${issue}\n`);
       report += `\n`;
     }
   }
 
-  if (warnings && warnings.length > 0) {
+  if (safeWarnings.length > 0) {
     report += `AVISOS GERAIS:\n`;
-    warnings.forEach(w => report += `  • ${w}\n`);
+    safeWarnings.forEach(w => report += `  • ${w}\n`);
   }
 
   return report;
@@ -1189,7 +1201,12 @@ downloadBtn.onclick = () => {
 };
 
 // Salva lote de arquivos (SHP + CSV) em diretório escolhido.
-const toArrayBufferFS = (view) => view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+const toArrayBufferFS = (view, fileLabel = "arquivo") => {
+  if (!view || typeof view.byteOffset !== "number" || typeof view.byteLength !== "number" || !view.buffer) {
+    throw new Error(`Saída SHP inválida para ${fileLabel}.`);
+  }
+  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+};
 
 saveToFolderBtn.onclick = async () => {
   const hasDocs = Array.isArray(documentsResults) && documentsResults.length > 0;
