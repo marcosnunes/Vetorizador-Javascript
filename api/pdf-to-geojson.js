@@ -176,7 +176,10 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     '3) GeoJSON deve ser FeatureCollection com 1 Feature Polygon.',
     '4) O anel do polígono deve estar fechado (primeiro ponto = último ponto).',
     '5) Coordenadas no padrão [x, y] => [este, norte] em metros quando CRS for UTM/SIRGAS/SAD.',
-    '6) Se não conseguir extrair com confiabilidade, retornar erro lógico no campo warnings e geometria mínima válida quando possível.'
+    '6) NÃO inferir, suavizar, reordenar, aproximar ou interpolar coordenadas; use apenas valores explícitos no texto OCR.',
+    '7) Preserve a ordem dos vértices conforme o memorial/documento.',
+    '8) Se o documento usar vírgula decimal, converta apenas para ponto decimal, sem alterar magnitude.',
+    '9) Se não conseguir extrair com confiabilidade, retornar erro lógico no campo warnings e geometria mínima válida quando possível.'
   ].join('\n');
 
   const userPrompt = [
