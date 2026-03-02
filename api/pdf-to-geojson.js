@@ -268,6 +268,60 @@ function validateGeoJsonPayload(payload) {
   return payload;
 }
 
+function normalizeModelPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  if (payload.geojson) {
+    return payload;
+  }
+
+  const base = {
+    matricula: String(payload.matricula || ''),
+    projectionKey: String(payload.projectionKey || ''),
+    warnings: Array.isArray(payload.warnings) ? payload.warnings : []
+  };
+
+  if (payload.type === 'FeatureCollection' && Array.isArray(payload.features)) {
+    return { ...base, geojson: payload };
+  }
+
+  if (payload.type === 'Feature' && payload.geometry) {
+    return { ...base, geojson: { type: 'FeatureCollection', features: [payload] } };
+  }
+
+  if (payload.type === 'Polygon' && Array.isArray(payload.coordinates)) {
+    return {
+      ...base,
+      geojson: {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: payload, properties: {} }]
+      }
+    };
+  }
+
+  if (payload.geometry?.type === 'Polygon' && Array.isArray(payload.geometry.coordinates)) {
+    return {
+      ...base,
+      geojson: {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: payload.geometry, properties: payload.properties || {} }]
+      }
+    };
+  }
+
+  if (payload.result?.geojson) {
+    return {
+      ...base,
+      geojson: payload.result.geojson,
+      warnings: base.warnings.concat(Array.isArray(payload.result.warnings) ? payload.result.warnings : [])
+    };
+  }
+
+  return payload;
+}
+
 export default async function handler(req, res) {
   const corsHeaders = buildCorsHeaders(req);
   res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
@@ -325,7 +379,8 @@ export default async function handler(req, res) {
   try {
     const ocrResult = await runDocumentIntelligence(pdfBase64, docIntelConfig);
     const llmResult = await runAzureOpenAIExtraction(ocrResult.text, openAiConfig, fileName);
-    const validated = validateGeoJsonPayload(llmResult);
+    const normalized = normalizeModelPayload(llmResult);
+    const validated = validateGeoJsonPayload(normalized);
 
     return res.status(200).json({
       success: true,
@@ -337,9 +392,11 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('[pdf-to-geojson] erro:', error);
-    return res.status(502).json({
+    const message = error?.message || 'Falha ao processar PDF com IA Azure.';
+    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido/i.test(message);
+    return res.status(isNonTransient ? 422 : 502).json({
       success: false,
-      error: error?.message || 'Falha ao processar PDF com IA Azure.'
+      error: message
     });
   }
 }

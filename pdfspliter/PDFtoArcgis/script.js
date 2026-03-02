@@ -70,7 +70,8 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
   }
 
   if (!response.ok) {
-    if ((response.status === 429 || response.status >= 500) && retryCount < MAX_RETRIES) {
+    const transientStatuses = new Set([429, 500, 503, 504]);
+    if (transientStatuses.has(response.status) && retryCount < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
       if (typeof displayLogMessage === 'function') {
         displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
