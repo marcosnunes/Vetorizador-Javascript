@@ -63,9 +63,9 @@
 
         <label for="shpInput" class="custom-file-upload">
           <i class="fas fa-database"></i>
-          <span>Carregar SHP</span>
+          <span>Carregar SHP (ZIP)</span>
         </label>
-        <input type="file" id="shpInput" accept=".zip,.shp" style="display:none" />
+        <input type="file" id="shpInput" accept=".zip" style="display:none" />
       </div>
     </div>
   </div>
@@ -80,7 +80,7 @@
           3. Verifique o sistema de coordenadas detectado e, se necessário, use o modo avançado para forçar o CRS.<br>
           4. Revise a validação topológica e a tabela de vértices antes de exportar.<br>
           5. Use "CSV" para baixar a matrícula selecionada ou "Salvar na Pasta" para exportar SHP + CSV.<br>
-          6. Se já possuir base vetorial, use "Carregar SHP" para complementar e gerar o memorial DOCX.
+          6. Ferramenta inversa (memorial descritivo): use "Carregar SHP (ZIP)" com o shapefile completo em .zip (mínimo: .shp, .shx, .dbf e .prj).
         </p>
       </div>
     </div>
@@ -192,6 +192,9 @@
 
           <small style="display:block; color:#666; margin-top:8px;">
             O CRS será incluído automaticamente no memorial (lido do .prj do SHP ou inferido pelas coordenadas).
+          </small>
+          <small style="display:block; color:#666; margin-top:4px;">
+            Para gerar o memorial via ferramenta inversa, envie o shapefile em .zip com todos os arquivos do conjunto (.shp, .shx, .dbf e .prj).
           </small>
         </div>
 

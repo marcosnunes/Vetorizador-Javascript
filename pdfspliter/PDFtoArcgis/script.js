@@ -1659,42 +1659,20 @@ if (shpInput) {
 
       // Extensao
       const isZip = file.name.toLowerCase().endsWith(".zip");
-      const isShp = file.name.toLowerCase().endsWith(".shp");
 
       let geojson = null;
       let prjText = null;
 
-      if (isZip) {
-        // ZIP -> GeoJSON
-        const ab = await file.arrayBuffer();
-        const geo = await shp(ab); // retorna FeatureCollection/Feature/Geometry
-        // Forcar Polygon
-        geojson = buildFeatureCollectionFromAny(geo);
-        // .prj do ZIP
-        prjText = await extractPrjFromZip(file);
+      if (!isZip) {
+        throw new Error("Formato não suportado. Para a ferramenta inversa, envie apenas .zip com o shapefile completo (.shp, .shx, .dbf, .prj).");
       }
+
       if (isZip) {
         // ZIP -> leitor tolerante
         const ab = await file.arrayBuffer();
         geojson = await readZipAsFeatureCollection(ab);
         // .prj do ZIP
         prjText = await extractPrjFromZip(file);
-      }
-      else if (isShp) {
-        // .shp solto
-        const shpBuf = await file.arrayBuffer();
-        const geom = await shp.parseShp(shpBuf); // [[x,y], [x,y], ...] ou múltiplos
-        const ring = Array.isArray(geom) ? geom : [];
-        const geometry = { type: "Polygon", coordinates: [ring] };
-
-        geojson = {
-          type: "FeatureCollection",
-          features: [{ type: "Feature", properties: {}, geometry }]
-        };
-        // Sem ZIP: CRS por inferencia
-      }
-      else {
-        throw new Error("Formato não suportado. Use .zip (SHP+DBF+PRJ) ou .shp.");
       }
 
       // Diagnostico GeoJSON
