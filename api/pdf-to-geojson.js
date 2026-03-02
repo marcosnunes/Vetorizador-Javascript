@@ -45,6 +45,34 @@ function getErrorMessage(payload, fallback = 'Erro desconhecido') {
   return fallback;
 }
 
+function extractJsonFromModelContent(rawContent) {
+  if (typeof rawContent === 'string') {
+    const trimmed = rawContent.trim();
+    if (!trimmed) return '';
+
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    return fencedMatch ? fencedMatch[1].trim() : trimmed;
+  }
+
+  if (Array.isArray(rawContent)) {
+    const textParts = rawContent
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object') {
+          if (typeof part.text === 'string') return part.text;
+          if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+
+    return extractJsonFromModelContent(textParts);
+  }
+
+  return '';
+}
+
 async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
@@ -221,7 +249,7 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     throw new Error(`Azure OpenAI falhou: ${openAiResponse.status} - ${getErrorMessage(openAiPayload)}`);
   }
 
-  const content = openAiPayload.choices?.[0]?.message?.content;
+  const content = extractJsonFromModelContent(openAiPayload.choices?.[0]?.message?.content);
   if (!content) {
     throw new Error('Azure OpenAI retornou resposta vazia.');
   }
