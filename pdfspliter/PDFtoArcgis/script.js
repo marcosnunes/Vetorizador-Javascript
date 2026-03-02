@@ -82,8 +82,20 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
       return callAzurePdfToGeoJson(pdfBase64, fileName, retryCount + 1);
     }
 
-    const errPayload = await response.json().catch(() => ({}));
-    const message = errPayload?.error || `Erro HTTP ${response.status} na API Azure`;
+    const errText = await response.text().catch(() => '');
+    let errPayload = {};
+    if (errText) {
+      try {
+        errPayload = JSON.parse(errText);
+      } catch {
+        errPayload = { raw: errText };
+      }
+    }
+
+    const message = errPayload?.error
+      || (typeof errPayload?.message === 'string' ? errPayload.message : '')
+      || (typeof errPayload?.raw === 'string' ? errPayload.raw.slice(0, 300) : '')
+      || `Erro HTTP ${response.status} na API Azure`;
     throw new Error(message);
   }
 
