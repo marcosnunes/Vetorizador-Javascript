@@ -33,6 +33,27 @@ function buildCorsHeaders(req) {
   };
 }
 
+function normalizePdfBase64(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const dataUrlMatch = raw.match(/^data:application\/pdf;base64,(.+)$/i);
+  return (dataUrlMatch ? dataUrlMatch[1] : raw).replace(/\s+/g, '');
+}
+
+function looksLikePdfBase64(base64Value) {
+  if (!base64Value || typeof base64Value !== 'string') return false;
+  if (!/^[A-Za-z0-9+/=]+$/.test(base64Value)) return false;
+
+  try {
+    // Decode only the first chunk (fast check)
+    const binary = atob(base64Value.slice(0, 64));
+    return binary.includes('%PDF-');
+  } catch {
+    return false;
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -586,8 +607,15 @@ export default async function handler(req, res) {
     });
   }
 
+  const normalizedPdfBase64 = normalizePdfBase64(pdfBase64);
+  if (!looksLikePdfBase64(normalizedPdfBase64)) {
+    return res.status(400).json({
+      error: 'PDF inválido ou base64 malformado. Envie o arquivo PDF em Base64 válido.'
+    });
+  }
+
   try {
-    const ocrResult = await runDocumentIntelligence(pdfBase64, docIntelConfig, {
+    const ocrResult = await runDocumentIntelligence(normalizedPdfBase64, docIntelConfig, {
       totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
     });
     const expectedVertices = estimateExpectedVertexCount(ocrResult.text);
