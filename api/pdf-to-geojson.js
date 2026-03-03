@@ -725,7 +725,7 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('[pdf-to-geojson] erro:', error);
     const message = error?.message || 'Falha ao processar PDF com IA Azure.';
-    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido|Extração incompleta/i.test(message);
+    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido|Extração incompleta|Document Intelligence \(analyze\) falhou: 400|Invalid request/i.test(message);
     return res.status(isNonTransient ? 422 : 502).json({
       success: false,
       error: message
