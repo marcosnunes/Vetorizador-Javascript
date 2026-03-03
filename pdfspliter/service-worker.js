@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdfspliter-cache-v2';
+const CACHE_NAME = 'pdfspliter-cache-v3';
 
 self.addEventListener('install', function() {
   self.skipWaiting();
@@ -19,6 +19,15 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', function(event) {
   const request = event.request;
   if (request.method !== 'GET') return;
+
+  try {
+    const requestUrl = new URL(request.url);
+    if (requestUrl.pathname.startsWith('/api/')) {
+      return;
+    }
+  } catch {
+    return;
+  }
 
   event.respondWith((async function() {
     const cache = await caches.open(CACHE_NAME);
