@@ -84,7 +84,7 @@ Em vez de usar várias ferramentas separadas, o usuário acessa uma plataforma �
 
 Ambiente principal:
 
-https://rg-vetorizador-prod.azurestaticapps.net
+https://jolly-pebble-0487d1a1e.6.azurestaticapps.net/
 
 ---
 
