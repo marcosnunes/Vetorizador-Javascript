@@ -4,6 +4,8 @@
 // Saída: Qualidade predita + ajustes de parâmetros recomendados
 
 let modeloTreinado = null;
+let ultimoRelatorioLimpezaML = null;
+let ultimaConscienciaML = null;
 
 const DEFAULT_TRAINING_CONFIG = {
   edgeThreshold: 90,
@@ -13,6 +15,288 @@ const DEFAULT_TRAINING_CONFIG = {
   minQualityScore: 35,
   simplification: 0.00001
 };
+
+const DATASET_HYGIENE_CONFIG = {
+  madZThreshold: 3.5,
+  maxOutlierRatio: 0.35,
+  minSamplesForKmeans: 12,
+  maxClusters: 3,
+  kmeansIterations: 20,
+  distanceSigmaMultiplier: 2.2,
+  minClusterRatio: 0.08
+};
+
+function calcularScoreConscienciaML(relatorio, exemplosUsados = 0) {
+  const base = 100;
+  if (!relatorio) return base;
+
+  const taxaRemocao = parseFloat(String(relatorio.taxaRemocao || '0').replace('%', '')) || 0;
+  const penalidadeRemocao = Math.min(35, taxaRemocao * 0.7);
+  const bonusVolume = Math.min(10, Math.floor((exemplosUsados || relatorio.totalFinal || 0) / 50));
+  const fallbackPenalty = relatorio.fallbackAtivado ? 8 : 0;
+
+  return Math.max(0, Math.min(100, Math.round(base - penalidadeRemocao - fallbackPenalty + bonusVolume)));
+}
+
+function atualizarConscienciaML({ fase, exemplosUsados = 0, observacao = '' } = {}) {
+  const score = calcularScoreConscienciaML(ultimoRelatorioLimpezaML, exemplosUsados);
+  const nivelRisco = score >= 80 ? 'baixo' : score >= 60 ? 'moderado' : 'alto';
+
+  ultimaConscienciaML = {
+    timestamp: new Date().toISOString(),
+    fase: fase || 'execucao',
+    score,
+    risco: nivelRisco,
+    exemplosUsados,
+    limpeza: ultimoRelatorioLimpezaML,
+    observacao
+  };
+
+  console.groupCollapsed(`🧠 [ML-Consciencia] fase=${ultimaConscienciaML.fase} score=${score} risco=${nivelRisco}`);
+  console.log('Snapshot:', ultimaConscienciaML);
+  if (ultimoRelatorioLimpezaML) {
+    console.log('Limpeza dataset:', ultimoRelatorioLimpezaML);
+  }
+  console.groupEnd();
+
+  return ultimaConscienciaML;
+}
+
+function distanciaEuclidiana(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return Number.POSITIVE_INFINITY;
+
+  let soma = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    soma += diff * diff;
+  }
+
+  return Math.sqrt(soma);
+}
+
+function calcularMediana(valores) {
+  if (!Array.isArray(valores) || valores.length === 0) return 0;
+  const ordenados = [...valores].sort((a, b) => a - b);
+  const meio = Math.floor(ordenados.length / 2);
+  if (ordenados.length % 2 === 0) {
+    return (ordenados[meio - 1] + ordenados[meio]) / 2;
+  }
+  return ordenados[meio];
+}
+
+function detectarOutliersPorMAD(vetores, zThreshold = DATASET_HYGIENE_CONFIG.madZThreshold) {
+  if (!Array.isArray(vetores) || vetores.length < 8) {
+    return new Set();
+  }
+
+  const dimensoes = vetores[0]?.length || 0;
+  if (!dimensoes) return new Set();
+
+  const medianas = [];
+  const mads = [];
+
+  for (let d = 0; d < dimensoes; d += 1) {
+    const coluna = vetores.map((v) => v[d] || 0);
+    const mediana = calcularMediana(coluna);
+    const desvios = coluna.map((valor) => Math.abs(valor - mediana));
+    const mad = calcularMediana(desvios) || 1e-6;
+    medianas.push(mediana);
+    mads.push(mad);
+  }
+
+  const candidatos = new Set();
+  vetores.forEach((vetor, idx) => {
+    let excedeu = false;
+    for (let d = 0; d < dimensoes; d += 1) {
+      const robustZ = 0.6745 * Math.abs((vetor[d] || 0) - medianas[d]) / mads[d];
+      if (robustZ > zThreshold) {
+        excedeu = true;
+        break;
+      }
+    }
+    if (excedeu) candidatos.add(idx);
+  });
+
+  const limite = Math.floor(vetores.length * DATASET_HYGIENE_CONFIG.maxOutlierRatio);
+  if (candidatos.size > limite && limite > 0) {
+    return new Set();
+  }
+
+  return candidatos;
+}
+
+function executarKMeans(vetores, totalClusters, iteracoes = DATASET_HYGIENE_CONFIG.kmeansIterations) {
+  if (!Array.isArray(vetores) || vetores.length === 0) {
+    return null;
+  }
+
+  const k = Math.max(1, Math.min(totalClusters, vetores.length));
+  const centroides = [];
+  const atribuicoes = new Array(vetores.length).fill(0);
+
+  for (let i = 0; i < k; i += 1) {
+    const base = vetores[Math.floor((i * vetores.length) / k)] || vetores[0];
+    centroides.push([...base]);
+  }
+
+  for (let it = 0; it < iteracoes; it += 1) {
+    let mudou = false;
+
+    for (let i = 0; i < vetores.length; i += 1) {
+      let melhorCluster = 0;
+      let melhorDist = Number.POSITIVE_INFINITY;
+
+      for (let c = 0; c < k; c += 1) {
+        const dist = distanciaEuclidiana(vetores[i], centroides[c]);
+        if (dist < melhorDist) {
+          melhorDist = dist;
+          melhorCluster = c;
+        }
+      }
+
+      if (atribuicoes[i] !== melhorCluster) {
+        atribuicoes[i] = melhorCluster;
+        mudou = true;
+      }
+    }
+
+    const novosCentroides = Array.from({ length: k }, () => new Array(vetores[0].length).fill(0));
+    const contagens = new Array(k).fill(0);
+
+    for (let i = 0; i < vetores.length; i += 1) {
+      const cluster = atribuicoes[i];
+      contagens[cluster] += 1;
+      for (let d = 0; d < vetores[i].length; d += 1) {
+        novosCentroides[cluster][d] += vetores[i][d];
+      }
+    }
+
+    for (let c = 0; c < k; c += 1) {
+      if (contagens[c] === 0) {
+        novosCentroides[c] = [...vetores[Math.floor(Math.random() * vetores.length)]];
+      } else {
+        for (let d = 0; d < novosCentroides[c].length; d += 1) {
+          novosCentroides[c][d] /= contagens[c];
+        }
+      }
+    }
+
+    for (let c = 0; c < k; c += 1) {
+      centroides[c] = novosCentroides[c];
+    }
+
+    if (!mudou) break;
+  }
+
+  return { centroides, atribuicoes };
+}
+
+function detectarSuspeitosPorKMeans(vetores) {
+  if (!Array.isArray(vetores) || vetores.length < DATASET_HYGIENE_CONFIG.minSamplesForKmeans) {
+    return new Set();
+  }
+
+  const kEstimado = Math.max(2, Math.min(DATASET_HYGIENE_CONFIG.maxClusters, Math.round(Math.sqrt(vetores.length / 2))));
+  const resultado = executarKMeans(vetores, kEstimado);
+  if (!resultado) return new Set();
+
+  const { centroides, atribuicoes } = resultado;
+  const suspeitos = new Set();
+  const total = vetores.length;
+
+  const tamanhosCluster = new Map();
+  atribuicoes.forEach((cluster) => {
+    tamanhosCluster.set(cluster, (tamanhosCluster.get(cluster) || 0) + 1);
+  });
+
+  const minClusterSize = Math.max(2, Math.floor(total * DATASET_HYGIENE_CONFIG.minClusterRatio));
+
+  for (let i = 0; i < vetores.length; i += 1) {
+    const cluster = atribuicoes[i];
+    const tamanho = tamanhosCluster.get(cluster) || 0;
+    if (tamanho < minClusterSize) {
+      suspeitos.add(i);
+      continue;
+    }
+
+    const dist = distanciaEuclidiana(vetores[i], centroides[cluster]);
+    const distanciasDoCluster = vetores
+      .map((v, idx) => ({
+        idx,
+        cluster: atribuicoes[idx],
+        dist: distanciaEuclidiana(v, centroides[atribuicoes[idx]])
+      }))
+      .filter((item) => item.cluster === cluster)
+      .map((item) => item.dist);
+
+    const media = distanciasDoCluster.reduce((s, v) => s + v, 0) / Math.max(1, distanciasDoCluster.length);
+    const variancia = distanciasDoCluster.reduce((s, v) => s + (v - media) ** 2, 0) / Math.max(1, distanciasDoCluster.length);
+    const desvio = Math.sqrt(variancia);
+    const limiteDist = media + (desvio * DATASET_HYGIENE_CONFIG.distanceSigmaMultiplier);
+    if (dist > limiteDist) {
+      suspeitos.add(i);
+    }
+  }
+
+  return suspeitos;
+}
+
+function higienizarExemplosTreinamento(exemplosBrutos) {
+  if (!Array.isArray(exemplosBrutos) || exemplosBrutos.length === 0) {
+    return {
+      exemplosFiltrados: [],
+      relatorio: {
+        totalOriginal: 0,
+        removidosOutlierMAD: 0,
+        removidosKMeans: 0,
+        totalRemovidos: 0,
+        totalFinal: 0,
+        taxaRemocao: '0.0%'
+      }
+    };
+  }
+
+  const vetoresAnalise = exemplosBrutos.map((ex) => [
+    ...(ex.entradaRaw || []),
+    ex.saidaRaw?.[0] || 0
+  ]);
+
+  const outliersMAD = detectarOutliersPorMAD(vetoresAnalise);
+  const suspeitosKMeans = detectarSuspeitosPorKMeans(vetoresAnalise);
+
+  const suspeitosTotais = new Set([...outliersMAD, ...suspeitosKMeans]);
+  const exemplosFiltrados = exemplosBrutos.filter((_, idx) => !suspeitosTotais.has(idx));
+
+  if (exemplosFiltrados.length < 5) {
+    return {
+      exemplosFiltrados: exemplosBrutos,
+      relatorio: {
+        totalOriginal: exemplosBrutos.length,
+        removidosOutlierMAD: 0,
+        removidosKMeans: 0,
+        totalRemovidos: 0,
+        totalFinal: exemplosBrutos.length,
+        taxaRemocao: '0.0%',
+        fallbackAtivado: true,
+        motivoFallback: 'Remoção excessiva reduziria dataset útil para treino.'
+      }
+    };
+  }
+
+  const totalRemovidos = exemplosBrutos.length - exemplosFiltrados.length;
+
+  return {
+    exemplosFiltrados,
+    relatorio: {
+      totalOriginal: exemplosBrutos.length,
+      removidosOutlierMAD: outliersMAD.size,
+      removidosKMeans: suspeitosKMeans.size,
+      totalRemovidos,
+      totalFinal: exemplosFiltrados.length,
+      taxaRemocao: `${((totalRemovidos / exemplosBrutos.length) * 100).toFixed(1)}%`
+    }
+  };
+}
 
 function obterConfigTreinamento(feature, run) {
   const merged = {
@@ -128,7 +412,7 @@ async function criarModeloML() {
 
 // Preparar dataset para treinamento
 function prepararDatasetTreinamento(dataset) {
-  const exemplos = [];
+  const exemplosBrutos = [];
   
   if (!dataset.runs || dataset.runs.length === 0) {
     console.warn('⚠️ Nenhum run no dataset');
@@ -151,14 +435,14 @@ function prepararDatasetTreinamento(dataset) {
 
       // Criar entrada: [edgeThreshold, morphologySize, minArea, contrastBoost, minQualityScore, simplification]
       // Normalizar para [0, 1]
-      const entrada = window.tf.tensor1d([
+      const entradaRaw = [
         Math.min(config.edgeThreshold / 200, 1),      // 0-200 → 0-1
         Math.min(config.morphologySize / 9, 1),       // 0-9 → 0-1
         Math.min(config.minArea / 100, 1),            // 0-100m² → 0-1
         Math.min(config.contrastBoost / 2, 1),        // 0-2 → 0-1
         config.minQualityScore / 100,                 // 0-100 → 0-1
         Math.min(config.simplification * 100000, 1)   // muito pequeno → 0-1
-      ]);
+      ];
 
       // Criar saída: qualidade predita (feedback label)
       const rotuloFeedback = obterRotuloFeedback(fb);
@@ -171,27 +455,43 @@ function prepararDatasetTreinamento(dataset) {
       // Ajustes recomendados baseados em feedback
       const ajustesRecomendados = recomendarAjustes(feature, fb, run);
 
-      exemplos.push({
-        entrada,
-        saida: window.tf.tensor1d([
+      exemplosBrutos.push({
+        entradaRaw,
+        saidaRaw: [
           qualidadeAlvo,
           ajustesRecomendados.edgeThreshold,
           ajustesRecomendados.morphologySize,
           ajustesRecomendados.contrastBoost,
           ajustesRecomendados.minArea,
           ajustesRecomendados.simplification
-        ])
+        ]
       });
     });
   });
 
-  console.log(`✅ Dataset preparado: ${exemplos.length} exemplos para treinamento`);
-  
-  if (exemplos.length < 10) {
-    alert('⚠️ Poucos exemplos para treinamento! Recomendado: ≥10 exemplos, você tem: ' + exemplos.length);
+  const { exemplosFiltrados, relatorio } = higienizarExemplosTreinamento(exemplosBrutos);
+  ultimoRelatorioLimpezaML = {
+    ...relatorio,
+    generatedAt: new Date().toISOString()
+  };
+
+  atualizarConscienciaML({
+    fase: 'pre-treino',
+    exemplosUsados: exemplosFiltrados.length,
+    observacao: 'Dataset higienizado antes do treinamento.'
+  });
+
+  if (relatorio.totalRemovidos > 0) {
+    console.warn('🧹 Higienização de dataset aplicada:', ultimoRelatorioLimpezaML);
   }
 
-  return exemplos;
+  console.log(`✅ Dataset preparado: ${exemplosFiltrados.length} exemplos para treinamento`);
+  
+  if (exemplosFiltrados.length < 10) {
+    alert('⚠️ Poucos exemplos para treinamento! Recomendado: ≥10 exemplos, você tem: ' + exemplosFiltrados.length);
+  }
+
+  return exemplosFiltrados;
 }
 
 // Recomendar ajustes baseado em feedback
@@ -228,8 +528,8 @@ async function treinarModeloML(dataset) {
 
   try {
     // Preparar tensores
-    const xs = window.tf.stack(exemplos.map(ex => ex.entrada));
-    const ys = window.tf.stack(exemplos.map(ex => ex.saida));
+    const xs = window.tf.tensor2d(exemplos.map(ex => ex.entradaRaw));
+    const ys = window.tf.tensor2d(exemplos.map(ex => ex.saidaRaw));
 
     // Treinar modelo com callbacks para UI
     console.log('📊 Treinando em', exemplos.length, 'exemplos...');
@@ -277,13 +577,16 @@ async function treinarModeloML(dataset) {
     console.log('📉 Loss final:', lossFinal);
     console.log('🎯 Melhoria:', melhoria + '%');
 
+    atualizarConscienciaML({
+      fase: 'pos-treino',
+      exemplosUsados: exemplos.length,
+      observacao: `Treino finalizado. Melhoria de loss: ${melhoria}%.`
+    });
+
     // Limpar memória
     xs.dispose();
     ys.dispose();
-    exemplos.forEach(ex => {
-      ex.entrada.dispose();
-      ex.saida.dispose();
-    });
+
 
     // Atualizar UI final
     const loaderText = document.getElementById('loader-text');
@@ -433,3 +736,6 @@ window.treinarModeloML = treinarModeloML;
 window.autoajustarParametrosML = autoajustarParametrosML;
 window.carregarModeloLocalStorage = carregarModeloLocalStorage;
 window.fazerPredictionML = fazerPredictionML;
+window.obterRelatorioLimpezaML = () => ultimoRelatorioLimpezaML;
+window.obterConscienciaML = () => ultimaConscienciaML;
+window.logConscienciaML = () => atualizarConscienciaML({ fase: 'manual', observacao: 'Snapshot manual solicitado pela equipe.' });

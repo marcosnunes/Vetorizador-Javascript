@@ -258,6 +258,7 @@ async function obterDashboardCompleto() {
   await atualizarDashboardMetricas();
 
   const autoInferenciasMetricas = window.obterMetricasAutoInferencia?.();
+  const relatorioLimpezaML = window.obterRelatorioLimpezaML?.() || null;
 
   return {
     timestamp: new Date().toISOString(),
@@ -269,6 +270,7 @@ async function obterDashboardCompleto() {
     ultimoTreinamento,
     metricas: dashboardMetricas,
     autoInferencia: autoInferenciasMetricas || null,
+    higieneDatasetML: relatorioLimpezaML,
     statusGeral: {
       fase: 'contínuo',
       ativo: true,
@@ -396,6 +398,7 @@ const APIEndpoints = {
     const feedback = await idbGetAll('feedback');
     const pendentes = feedback.filter(fb => fb.label === 'editado').length;
     const rejeitadas = feedback.filter(fb => fb.label === 'rejeitado').length;
+    const relatorioLimpezaML = window.obterRelatorioLimpezaML?.() || null;
 
     let recomendacoes = [];
 
@@ -423,10 +426,19 @@ const APIEndpoints = {
       });
     }
 
+    if (relatorioLimpezaML?.totalRemovidos > 0) {
+      recomendacoes.push({
+        tipo: 'higiene-dataset',
+        prioridade: relatorioLimpezaML.totalRemovidos > 20 ? 'alta' : 'média',
+        mensagem: `Autolimpeza removeu ${relatorioLimpezaML.totalRemovidos} exemplo(s) suspeito(s) no último treino (${relatorioLimpezaML.taxaRemocao}).`
+      });
+    }
+
     return {
       timestamp: new Date().toISOString(),
       recomendacoes,
-      exemplosAtuais: exemploColetados
+      exemplosAtuais: exemploColetados,
+      higieneDatasetML: relatorioLimpezaML
     };
   }
 };
