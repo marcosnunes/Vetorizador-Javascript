@@ -99,9 +99,12 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
       || (typeof errPayload?.raw === 'string' ? errPayload.raw.slice(0, 300) : '')
       || `Erro HTTP ${response.status} na API Azure`;
     const platformBridgeFailure = /backend call failure/i.test(message);
+    const docIntelInvalidRequest = /Document Intelligence \(analyze\) falhou: 400|Invalid request/i.test(message);
     const enrichedMessage = platformBridgeFailure
       ? 'Falha de comunicação entre site e API (Backend call failure). Em geral é limite de payload/timeout da plataforma. Tente PDF menor (até ~8MB), dividir o arquivo ou usar endpoint dedicado da Function.'
-      : message;
+      : (docIntelInvalidRequest
+        ? 'O Azure Document Intelligence rejeitou este PDF (Invalid request). Verifique se o arquivo não está protegido por senha/assinatura, reexporte como PDF padrão (ou PDF/A) e confirme endpoint/key/version do recurso em produção.'
+        : message);
     const fullMessage = `${message}${middlewareRequestId ? ` (requestId: ${middlewareRequestId})` : ''}`;
     console.error('[PDFtoArcgis] Erro API Azure detalhado:', {
       status: response.status,
