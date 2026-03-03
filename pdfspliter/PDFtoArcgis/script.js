@@ -72,11 +72,12 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
   }
 
   if (!response.ok) {
+    const middlewareRequestId = response.headers.get('x-ms-middleware-request-id') || '';
     const transientStatuses = new Set([429, 500, 503, 504]);
     if (transientStatuses.has(response.status) && retryCount < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
       if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
+        displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...${middlewareRequestId ? ` requestId=${middlewareRequestId}` : ''}`);
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
       return callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint, retryCount + 1);
@@ -96,7 +97,15 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
       || (typeof errPayload?.message === 'string' ? errPayload.message : '')
       || (typeof errPayload?.raw === 'string' ? errPayload.raw.slice(0, 300) : '')
       || `Erro HTTP ${response.status} na API Azure`;
-    throw new Error(message);
+    const fullMessage = `${message}${middlewareRequestId ? ` (requestId: ${middlewareRequestId})` : ''}`;
+    console.error('[PDFtoArcgis] Erro API Azure detalhado:', {
+      status: response.status,
+      routeCandidates: candidateRoutes,
+      middlewareRequestId,
+      message,
+      raw: errText
+    });
+    throw new Error(fullMessage);
   }
 
   return response.json();
