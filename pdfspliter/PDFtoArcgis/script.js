@@ -10,7 +10,6 @@ function getPdfToArcgisConfig() {
 }
 
 const ENABLE_TOPOLOGY_VALIDATION = false;
-const MAX_PDF_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 function getAzurePdfToGeoJsonRoutes() {
   const cfg = getPdfToArcgisConfig();
@@ -35,11 +34,11 @@ function getAzurePdfToGeoJsonRoutes() {
   return [...new Set(routes)];
 }
 
-async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, retryCount = 0) {
+async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
   const MAX_RETRIES = 3;
   const INITIAL_DELAY_MS = 1200;
 
-  const payload = JSON.stringify({ pdfBase64, fileName, totalPagesHint });
+  const payload = JSON.stringify({ pdfBase64, fileName });
   const candidateRoutes = getAzurePdfToGeoJsonRoutes();
   let response = null;
   let lastError = null;
@@ -73,107 +72,14 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
   }
 
   if (!response.ok) {
-    const middlewareRequestId = response.headers.get('x-ms-middleware-request-id') || '';
     const transientStatuses = new Set([429, 500, 503, 504]);
     if (transientStatuses.has(response.status) && retryCount < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
       if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...${middlewareRequestId ? ` requestId=${middlewareRequestId}` : ''}`);
+        displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
-      return callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint, retryCount + 1);
-    }
-
-    const errText = await response.text().catch(() => '');
-    let errPayload = {};
-    if (errText) {
-      try {
-        errPayload = JSON.parse(errText);
-      } catch {
-        errPayload = { raw: errText };
-      }
-    }
-
-    const message = errPayload?.error
-      || (typeof errPayload?.message === 'string' ? errPayload.message : '')
-      || (typeof errPayload?.raw === 'string' ? errPayload.raw.slice(0, 300) : '')
-      || `Erro HTTP ${response.status} na API Azure`;
-    const platformBridgeFailure = /backend call failure/i.test(message);
-    const docIntelInvalidRequest = /Document Intelligence \(analyze\) falhou: 400|Invalid request/i.test(message);
-    const enrichedMessage = platformBridgeFailure
-      ? 'Falha de comunicação entre site e API (Backend call failure). Em geral é limite de payload/timeout da plataforma. Tente PDF menor (até ~8MB), dividir o arquivo ou usar endpoint dedicado da Function.'
-      : (docIntelInvalidRequest
-        ? 'O Azure Document Intelligence rejeitou este PDF (Invalid request). Verifique se o arquivo não está protegido por senha/assinatura, reexporte como PDF padrão (ou PDF/A) e confirme endpoint/key/version do recurso em produção.'
-        : message);
-    const fullMessage = `${message}${middlewareRequestId ? ` (requestId: ${middlewareRequestId})` : ''}`;
-    console.error('[PDFtoArcgis] Erro API Azure detalhado:', {
-      status: response.status,
-      routeCandidates: candidateRoutes,
-      middlewareRequestId,
-      message,
-      raw: errText
-    });
-    throw new Error(`${enrichedMessage}${middlewareRequestId ? ` (requestId: ${middlewareRequestId})` : ''}`);
-  }
-
-  return response.json();
-}
-
-function withQueryParams(url, params) {
-  const query = new URLSearchParams(params).toString();
-  if (!query) return url;
-  return url.includes('?') ? `${url}&${query}` : `${url}?${query}`;
-}
-
-async function callAzurePdfToGeoJsonBinary(pdfArrayBuffer, fileName, totalPagesHint = 0, retryCount = 0) {
-  const MAX_RETRIES = 3;
-  const INITIAL_DELAY_MS = 1200;
-  const candidateRoutes = getAzurePdfToGeoJsonRoutes();
-  let response = null;
-  let lastError = null;
-
-  for (const baseRoute of candidateRoutes) {
-    try {
-      const route = withQueryParams(baseRoute, {
-        fileName: fileName || 'documento.pdf',
-        totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
-      });
-
-      const res = await fetch(route, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/pdf',
-          'X-File-Name': fileName || 'documento.pdf',
-          'X-Total-Pages-Hint': String(Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0)
-        },
-        body: pdfArrayBuffer
-      });
-
-      if (res.status === 404) {
-        lastError = new Error(`Rota não encontrada: ${route}`);
-        continue;
-      }
-
-      response = res;
-      break;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  if (!response) {
-    throw new Error(lastError?.message || 'Não foi possível acessar a API de extração Azure.');
-  }
-
-  if (!response.ok) {
-    const transientStatuses = new Set([429, 500, 503, 504]);
-    if (transientStatuses.has(response.status) && retryCount < MAX_RETRIES) {
-      const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}) no envio binário. Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return callAzurePdfToGeoJsonBinary(pdfArrayBuffer, fileName, totalPagesHint, retryCount + 1);
+      return callAzurePdfToGeoJson(pdfBase64, fileName, retryCount + 1);
     }
 
     const errText = await response.text().catch(() => '');
@@ -1159,11 +1065,7 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 
   const nameBase = (sourceFileName || 'coordenadas_extracao').replace(/\.[^/.]+$/, '');
   const projectionFromApi = String(apiResult?.projectionKey || '').trim();
-  const geometryMode = String(apiResult?.geometryMode || '').trim().toLowerCase();
-  const isRelativeFromApi = projectionFromApi.toUpperCase() === 'LOCAL_RELATIVE' || geometryMode === 'local_relative';
-  const projKey = isRelativeFromApi
-    ? 'LOCAL_RELATIVE'
-    : (projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S');
+  const projKey = projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S';
 
   let vertices = verticesFromGeoJSON(geojson, null);
   vertices = vertices
@@ -1185,12 +1087,10 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
     : null;
   const warnings = Array.isArray(apiResult?.warnings) ? apiResult.warnings : [];
   const projectionInfo = {
-    confidence: isRelativeFromApi ? 'média' : (projectionFromApi ? 'alta' : 'baixa'),
-    reason: isRelativeFromApi
-      ? 'IA retornou geometria local relativa (sem georreferência absoluta).'
-      : (projectionFromApi
+    confidence: projectionFromApi ? 'alta' : 'baixa',
+    reason: projectionFromApi
       ? 'CRS informado pela IA Azure no retorno do GeoJSON.'
-      : 'CRS não informado pela IA; aplicado CRS ativo da interface.')
+      : 'CRS não informado pela IA; aplicado CRS ativo da interface.'
   };
 
   documentsResults = [{
@@ -1204,15 +1104,7 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
     topology,
     memorialValidation: { matches: [], issues: [] },
     memorialData: { azimutes: [], distances: [] },
-    relativeInfo: isRelativeFromApi
-      ? {
-          relative: true,
-          reason: 'Polígono construído por rumo/azimute e distância sem coordenadas georreferenciadas explícitas.',
-          origin: Array.isArray(vertices) && vertices[0]
-            ? { east: Number(vertices[0].east) || 0, north: Number(vertices[0].north) || 0 }
-            : { east: 0, north: 0 }
-        }
-      : null,
+    relativeInfo: null,
     text: ''
   }];
 
@@ -1230,8 +1122,7 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
   displayResults();
   renderDocSelector();
 
-  const pagesMsg = apiResult?.pagesAnalyzed ? ` em ${apiResult.pagesAnalyzed} página(s)` : '';
-  updateStatus(`✅ IA Azure concluiu${pagesMsg}: ${vertices.length} coordenadas processadas.`, 'success');
+  updateStatus(`✅ IA Azure concluiu: ${vertices.length} coordenadas processadas.`, 'success');
   progressContainer.style.display = 'none';
 
   if (typeof displayLogMessage === 'function') {
@@ -1243,16 +1134,6 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 fileInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
-
-  if (file.size > MAX_PDF_UPLOAD_BYTES) {
-    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-    const maxMb = (MAX_PDF_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
-    updateStatus(`Arquivo com ${sizeMb}MB excede o limite recomendado de ${maxMb}MB para este endpoint. Divida/comprima o PDF ou use endpoint dedicado.`, 'warning');
-    if (typeof displayLogMessage === 'function') {
-      displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Arquivo grande (${sizeMb}MB). Risco de Backend call failure por limite/timeout da plataforma.`);
-    }
-    return;
-  }
 
   // Reset de UI e estado
   fileNameBase = file.name.replace(/\.[^/.]+$/, "");
@@ -1276,26 +1157,11 @@ fileInput.addEventListener("change", async (event) => {
 
     const arrayBuffer = await file.arrayBuffer();
     const pdfBase64 = arrayBufferToBase64(arrayBuffer);
-    let totalPagesHint = 0;
-    try {
-      const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      totalPagesHint = Number(pdfDoc?.numPages || 0);
-    } catch {
-      totalPagesHint = 0;
-    }
 
     progressBar.value = 35;
     document.getElementById("progressLabel").innerText = "Processando PDF na IA Azure...";
 
-    let apiResult;
-    try {
-      apiResult = await callAzurePdfToGeoJsonBinary(arrayBuffer, file.name, totalPagesHint);
-    } catch (binaryError) {
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Envio binário falhou (${binaryError?.message || 'erro desconhecido'}). Tentando fallback JSON/Base64...`);
-      }
-      apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint);
-    }
+    const apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name);
     progressBar.value = 100;
 
     if (!apiResult?.success) {
@@ -1303,17 +1169,6 @@ fileInput.addEventListener("change", async (event) => {
     }
 
     applyAzureGeoJsonResult(apiResult, file.name);
-
-    if (totalPagesHint > 0 && Number(apiResult?.pagesAnalyzed || 0) > 0 && Number(apiResult.pagesAnalyzed) < totalPagesHint) {
-      const analyzed = Number(apiResult.pagesAnalyzed);
-      const requested = Number(apiResult?.pagesRequestedHint || totalPagesHint);
-      const diagnostic = `⚠️ A API analisou ${analyzed}/${requested} página(s). Isso indica limitação do recurso/credenciais do Document Intelligence em produção.`;
-      updateStatus(diagnostic, 'warning');
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] ${diagnostic}`);
-      }
-    }
-
     return;
 
   } catch (e) {

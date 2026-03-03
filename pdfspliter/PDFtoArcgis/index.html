@@ -9,32 +9,24 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css" />
 
-  <script defer src="vendor/shpwrite.js"></script>
-  <script defer src="vendor/shp.min.js"></script>
-  <script defer src="vendor/pizzip.min.js"></script>
-  <script defer src="vendor/proj4.min.js"></script>
-  <script defer src="vendor/FileSaver.min.js"></script>
-  <script defer src="vendor/docx.umd.js"></script>
-  <script src="config.js"></script>
+  <script src="vendor/shpwrite.js"></script>
+  <script src="vendor/shp.min.js"></script>
+  <script src="vendor/pizzip.min.js"></script>
+  <script src="vendor/proj4.min.js"></script>
+  <script src="vendor/FileSaver.min.js"></script>
+  <script src="vendor/docx.umd.js"></script>
   <script>
-    window.PDFTOARCGIS_CONFIG = Object.assign(
-      {
-        azurePdfToGeoJsonUrls: ["/api/pdf-to-geojson"],
-        azurePdfToGeoJsonUrl: "/api/pdf-to-geojson"
-      },
-      window.PDFTOARCGIS_RUNTIME || {},
-      window.PDFTOARCGIS_CONFIG || {}
-    );
+    window.PDFTOARCGIS_CONFIG = Object.assign({
+      azurePdfToGeoJsonUrl: "/api/pdf-to-geojson"
+    }, window.PDFTOARCGIS_CONFIG || {});
   </script>
   <script>
     (function ensureDocxLoaded() {
-      window.addEventListener('load', function() {
-        if (window.docx && window.docx.Document) {
-          console.log("[DOCX] Biblioteca carregada (local).");
-          return;
-        }
-        console.warn("[DOCX] Biblioteca nao encontrada. Verifique o arquivo local.");
-      });
+      if (window.docx && window.docx.Document) {
+        console.log("[DOCX] Biblioteca carregada (local).");
+        return;
+      }
+      console.warn("[DOCX] Biblioteca nao encontrada. Verifique o arquivo local.");
     })();
   </script>
 </head>
@@ -242,10 +234,10 @@
   </div>
 
   <!-- PDF e OCR -->
-  <script defer src="vendor/pdf.min.js"></script>
+  <script src="vendor/pdf.min.js"></script>
 
   
   <!-- Seu script principal -->
-  <script defer src="script.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
