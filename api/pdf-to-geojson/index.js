@@ -381,22 +381,30 @@ async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRa
 async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) {
   const totalPagesHint = Number.isFinite(options.totalPagesHint) ? options.totalPagesHint : 0;
   let modelId = 'prebuilt-read';
-  let firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', modelId);
+  let firstPass = null;
+  const modelCandidates = ['prebuilt-read', 'prebuilt-layout', 'prebuilt-document'];
 
-  if (!String(firstPass?.text || '').trim()) {
-    modelId = 'prebuilt-layout';
-    firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', modelId);
+  for (const candidate of modelCandidates) {
+    const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', candidate);
+    if (String(pass?.text || '').trim()) {
+      modelId = candidate;
+      firstPass = pass;
+      break;
+    }
+  }
+
+  if (!firstPass) {
+    throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
   }
 
   const firstPages = Array.isArray(firstPass.pages) ? firstPass.pages : [];
   const firstCount = firstPages.length;
 
-  if (!String(firstPass?.text || '').trim()) {
-    throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
-  }
-
   if (!totalPagesHint || totalPagesHint <= firstCount) {
-    return firstPass;
+    return {
+      ...firstPass,
+      modelId
+    };
   }
 
   const mergedPages = new Map();

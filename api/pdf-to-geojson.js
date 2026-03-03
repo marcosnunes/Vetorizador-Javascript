@@ -46,8 +46,16 @@ function looksLikePdfBase64(base64Value) {
   if (!/^[A-Za-z0-9+/=]+$/.test(base64Value)) return false;
 
   try {
-    // Decode only the first chunk (fast check)
-    const binary = atob(base64Value.slice(0, 64));
+    const probe = base64Value.slice(0, 64);
+    let binary = '';
+
+    if (typeof globalThis !== 'undefined' && globalThis.Buffer) {
+      binary = globalThis.Buffer.from(probe, 'base64').toString('latin1');
+    } else if (typeof atob === 'function') {
+      binary = atob(probe);
+    }
+
+    if (!binary) return false;
     return binary.includes('%PDF-');
   } catch {
     return false;
@@ -57,12 +65,18 @@ function looksLikePdfBase64(base64Value) {
 function toBase64FromRawPdfBody(rawBody) {
   if (!rawBody) return '';
 
-  if (Buffer.isBuffer(rawBody)) {
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(rawBody)) {
     return rawBody.toString('base64');
   }
 
   if (rawBody instanceof Uint8Array) {
-    return Buffer.from(rawBody).toString('base64');
+    if (typeof Buffer !== 'undefined') {
+      // eslint-disable-next-line no-undef
+      return Buffer.from(rawBody).toString('base64');
+    }
+    // Fallback for environments without Buffer
+    return btoa(String.fromCharCode.apply(null, Array.from(rawBody)));
   }
 
   if (typeof rawBody === 'string') {
@@ -70,14 +84,22 @@ function toBase64FromRawPdfBody(rawBody) {
     if (!trimmed) return '';
 
     if (trimmed.startsWith('%PDF-')) {
-      return Buffer.from(trimmed, 'binary').toString('base64');
+      if (typeof Buffer !== 'undefined') {
+        // eslint-disable-next-line no-undef
+        return Buffer.from(trimmed, 'binary').toString('base64');
+      }
+      return btoa(trimmed);
     }
 
     if (/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) {
       return trimmed.replace(/\s+/g, '');
     }
 
-    return Buffer.from(rawBody, 'binary').toString('base64');
+    if (typeof Buffer !== 'undefined') {
+      // eslint-disable-next-line no-undef
+      return Buffer.from(rawBody, 'binary').toString('base64');
+    }
+    return btoa(rawBody);
   }
 
   return '';
@@ -332,22 +354,30 @@ async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRa
 async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) {
   const totalPagesHint = Number.isFinite(options.totalPagesHint) ? options.totalPagesHint : 0;
   let modelId = 'prebuilt-read';
-  let firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', modelId);
+  let firstPass = null;
+  const modelCandidates = ['prebuilt-read', 'prebuilt-layout', 'prebuilt-document'];
 
-  if (!String(firstPass?.text || '').trim()) {
-    modelId = 'prebuilt-layout';
-    firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', modelId);
+  for (const candidate of modelCandidates) {
+    const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', candidate);
+    if (String(pass?.text || '').trim()) {
+      modelId = candidate;
+      firstPass = pass;
+      break;
+    }
+  }
+
+  if (!firstPass) {
+    throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
   }
 
   const firstPages = Array.isArray(firstPass.pages) ? firstPass.pages : [];
   const firstCount = firstPages.length;
 
-  if (!String(firstPass?.text || '').trim()) {
-    throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
-  }
-
   if (!totalPagesHint || totalPagesHint <= firstCount) {
-    return firstPass;
+    return {
+      ...firstPass,
+      modelId
+    };
   }
 
   const mergedPages = new Map();
