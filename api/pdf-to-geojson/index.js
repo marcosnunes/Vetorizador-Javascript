@@ -315,11 +315,11 @@ function extractTextFromAnalyzeResult(analyzeResult) {
   return pageTexts.join('\n\n').trim();
 }
 
-async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRange = '') {
+async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRange = '', modelId = 'prebuilt-read') {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
 
-  let analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=${encodeURIComponent(apiVersion)}`;
+  let analyzeUrl = `${endpoint}/documentintelligence/documentModels/${encodeURIComponent(modelId)}:analyze?api-version=${encodeURIComponent(apiVersion)}`;
   if (pagesRange) {
     analyzeUrl += `&pages=${encodeURIComponent(pagesRange)}`;
   }
@@ -363,12 +363,10 @@ async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRa
 
     if (status === 'succeeded') {
       const content = extractTextFromAnalyzeResult(pollPayload.analyzeResult);
-      if (!content.trim()) {
-        throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
-      }
       return {
         text: content,
-        pages: pollPayload.analyzeResult?.pages || []
+        pages: pollPayload.analyzeResult?.pages || [],
+        modelId
       };
     }
 
@@ -382,10 +380,20 @@ async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRa
 
 async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) {
   const totalPagesHint = Number.isFinite(options.totalPagesHint) ? options.totalPagesHint : 0;
-  const firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig);
+  let modelId = 'prebuilt-read';
+  let firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', modelId);
+
+  if (!String(firstPass?.text || '').trim()) {
+    modelId = 'prebuilt-layout';
+    firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', modelId);
+  }
 
   const firstPages = Array.isArray(firstPass.pages) ? firstPass.pages : [];
   const firstCount = firstPages.length;
+
+  if (!String(firstPass?.text || '').trim()) {
+    throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
+  }
 
   if (!totalPagesHint || totalPagesHint <= firstCount) {
     return firstPass;
@@ -407,7 +415,7 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) 
     const range = `${start}-${end}`;
 
     try {
-      const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, range);
+      const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, range, modelId);
       if (pass.text) {
         mergedTexts.push(pass.text);
       }
@@ -428,11 +436,15 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) 
     return {
       text: mergedTexts.join('\n\n'),
       pages: mergedPageList,
-      usedPagedFallback: true
+      usedPagedFallback: true,
+      modelId
     };
   }
 
-  return firstPass;
+  return {
+    ...firstPass,
+    modelId
+  };
 }
 
 async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '', options = {}) {
