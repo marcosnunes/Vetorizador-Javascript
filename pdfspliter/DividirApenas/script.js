@@ -148,6 +148,7 @@ async function processarPdf() {
                 downloadLink.download = downloadFileName;
                 downloadLink.textContent = `Página ${i + 1}`;
                 downloadLink.target = "_blank";
+                downloadLink.classList.add("custom-download-link");
 
                 const revokeObjectUrl = () => {
                     setTimeout(() => {

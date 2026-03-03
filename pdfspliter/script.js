@@ -697,6 +697,7 @@ async function processarPdf() {
             downloadLink.textContent = `${linkText} (${pages.length} pág.)`;
             downloadLink.title = `${nome} (${pages.length} páginas)`; // Tooltip com nome completo
             downloadLink.target = "_blank";
+            downloadLink.classList.add("custom-download-link");
              // Garante que o objeto URL seja revogado após o clique ou download
             const revokeObjectUrl = () => {
                 setTimeout(() => {
