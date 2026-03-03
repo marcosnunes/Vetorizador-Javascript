@@ -10,6 +10,7 @@ function getPdfToArcgisConfig() {
 }
 
 const ENABLE_TOPOLOGY_VALIDATION = false;
+const MAX_PDF_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 function getAzurePdfToGeoJsonRoutes() {
   const cfg = getPdfToArcgisConfig();
@@ -97,6 +98,10 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
       || (typeof errPayload?.message === 'string' ? errPayload.message : '')
       || (typeof errPayload?.raw === 'string' ? errPayload.raw.slice(0, 300) : '')
       || `Erro HTTP ${response.status} na API Azure`;
+    const platformBridgeFailure = /backend call failure/i.test(message);
+    const enrichedMessage = platformBridgeFailure
+      ? 'Falha de comunicação entre site e API (Backend call failure). Em geral é limite de payload/timeout da plataforma. Tente PDF menor (até ~8MB), dividir o arquivo ou usar endpoint dedicado da Function.'
+      : message;
     const fullMessage = `${message}${middlewareRequestId ? ` (requestId: ${middlewareRequestId})` : ''}`;
     console.error('[PDFtoArcgis] Erro API Azure detalhado:', {
       status: response.status,
@@ -105,7 +110,7 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
       message,
       raw: errText
     });
-    throw new Error(fullMessage);
+    throw new Error(`${enrichedMessage}${middlewareRequestId ? ` (requestId: ${middlewareRequestId})` : ''}`);
   }
 
   return response.json();
@@ -1158,6 +1163,16 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 fileInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
+
+  if (file.size > MAX_PDF_UPLOAD_BYTES) {
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    const maxMb = (MAX_PDF_UPLOAD_BYTES / (1024 * 1024)).toFixed(0);
+    updateStatus(`Arquivo com ${sizeMb}MB excede o limite recomendado de ${maxMb}MB para este endpoint. Divida/comprima o PDF ou use endpoint dedicado.`, 'warning');
+    if (typeof displayLogMessage === 'function') {
+      displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Arquivo grande (${sizeMb}MB). Risco de Backend call failure por limite/timeout da plataforma.`);
+    }
+    return;
+  }
 
   // Reset de UI e estado
   fileNameBase = file.name.replace(/\.[^/.]+$/, "");

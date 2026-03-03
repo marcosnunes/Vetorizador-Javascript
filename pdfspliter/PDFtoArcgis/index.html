@@ -15,10 +15,16 @@
   <script src="vendor/proj4.min.js"></script>
   <script src="vendor/FileSaver.min.js"></script>
   <script src="vendor/docx.umd.js"></script>
+  <script src="config.js"></script>
   <script>
-    window.PDFTOARCGIS_CONFIG = Object.assign({
-      azurePdfToGeoJsonUrl: "/api/pdf-to-geojson"
-    }, window.PDFTOARCGIS_CONFIG || {});
+    window.PDFTOARCGIS_CONFIG = Object.assign(
+      {
+        azurePdfToGeoJsonUrls: ["/api/pdf-to-geojson"],
+        azurePdfToGeoJsonUrl: "/api/pdf-to-geojson"
+      },
+      window.PDFTOARCGIS_RUNTIME || {},
+      window.PDFTOARCGIS_CONFIG || {}
+    );
   </script>
   <script>
     (function ensureDocxLoaded() {
