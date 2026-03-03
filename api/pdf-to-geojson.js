@@ -54,6 +54,35 @@ function looksLikePdfBase64(base64Value) {
   }
 }
 
+function toBase64FromRawPdfBody(rawBody) {
+  if (!rawBody) return '';
+
+  if (Buffer.isBuffer(rawBody)) {
+    return rawBody.toString('base64');
+  }
+
+  if (rawBody instanceof Uint8Array) {
+    return Buffer.from(rawBody).toString('base64');
+  }
+
+  if (typeof rawBody === 'string') {
+    const trimmed = rawBody.trim();
+    if (!trimmed) return '';
+
+    if (trimmed.startsWith('%PDF-')) {
+      return Buffer.from(trimmed, 'binary').toString('base64');
+    }
+
+    if (/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) {
+      return trimmed.replace(/\s+/g, '');
+    }
+
+    return Buffer.from(rawBody, 'binary').toString('base64');
+  }
+
+  return '';
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -600,14 +629,31 @@ export default async function handler(req, res) {
     });
   }
 
-  const { pdfBase64, fileName, totalPagesHint } = req.body || {};
-  if (!pdfBase64 || typeof pdfBase64 !== 'string') {
-    return res.status(400).json({
-      error: 'Campo pdfBase64 é obrigatório e deve ser string Base64 do PDF.'
-    });
+  const contentType = String(req?.headers?.['content-type'] || req?.headers?.['Content-Type'] || '').toLowerCase();
+  let normalizedPdfBase64 = '';
+  let fileName = '';
+  let totalPagesHint = 0;
+
+  if (contentType.includes('application/pdf')) {
+    fileName = String(req?.query?.fileName || req?.headers?.['x-file-name'] || 'documento.pdf');
+    totalPagesHint = Number(req?.query?.totalPagesHint || req?.headers?.['x-total-pages-hint'] || 0);
+
+    const rawPdfBody = req.rawBody ?? req.body;
+    normalizedPdfBase64 = normalizePdfBase64(toBase64FromRawPdfBody(rawPdfBody));
+  } else {
+    const payloadPdfBase64 = req.body?.pdfBase64;
+    fileName = req.body?.fileName;
+    totalPagesHint = Number(req.body?.totalPagesHint || 0);
+
+    if (!payloadPdfBase64 || typeof payloadPdfBase64 !== 'string') {
+      return res.status(400).json({
+        error: 'Campo pdfBase64 é obrigatório e deve ser string Base64 do PDF.'
+      });
+    }
+
+    normalizedPdfBase64 = normalizePdfBase64(payloadPdfBase64);
   }
 
-  const normalizedPdfBase64 = normalizePdfBase64(pdfBase64);
   if (!looksLikePdfBase64(normalizedPdfBase64)) {
     return res.status(400).json({
       error: 'PDF inválido ou base64 malformado. Envie o arquivo PDF em Base64 válido.'
