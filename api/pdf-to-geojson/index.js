@@ -137,12 +137,14 @@ function buildCoordinateFocusedText(rawText) {
   const selected = [];
   const seen = new Set();
 
-  const hasVertexToken = /\b(?:V(?:É|E)?RTICE|VERTICE|PONTO|PT|M\s*[-.]?\s*\d+|V\s*\d{2,4})\b/i;
-  const hasCoordPair = /-?\d{5,7}[.,]\d+[^\d\n\r]{1,25}-?\d{5,7}[.,]\d+/;
-  const hasAzDist = /\b(?:AZIMUTE|RUMO|DIST[ÂA]NCIA|DIST)\b/i;
+  const hasVertexToken = /\b(?:V(?:É|E)?RTICE|VERTICE|PONTO|PT|M\s*[-.]?\s*\d+|V\s*\d{1,4})\b/i;
+  const hasUtmPair = /-?\d{5,7}[.,]\d+[^\d\n\r]{1,25}-?\d{5,7}[.,]\d+/;
+  const hasLatLonPair = /-?\d{1,3}[.,]\d{4,}[^\d\n\r]{1,20}-?\d{1,3}[.,]\d{4,}/;
+  const hasDmsPair = /\d{1,3}\s*[°º]\s*\d{1,2}\s*['’′]\s*\d{1,2}(?:[.,]\d+)?\s*(?:["”″]\s*)?[NSOLWE]/i;
+  const hasAzDist = /\b(?:AZIMUTE|RUMO|DIST[ÂA]NCIA|DIST\.?|METROS?|M\b|BEARING|N\s*\d{1,2}.*E|S\s*\d{1,2}.*W)\b/i;
 
   for (const line of lines) {
-    if (!hasVertexToken.test(line) && !hasCoordPair.test(line) && !hasAzDist.test(line)) {
+    if (!hasVertexToken.test(line) && !hasUtmPair.test(line) && !hasLatLonPair.test(line) && !hasDmsPair.test(line) && !hasAzDist.test(line)) {
       continue;
     }
 
@@ -151,10 +153,25 @@ function buildCoordinateFocusedText(rawText) {
     seen.add(compact);
     selected.push(compact);
 
-    if (selected.length >= 1800) break;
+    if (selected.length >= 5000) break;
   }
 
   return selected.join('\n');
+}
+
+function parseNumericValue(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/\s+/g, '').replace(',', '.');
+    if (!normalized) return null;
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
 }
 
 function estimateExpectedVertexCount(rawText) {
@@ -284,7 +301,7 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   throw new Error('Timeout ao aguardar processamento do Document Intelligence.');
 }
 
-async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
+async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '', options = {}) {
   const endpoint = sanitizeEndpoint(openAiConfig.endpoint);
   const apiVersion = openAiConfig.apiVersion || DEFAULT_OPENAI_API_VERSION;
 
@@ -302,7 +319,7 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     '3) GeoJSON deve ser FeatureCollection com 1 Feature Polygon.',
     '4) O anel do polígono deve estar fechado (primeiro ponto = último ponto).',
     '5) Coordenadas no padrão [x, y] => [este, norte] em metros quando CRS for UTM/SIRGAS/SAD.',
-    '6) NÃO inferir, suavizar, reordenar, aproximar ou interpolar coordenadas; use apenas valores explícitos no texto OCR.',
+    '6) Se houver coordenadas explícitas (UTM, geográficas, DMS), NÃO inferir, suavizar, reordenar, aproximar ou interpolar; use apenas valores explícitos.',
     '7) Preserve a ordem dos vértices conforme o memorial/documento.',
     '8) Se o documento usar vírgula decimal, converta apenas para ponto decimal, sem alterar magnitude.',
     '9) Captura TOTAL: extraia todos os vértices encontrados (não resumir, não amostrar, não truncar lista).',
@@ -310,18 +327,29 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '') {
     '11) Priorize linhas/tabulações que contenham pares numéricos de coordenadas (N/Y com E/X), mesmo quando existirem colunas extras (azimute, distância, confrontante, observações).',
     '12) Ignore repetições de cabeçalho/rodapé e repetições exatas da mesma linha OCR; mantenha apenas a sequência real dos vértices.',
     '13) Se houver múltiplos blocos de coordenadas, escolha o bloco principal do perímetro do imóvel com maior cardinalidade de vértices.',
-    '14) Se não conseguir extrair com confiabilidade, retornar erro lógico no campo warnings e geometria mínima válida quando possível.'
+    '14) Quando NÃO houver coordenadas absolutas e o documento trouxer apenas rumo/azimute + distância, construa polígono LOCAL RELATIVO: ponto inicial [0,0], acumule segmentos na ordem textual, feche o anel e use projectionKey="LOCAL_RELATIVE".',
+    '15) Para azimute use convenção topográfica: 0° = Norte, crescimento horário.',
+    '16) Para rumo quadrantal (ex.: N 35°20\' E), converta para direção cartesiana equivalente.',
+    '17) Nesses casos locais relativos, informe geometryMode="local_relative" e inclua warning indicando necessidade de georreferenciamento manual posterior.',
+    '18) Sempre retornar também sourcePattern em {"utm","latlong","rumo_distancia","azimute_distancia","misto","desconhecido"}.'
   ].join('\n');
 
   const focusedText = buildCoordinateFocusedText(ocrText);
-  const compactOcrText = String(ocrText || '').slice(0, 140000);
-  const compactFocusedText = String(focusedText || '').slice(0, 140000);
+  const compactOcrText = String(ocrText || '').slice(0, 220000);
+  const compactFocusedText = String(focusedText || '').slice(0, 220000);
+  const expectedVertices = Number.isFinite(options.expectedVertices) ? options.expectedVertices : 0;
+  const minimumVertices = Number.isFinite(options.minimumVertices) ? options.minimumVertices : 0;
+  const previousVertices = Number.isFinite(options.previousVertices) ? options.previousVertices : 0;
 
   const userPrompt = [
     `Arquivo: ${fileName || 'documento.pdf'}`,
+    `Páginas OCR detectadas: ${options.pagesAnalyzed || 'desconhecido'}`,
+    expectedVertices > 0 ? `Meta de cobertura: extrair aproximadamente ${expectedVertices} vértices (mínimo aceitável ${minimumVertices || expectedVertices}).` : 'Meta de cobertura: extrair todos os vértices disponíveis no documento.',
+    previousVertices > 0 ? `Extração anterior parcial: ${previousVertices} vértices. É obrigatório melhorar a cobertura nesta tentativa.` : 'Primeira tentativa de extração.',
     'Extraia matrícula (se existir), CRS provável e geometria do imóvel em GeoJSON.',
     'A geometria deve conter TODOS os vértices do perímetro principal presentes no documento, sem omissões.',
     'Não reduza para amostra; não retorne apenas 30-40 pontos se houver mais de 100 no texto.',
+    'Se o documento for apenas rumo/azimute+distância, retornar geometria local relativa fechada para georreferenciamento manual posterior.',
     'Use prioritariamente o trecho focado em coordenadas abaixo para montar o anel completo:',
     compactFocusedText || '(sem trecho focado disponível)',
     'Texto OCR bruto completo abaixo (contexto adicional):',
@@ -403,8 +431,37 @@ function validateGeoJsonPayload(payload) {
     throw new Error('GeoJSON inválido: vértices malformados.');
   }
 
+  for (let i = 0; i < ring.length; i++) {
+    const point = ring[i];
+    if (!Array.isArray(point) || point.length < 2) {
+      throw new Error('GeoJSON inválido: vértices malformados.');
+    }
+
+    const x = parseNumericValue(point[0]);
+    const y = parseNumericValue(point[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error('GeoJSON inválido: coordenadas não numéricas.');
+    }
+
+    ring[i] = [x, y];
+  }
+
   if (first[0] !== last[0] || first[1] !== last[1]) {
-    ring.push([first[0], first[1]]);
+    ring.push([ring[0][0], ring[0][1]]);
+  }
+
+  if (!payload.projectionKey) {
+    const p = ring[0];
+    if (Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90) {
+      payload.projectionKey = 'WGS84';
+    }
+  }
+
+  if (String(payload.projectionKey || '').toUpperCase() === 'LOCAL_RELATIVE') {
+    const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+    warnings.push('Geometria local relativa (rumo/azimute + distância), requer georreferenciamento manual em GIS.');
+    payload.warnings = [...new Set(warnings)];
+    payload.geometryMode = 'local_relative';
   }
 
   return payload;
@@ -422,6 +479,8 @@ function normalizeModelPayload(payload) {
   const base = {
     matricula: String(payload.matricula || ''),
     projectionKey: String(payload.projectionKey || ''),
+    geometryMode: String(payload.geometryMode || ''),
+    sourcePattern: String(payload.sourcePattern || ''),
     warnings: Array.isArray(payload.warnings) ? payload.warnings : []
   };
 
@@ -551,8 +610,13 @@ module.exports = async function (context, req) {
     const minimumAcceptable = expectedVertices >= 20
       ? Math.floor(expectedVertices * 0.75)
       : 0;
+    const pagesAnalyzed = Array.isArray(ocrResult.pages) ? ocrResult.pages.length : 0;
 
-    let llmResult = await runAzureOpenAIExtraction(ocrResult.text, openAiConfig, fileName);
+    let llmResult = await runAzureOpenAIExtraction(ocrResult.text, openAiConfig, fileName, {
+      pagesAnalyzed,
+      expectedVertices,
+      minimumVertices: minimumAcceptable
+    });
     let normalized = normalizeModelPayload(llmResult);
     let validated = validateGeoJsonPayload(normalized);
     let extractedVertices = getExtractedVertexCount(validated);
@@ -566,7 +630,13 @@ module.exports = async function (context, req) {
           const rescueResult = await runAzureOpenAIExtraction(
             focusedText,
             openAiConfig,
-            `${fileName || 'documento.pdf'} [RESGATE]`
+            `${fileName || 'documento.pdf'} [RESGATE]`,
+            {
+              pagesAnalyzed,
+              expectedVertices,
+              minimumVertices: minimumAcceptable,
+              previousVertices: extractedVertices
+            }
           );
 
           const rescueNormalized = normalizeModelPayload(rescueResult);
@@ -588,6 +658,34 @@ module.exports = async function (context, req) {
       }
     }
 
+    if (minimumAcceptable > 0 && extractedVertices < minimumAcceptable) {
+      try {
+        const coverageRetry = await runAzureOpenAIExtraction(
+          ocrResult.text,
+          openAiConfig,
+          `${fileName || 'documento.pdf'} [COBERTURA]`,
+          {
+            pagesAnalyzed,
+            expectedVertices,
+            minimumVertices: minimumAcceptable,
+            previousVertices: extractedVertices
+          }
+        );
+
+        const coverageNormalized = normalizeModelPayload(coverageRetry);
+        const coverageValidated = validateGeoJsonPayload(coverageNormalized);
+        const coverageExtracted = getExtractedVertexCount(coverageValidated);
+
+        if (coverageExtracted > extractedVertices) {
+          validated = coverageValidated;
+          extractedVertices = coverageExtracted;
+          additionalWarnings.push(`Reprocessamento de cobertura aplicado: ${extractedVertices}/${expectedVertices} vértices.`);
+        }
+      } catch (coverageError) {
+        additionalWarnings.push(`Reprocessamento de cobertura falhou: ${coverageError?.message || 'falha desconhecida'}.`);
+      }
+    }
+
     const finalWarnings = [
       ...(Array.isArray(validated.warnings) ? validated.warnings : []),
       ...additionalWarnings
@@ -600,9 +698,12 @@ module.exports = async function (context, req) {
         success: true,
         matricula: validated.matricula || '',
         projectionKey: validated.projectionKey || '',
+        geometryMode: validated.geometryMode || '',
+        sourcePattern: validated.sourcePattern || '',
         warnings: [...new Set(finalWarnings)],
         geojson: validated.geojson,
-        pagesAnalyzed: Array.isArray(ocrResult.pages) ? ocrResult.pages.length : 0,
+        pagesAnalyzed,
+        textSourceUsed: 'document-intelligence',
         expectedVertices,
         extractedVertices
       }

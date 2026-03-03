@@ -1065,7 +1065,11 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 
   const nameBase = (sourceFileName || 'coordenadas_extracao').replace(/\.[^/.]+$/, '');
   const projectionFromApi = String(apiResult?.projectionKey || '').trim();
-  const projKey = projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S';
+  const geometryMode = String(apiResult?.geometryMode || '').trim().toLowerCase();
+  const isRelativeFromApi = projectionFromApi.toUpperCase() === 'LOCAL_RELATIVE' || geometryMode === 'local_relative';
+  const projKey = isRelativeFromApi
+    ? 'LOCAL_RELATIVE'
+    : (projectionFromApi || getActiveProjectionKey() || 'SIRGAS2000_22S');
 
   let vertices = verticesFromGeoJSON(geojson, null);
   vertices = vertices
@@ -1087,10 +1091,12 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
     : null;
   const warnings = Array.isArray(apiResult?.warnings) ? apiResult.warnings : [];
   const projectionInfo = {
-    confidence: projectionFromApi ? 'alta' : 'baixa',
-    reason: projectionFromApi
+    confidence: isRelativeFromApi ? 'média' : (projectionFromApi ? 'alta' : 'baixa'),
+    reason: isRelativeFromApi
+      ? 'IA retornou geometria local relativa (sem georreferência absoluta).'
+      : (projectionFromApi
       ? 'CRS informado pela IA Azure no retorno do GeoJSON.'
-      : 'CRS não informado pela IA; aplicado CRS ativo da interface.'
+      : 'CRS não informado pela IA; aplicado CRS ativo da interface.')
   };
 
   documentsResults = [{
@@ -1104,7 +1110,15 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
     topology,
     memorialValidation: { matches: [], issues: [] },
     memorialData: { azimutes: [], distances: [] },
-    relativeInfo: null,
+    relativeInfo: isRelativeFromApi
+      ? {
+          relative: true,
+          reason: 'Polígono construído por rumo/azimute e distância sem coordenadas georreferenciadas explícitas.',
+          origin: Array.isArray(vertices) && vertices[0]
+            ? { east: Number(vertices[0].east) || 0, north: Number(vertices[0].north) || 0 }
+            : { east: 0, north: 0 }
+        }
+      : null,
     text: ''
   }];
 
@@ -1122,7 +1136,8 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
   displayResults();
   renderDocSelector();
 
-  updateStatus(`✅ IA Azure concluiu: ${vertices.length} coordenadas processadas.`, 'success');
+  const pagesMsg = apiResult?.pagesAnalyzed ? ` em ${apiResult.pagesAnalyzed} página(s)` : '';
+  updateStatus(`✅ IA Azure concluiu${pagesMsg}: ${vertices.length} coordenadas processadas.`, 'success');
   progressContainer.style.display = 'none';
 
   if (typeof displayLogMessage === 'function') {
