@@ -4,6 +4,7 @@ const DEFAULT_OPENAI_API_VERSION = '2024-10-21';
 const DEFAULT_DOCINTEL_API_VERSION = '2024-11-30';
 const MAX_DOCINTEL_POLLS = 60;
 const POLL_INTERVAL_MS = 2000;
+const DOCINTEL_FALLBACK_BATCH_SIZE = 2;
 const http = require('http');
 const https = require('https');
 
@@ -239,11 +240,14 @@ function buildCorsHeaders(req) {
   };
 }
 
-async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
+async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRange = '') {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
 
-  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=${encodeURIComponent(apiVersion)}`;
+  let analyzeUrl = `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=${encodeURIComponent(apiVersion)}`;
+  if (pagesRange) {
+    analyzeUrl += `&pages=${encodeURIComponent(pagesRange)}`;
+  }
 
   const analyzeResponse = await httpFetch(analyzeUrl, {
     method: 'POST',
@@ -299,6 +303,61 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig) {
   }
 
   throw new Error('Timeout ao aguardar processamento do Document Intelligence.');
+}
+
+async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) {
+  const totalPagesHint = Number.isFinite(options.totalPagesHint) ? options.totalPagesHint : 0;
+  const firstPass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig);
+
+  const firstPages = Array.isArray(firstPass.pages) ? firstPass.pages : [];
+  const firstCount = firstPages.length;
+
+  if (!totalPagesHint || totalPagesHint <= firstCount) {
+    return firstPass;
+  }
+
+  const mergedPages = new Map();
+  const mergedTexts = [];
+
+  if (firstPass.text) mergedTexts.push(firstPass.text);
+  for (const p of firstPages) {
+    if (Number.isFinite(p?.pageNumber)) {
+      mergedPages.set(p.pageNumber, p);
+    }
+  }
+
+  let improved = false;
+  for (let start = 1; start <= totalPagesHint; start += DOCINTEL_FALLBACK_BATCH_SIZE) {
+    const end = Math.min(totalPagesHint, start + DOCINTEL_FALLBACK_BATCH_SIZE - 1);
+    const range = `${start}-${end}`;
+
+    try {
+      const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, range);
+      if (pass.text) {
+        mergedTexts.push(pass.text);
+      }
+
+      for (const p of (pass.pages || [])) {
+        if (Number.isFinite(p?.pageNumber)) {
+          if (!mergedPages.has(p.pageNumber)) improved = true;
+          mergedPages.set(p.pageNumber, p);
+        }
+      }
+    } catch {
+      // mantém o resultado inicial se algum range falhar
+    }
+  }
+
+  const mergedPageList = [...mergedPages.values()].sort((a, b) => (a.pageNumber || 0) - (b.pageNumber || 0));
+  if (improved && mergedPageList.length > firstCount) {
+    return {
+      text: mergedTexts.join('\n\n'),
+      pages: mergedPageList,
+      usedPagedFallback: true
+    };
+  }
+
+  return firstPass;
 }
 
 async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '', options = {}) {
@@ -592,7 +651,7 @@ module.exports = async function (context, req) {
     }
   }
 
-  const { pdfBase64, fileName } = parsedBody || {};
+  const { pdfBase64, fileName, totalPagesHint } = parsedBody || {};
   if (!pdfBase64 || typeof pdfBase64 !== 'string') {
     context.res = {
       status: 400,
@@ -605,12 +664,17 @@ module.exports = async function (context, req) {
   }
 
   try {
-    const ocrResult = await runDocumentIntelligence(pdfBase64, docIntelConfig);
+    const ocrResult = await runDocumentIntelligence(pdfBase64, docIntelConfig, {
+      totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
+    });
     const expectedVertices = estimateExpectedVertexCount(ocrResult.text);
     const minimumAcceptable = expectedVertices >= 20
       ? Math.floor(expectedVertices * 0.75)
       : 0;
     const pagesAnalyzed = Array.isArray(ocrResult.pages) ? ocrResult.pages.length : 0;
+    const pageNumbers = Array.isArray(ocrResult.pages)
+      ? ocrResult.pages.map((p) => p?.pageNumber).filter((n) => Number.isFinite(n))
+      : [];
 
     let llmResult = await runAzureOpenAIExtraction(ocrResult.text, openAiConfig, fileName, {
       pagesAnalyzed,
@@ -703,6 +767,9 @@ module.exports = async function (context, req) {
         warnings: [...new Set(finalWarnings)],
         geojson: validated.geojson,
         pagesAnalyzed,
+        pageNumbers,
+        pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+        usedPagedFallback: !!ocrResult.usedPagedFallback,
         textSourceUsed: 'document-intelligence',
         expectedVertices,
         extractedVertices

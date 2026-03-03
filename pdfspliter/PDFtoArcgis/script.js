@@ -34,11 +34,11 @@ function getAzurePdfToGeoJsonRoutes() {
   return [...new Set(routes)];
 }
 
-async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
+async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, retryCount = 0) {
   const MAX_RETRIES = 3;
   const INITIAL_DELAY_MS = 1200;
 
-  const payload = JSON.stringify({ pdfBase64, fileName });
+  const payload = JSON.stringify({ pdfBase64, fileName, totalPagesHint });
   const candidateRoutes = getAzurePdfToGeoJsonRoutes();
   let response = null;
   let lastError = null;
@@ -79,7 +79,7 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
         displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
-      return callAzurePdfToGeoJson(pdfBase64, fileName, retryCount + 1);
+      return callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint, retryCount + 1);
     }
 
     const errText = await response.text().catch(() => '');
@@ -1172,11 +1172,18 @@ fileInput.addEventListener("change", async (event) => {
 
     const arrayBuffer = await file.arrayBuffer();
     const pdfBase64 = arrayBufferToBase64(arrayBuffer);
+    let totalPagesHint = 0;
+    try {
+      const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      totalPagesHint = Number(pdfDoc?.numPages || 0);
+    } catch {
+      totalPagesHint = 0;
+    }
 
     progressBar.value = 35;
     document.getElementById("progressLabel").innerText = "Processando PDF na IA Azure...";
 
-    const apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name);
+    const apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint);
     progressBar.value = 100;
 
     if (!apiResult?.success) {
@@ -1184,6 +1191,17 @@ fileInput.addEventListener("change", async (event) => {
     }
 
     applyAzureGeoJsonResult(apiResult, file.name);
+
+    if (totalPagesHint > 0 && Number(apiResult?.pagesAnalyzed || 0) > 0 && Number(apiResult.pagesAnalyzed) < totalPagesHint) {
+      const analyzed = Number(apiResult.pagesAnalyzed);
+      const requested = Number(apiResult?.pagesRequestedHint || totalPagesHint);
+      const diagnostic = `⚠️ A API analisou ${analyzed}/${requested} página(s). Isso indica limitação do recurso/credenciais do Document Intelligence em produção.`;
+      updateStatus(diagnostic, 'warning');
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage(`[PDFtoArcgis][LogUI] ${diagnostic}`);
+      }
+    }
+
     return;
 
   } catch (e) {
