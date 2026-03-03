@@ -47,6 +47,21 @@
 
         <div class="controls-panel">
           <div class="control-group">
+            <h3>🔎 Buscar no Mapa</h3>
+            <div class="map-search-row">
+              <input
+                type="text"
+                id="mapSearchInput"
+                class="map-search-input"
+                placeholder="Endereço ou coordenada (lat,lng)"
+                autocomplete="off"
+              >
+              <button type="button" id="mapSearchBtn" class="map-search-btn">Buscar</button>
+            </div>
+            <small>Ex.: Avenida Paulista, São Paulo ou -25.706923, -52.385530</small>
+          </div>
+
+          <div class="control-group">
             <h3>🎯 Presets Profissionais</h3>
             <div class="preset-buttons">
               <button onclick="aplicarPreset('urbano')" class="preset-btn"

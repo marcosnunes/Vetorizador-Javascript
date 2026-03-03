@@ -253,6 +253,35 @@ small {
   margin-top: 15px;
 }
 
+.map-search-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.map-search-input {
+  flex: 1;
+  margin-bottom: 0;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.map-search-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+}
+
+.map-search-btn {
+  width: auto;
+  min-width: 84px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
 .secondary-btn {
   flex: 1;
   padding: 10px;

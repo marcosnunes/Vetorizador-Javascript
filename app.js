@@ -66,6 +66,7 @@ import {
 const loader = document.getElementById('loader-overlay');
 const loaderText = document.getElementById('loader-text');
 let debugMaskLayer = null;
+let searchResultMarker = null;
 const geojsonFeatures = [];
 let activeRunId = null;
 let activeRunStartedAt = null;
@@ -202,6 +203,20 @@ function inicializarToggleMenuLateral() {
 // Inicializa listeners dos controles
 window.addEventListener('DOMContentLoaded', () => {
   inicializarToggleMenuLateral();
+
+  const mapSearchInput = document.getElementById('mapSearchInput');
+  const mapSearchBtn = document.getElementById('mapSearchBtn');
+  if (mapSearchBtn) {
+    mapSearchBtn.addEventListener('click', buscarLocalNoMapa);
+  }
+  if (mapSearchInput) {
+    mapSearchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        buscarLocalNoMapa();
+      }
+    });
+  }
 
   sincronizarControle('edgeThreshold', 'edgeThresholdInput', 'edgeThreshold', v => v.toFixed(0));
   sincronizarControle('morphologySize', 'morphologySizeInput', 'morphologySize', v => v.toFixed(0));
@@ -374,6 +389,98 @@ function atualizarIndicadorConexao() {
   } else {
     indicador.textContent = '🌐 Online';
     indicador.className = 'status-online';
+  }
+}
+
+function parseCoordBusca(rawValue) {
+  if (!rawValue || typeof rawValue !== 'string') return null;
+
+  const cleaned = rawValue
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/;/g, ',');
+
+  const match = cleaned.match(/^\s*(-?\d+(?:[.,]\d+)?)\s*,\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+  if (!match) return null;
+
+  const first = Number(match[1].replace(',', '.'));
+  const second = Number(match[2].replace(',', '.'));
+
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+
+  let lat = first;
+  let lng = second;
+
+  if (Math.abs(first) > 90 && Math.abs(second) <= 90) {
+    lat = second;
+    lng = first;
+  }
+
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+
+  return { lat, lng };
+}
+
+function marcarResultadoBusca(lat, lng, label = 'Local encontrado') {
+  if (!window.map) return;
+
+  if (searchResultMarker) {
+    map.removeLayer(searchResultMarker);
+  }
+
+  searchResultMarker = L.marker([lat, lng]).addTo(map);
+  searchResultMarker.bindPopup(label).openPopup();
+  map.setView([lat, lng], 19);
+}
+
+async function buscarLocalNoMapa() {
+  const input = document.getElementById('mapSearchInput');
+  if (!input) return;
+
+  const query = input.value.trim();
+  if (!query) {
+    alert('Informe um endereço ou coordenada para buscar.');
+    return;
+  }
+
+  const coord = parseCoordBusca(query);
+  if (coord) {
+    marcarResultadoBusca(coord.lat, coord.lng, `Coordenada: ${coord.lat.toFixed(6)}, ${coord.lng.toFixed(6)}`);
+    return;
+  }
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Falha na busca (${response.status})`);
+    }
+
+    const results = await response.json();
+    const first = Array.isArray(results) ? results[0] : null;
+
+    if (!first) {
+      alert('Nenhum resultado encontrado para este endereço.');
+      return;
+    }
+
+    const lat = Number(first.lat);
+    const lng = Number(first.lon);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      alert('Resultado de endereço inválido.');
+      return;
+    }
+
+    marcarResultadoBusca(lat, lng, first.display_name || 'Endereço encontrado');
+  } catch (error) {
+    console.error('Erro ao buscar endereço no mapa:', error);
+    alert('Não foi possível buscar o endereço agora. Tente novamente em instantes.');
   }
 }
 
@@ -2686,4 +2793,5 @@ window.aplicarPreset = aplicarPreset;
 window.resetarParametros = resetarParametros;
 window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
+window.buscarLocalNoMapa = buscarLocalNoMapa;
 window.idbGetAll = idbGetAll;  // ✨ Para continuous-learning.js
