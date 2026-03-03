@@ -289,6 +289,32 @@ function toBase64FromRawPdfBody(rawBody) {
   return '';
 }
 
+function extractTextFromAnalyzeResult(analyzeResult) {
+  if (!analyzeResult || typeof analyzeResult !== 'object') return '';
+
+  const direct = String(analyzeResult.content || '').trim();
+  if (direct) return direct;
+
+  const pages = Array.isArray(analyzeResult.pages) ? analyzeResult.pages : [];
+  const pageTexts = pages.map((page) => {
+    const lines = Array.isArray(page?.lines) ? page.lines : [];
+    const lineText = lines
+      .map((line) => String(line?.content || '').trim())
+      .filter(Boolean)
+      .join('\n');
+
+    if (lineText) return lineText;
+
+    const words = Array.isArray(page?.words) ? page.words : [];
+    return words
+      .map((word) => String(word?.content || '').trim())
+      .filter(Boolean)
+      .join(' ');
+  }).filter(Boolean);
+
+  return pageTexts.join('\n\n').trim();
+}
+
 async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRange = '') {
   const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
   const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
@@ -336,7 +362,7 @@ async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRa
     const status = String(pollPayload.status || '').toLowerCase();
 
     if (status === 'succeeded') {
-      const content = pollPayload.analyzeResult?.content || '';
+      const content = extractTextFromAnalyzeResult(pollPayload.analyzeResult);
       if (!content.trim()) {
         throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
       }
