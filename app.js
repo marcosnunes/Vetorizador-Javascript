@@ -53,7 +53,10 @@ import { inicializarFirebase, estaOnline, monitorarConexao } from './firebase-co
 import { 
   salvarRunFirestore, 
   salvarFeaturesFirestore, 
-  salvarFeedbackFirestore
+  salvarFeedbackFirestore,
+  salvarAppBoundaryFirestore,
+  lerAppBoundaryFirestore,
+  limparAppBoundaryFirestore
 } from './firestore-service.js';
 import { 
   inicializarFilaOffline, 
@@ -281,7 +284,11 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const btnLimparAppZip = document.getElementById('btnLimparAppZip');
   if (btnLimparAppZip) {
-    btnLimparAppZip.addEventListener('click', limparAppPersistida);
+    btnLimparAppZip.addEventListener('click', () => {
+      limparAppPersistida().catch((err) => {
+        console.error('Erro ao limpar APP:', err);
+      });
+    });
   }
 
   restaurarAppPersistida();
@@ -318,12 +325,25 @@ async function inicializarSistemaAprendizado() {
     if (db && auth) {
       firebaseInicializado = true;
       console.log('✅ Firebase/Firestore inicializado');
+
+      await restaurarAppPersistidaDoFirestoreSeNecessario();
+      setTimeout(() => {
+        restaurarAppPersistidaDoFirestoreSeNecessario().catch((err) => {
+          console.warn('⚠️ Falha no retry de restauração APP no Firestore:', err);
+        });
+      }, 1800);
       
       // 4. Monitorar conexão e sincronizar quando online
       monitorarConexao(
-        () => {
+        async () => {
           modoOffline = false;
-          sincronizarFilaPendente();
+          await sincronizarFilaPendente();
+
+          if (appBoundaryGeoJSON) {
+            await persistirAppBoundary(appBoundaryGeoJSON, appBoundaryMetadata || {});
+          } else {
+            await restaurarAppPersistidaDoFirestoreSeNecessario();
+          }
         },
         () => {
           modoOffline = true;
@@ -800,7 +820,7 @@ function normalizarGeoJsonApp(geojson) {
   };
 }
 
-function persistirAppBoundary(geojson, metadata = {}) {
+async function persistirAppBoundary(geojson, metadata = {}) {
   appBoundaryGeoJSON = geojson;
   appBoundaryMetadata = {
     loadedAt: new Date().toISOString(),
@@ -811,6 +831,18 @@ function persistirAppBoundary(geojson, metadata = {}) {
     geojson: appBoundaryGeoJSON,
     metadata: appBoundaryMetadata
   }));
+
+  if (firebaseInicializado && estaOnline()) {
+    try {
+      await salvarAppBoundaryFirestore({
+        geojson: appBoundaryGeoJSON,
+        metadata: appBoundaryMetadata
+      });
+      console.log('✅ APP persistida no Firestore para o usuário atual.');
+    } catch (error) {
+      console.warn('⚠️ Não foi possível persistir APP no Firestore. Mantido em cache local.', error);
+    }
+  }
 }
 
 function restaurarAppPersistida() {
@@ -837,10 +869,55 @@ function restaurarAppPersistida() {
   }
 }
 
-function limparAppPersistida() {
+async function restaurarAppPersistidaDoFirestoreSeNecessario() {
+  if (!firebaseInicializado || !estaOnline()) {
+    return;
+  }
+
+  if (appBoundaryGeoJSON) {
+    return;
+  }
+
+  try {
+    const remoto = await lerAppBoundaryFirestore();
+    const geojsonRemoto = normalizarGeoJsonApp(remoto?.geojson);
+    const metadataRemota = remoto?.metadata || {};
+
+    appBoundaryGeoJSON = geojsonRemoto;
+    appBoundaryMetadata = metadataRemota;
+
+    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify({
+      geojson: appBoundaryGeoJSON,
+      metadata: appBoundaryMetadata
+    }));
+
+    const qtd = appBoundaryGeoJSON.features.length;
+    const nomeArquivo = appBoundaryMetadata?.fileName || 'arquivo salvo na nuvem';
+    atualizarStatusAppUi(`APP ativa (${qtd} polígonos) • ${nomeArquivo}`);
+    console.log('☁️ APP restaurada do Firestore para esta instância.');
+  } catch (error) {
+    if (String(error?.message || '').includes('inválido')) {
+      console.warn('⚠️ APP remota ignorada por formato inválido:', error?.message || error);
+      return;
+    }
+    console.warn('⚠️ Falha ao restaurar APP do Firestore:', error);
+  }
+}
+
+async function limparAppPersistida() {
   appBoundaryGeoJSON = null;
   appBoundaryMetadata = null;
   localStorage.removeItem(APP_STORAGE_KEY);
+
+  if (firebaseInicializado && estaOnline()) {
+    try {
+      await limparAppBoundaryFirestore();
+      console.log('✅ APP removida do Firestore para o usuário atual.');
+    } catch (error) {
+      console.warn('⚠️ Não foi possível remover APP no Firestore.', error);
+    }
+  }
+
   atualizarStatusAppUi('Nenhum arquivo APP carregado.');
   alert('🧹 APP removida do sistema.');
 }
@@ -868,9 +945,15 @@ async function carregarAppShapefileZip() {
     const zipBase64 = arrayBufferParaBase64(arrayBuffer);
 
     let geojson = null;
-    let source = 'shapefile-zip-backend';
+    let source = 'shapefile-zip-frontend-fallback';
 
     try {
+      loaderText.textContent = '📥 Convertendo APP localmente...';
+      geojson = await converterShapefileZipLocal(arrayBuffer);
+    } catch (frontendError) {
+      console.warn('⚠️ Conversão local falhou; tentando backend de contingência:', frontendError?.message || frontendError);
+      loaderText.textContent = '📥 Conversão local falhou; tentando backend...';
+
       const response = await fetch('/api/shp-to-geojson', {
         method: 'POST',
         headers: {
@@ -897,14 +980,10 @@ async function carregarAppShapefileZip() {
       }
 
       geojson = normalizarGeoJsonApp(payload.geojson);
-    } catch (backendError) {
-      console.warn('⚠️ Conversão backend indisponível, usando fallback local (shpjs):', backendError?.message || backendError);
-      loaderText.textContent = '📥 Backend indisponível; convertendo APP localmente...';
-      geojson = await converterShapefileZipLocal(arrayBuffer);
-      source = 'shapefile-zip-frontend-fallback';
+      source = 'shapefile-zip-backend-contingencia';
     }
 
-    persistirAppBoundary(geojson, {
+    await persistirAppBoundary(geojson, {
       fileName: file.name,
       source
     });

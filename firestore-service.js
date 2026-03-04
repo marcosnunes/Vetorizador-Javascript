@@ -12,6 +12,7 @@ import {
   doc, 
   setDoc, 
   getDoc, 
+  deleteDoc,
   getDocs, 
   query, 
   where, 
@@ -21,6 +22,10 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { obterFirestore, obterUsuarioAtual } from './firebase-config.js';
+
+function obterRefAppBoundaryUsuario(db, userId) {
+  return doc(db, 'users', userId, 'settings', 'appBoundary');
+}
 
 // ==================== SALVAR RUN ====================
 /**
@@ -159,6 +164,77 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
     console.error('❌ Erro ao salvar feedback em Firestore:', error);
     throw error;
   }
+}
+
+// ==================== APP BOUNDARY (USUÁRIO) ====================
+/**
+ * Salva a APP carregada para o usuário atual.
+ * @param {Object} payload - {geojson, metadata}
+ */
+export async function salvarAppBoundaryFirestore(payload = {}) {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  if (!userId) {
+    throw new Error('Usuário não autenticado para salvar APP.');
+  }
+
+  const geojson = payload?.geojson;
+  const metadata = payload?.metadata || {};
+
+  if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
+    throw new Error('GeoJSON APP inválido para persistência.');
+  }
+
+  const dados = {
+    userId,
+    geojson,
+    metadata,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: new Date().toISOString()
+  };
+
+  const ref = obterRefAppBoundaryUsuario(db, userId);
+  await setDoc(ref, dados);
+  return true;
+}
+
+/**
+ * Lê a APP salva para o usuário atual.
+ * @returns {Object|null}
+ */
+export async function lerAppBoundaryFirestore() {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  if (!userId) {
+    return null;
+  }
+
+  const ref = obterRefAppBoundaryUsuario(db, userId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) {
+    return null;
+  }
+
+  return snap.data();
+}
+
+/**
+ * Remove a APP salva para o usuário atual.
+ */
+export async function limparAppBoundaryFirestore() {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  if (!userId) {
+    return false;
+  }
+
+  const ref = obterRefAppBoundaryUsuario(db, userId);
+  await deleteDoc(ref);
+  return true;
 }
 
 // ==================== LER RUN ====================
