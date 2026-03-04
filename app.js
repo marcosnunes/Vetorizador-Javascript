@@ -1128,6 +1128,14 @@ function gerarRelatorioIntersecaoApp() {
     });
   }
 
+  const taxaOcupacaoApp = areaAppDoRequerente > 0
+    ? (areaTotalIntersecao / areaAppDoRequerente) * 100
+    : 0;
+
+  const percentualBenfeitoriasEmApp = areaTotalPoligonos > 0
+    ? (areaTotalIntersecao / areaTotalPoligonos) * 100
+    : 0;
+
   return {
     generatedAt: new Date().toISOString(),
     appMetadata: appBoundaryMetadata || {},
@@ -1138,12 +1146,8 @@ function gerarRelatorioIntersecaoApp() {
     areaTotalPoligonos,
     areaTotalIntersecao,
     areaOcupada: areaTotalIntersecao,
-    percentualSobreposicaoGeral: areaTotalPoligonos > 0
-      ? (areaTotalIntersecao / areaTotalPoligonos) * 100
-      : 0,
-    taxaOcupacao: areaTotalPoligonos > 0
-      ? (areaTotalIntersecao / areaTotalPoligonos) * 100
-      : 0,
+    percentualSobreposicaoGeral: percentualBenfeitoriasEmApp,
+    taxaOcupacao: taxaOcupacaoApp,
     detalhes
   };
 }
@@ -1193,15 +1197,14 @@ function exportarRelatorioAppPdf() {
   addLine(`Quantidade de benfeitorias vetorizadas: ${relatorio.totalPoligonos}`);
   addLine(`Área total das benfeitorias (m²): ${relatorio.areaTotalPoligonos.toFixed(2)}`);
   addLine(`Área ocupada em APP (m²): ${relatorio.areaOcupada.toFixed(2)}`);
-  addLine(`Taxa de ocupação da benfeitoria em APP (%): ${relatorio.taxaOcupacao.toFixed(2)}`);
-  addLine(`Sobreposição geral (%): ${relatorio.percentualSobreposicaoGeral.toFixed(2)}`);
+  addLine(`Taxa de ocupação em APP (%): ${relatorio.taxaOcupacao.toFixed(2)}`);
   addLine('Observação: valores 0,00 m² podem indicar ausência de APP carregada, APP fora da máscara ou ausência de interseção.', 5);
   addLine('');
   addLine('Detalhamento por benfeitoria vetorizada:');
 
   relatorio.detalhes.forEach((item) => {
     addLine(
-      `${item.id} | Classe: ${item.tipoBenfeitoriaLabel} | Área da benfeitoria: ${item.areaPoligonoM2.toFixed(2)} m² | Área ocupada em APP: ${item.areaIntersecaoM2.toFixed(2)} m² | Taxa de ocupação: ${item.taxaOcupacao.toFixed(2)}%`,
+      `${item.id} | Classe: ${item.tipoBenfeitoriaLabel} | Área da benfeitoria: ${item.areaPoligonoM2.toFixed(2)} m² | Área ocupada em APP: ${item.areaIntersecaoM2.toFixed(2)} m² | Percentual da benfeitoria em APP: ${item.percentualIntersecao.toFixed(2)}%`,
       5
     );
   });
