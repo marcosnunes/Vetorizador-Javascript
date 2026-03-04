@@ -1,6 +1,19 @@
-/* global module, Buffer, process, require */
+/* global module, Buffer, process */
 
-const shp = require('shpjs');
+let shpParserPromise = null;
+
+async function getShpParser() {
+  if (!shpParserPromise) {
+    shpParserPromise = import('shpjs')
+      .then((mod) => mod?.default || mod)
+      .catch((error) => {
+        shpParserPromise = null;
+        throw error;
+      });
+  }
+
+  return shpParserPromise;
+}
 
 function buildCorsHeaders(req) {
   const env = process.env || {};
@@ -95,6 +108,7 @@ module.exports = async function handler(context, req) {
     }
 
     const zipArrayBuffer = toArrayBufferFromBase64(zipBase64);
+    const shp = await getShpParser();
     const geoRaw = await shp(zipArrayBuffer);
     const geojson = normalizeShpResult(geoRaw);
 
@@ -118,6 +132,7 @@ module.exports = async function handler(context, req) {
       }
     };
   } catch (error) {
+    context.log.error('Erro shp-to-geojson:', error);
     context.res = {
       status: 500,
       headers: corsHeaders,
