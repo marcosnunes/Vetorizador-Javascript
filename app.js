@@ -3151,7 +3151,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         debugLog('📍 [DEBUG] Features recebidas:', geojsonResult.features?.length || 0);
 
         // Converte coordenadas de pixel (0,0) para Lat/Lng reais
-        const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds, selectionMaskGeoJSON);
+        const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds, selectionMaskGeoJSON, roiCanvas);
         debugLog(`📍 [DEBUG] Conversão para LatLng completa: ${geojsonConvertido.features.length} features`);
         debugLog('📍 [DEBUG] Primeiros dados de features:', geojsonConvertido.features.slice(0, 2));
         relatorio.resultadoFinal = {
@@ -3311,6 +3311,106 @@ function applyMorphologicalOperation(ctx, width, height, operationType, kernelSi
   ctx.putImageData(processedData, 0, 0);
 }
 
+function pontoDentroPoligonoPixel(point, polygonCoords) {
+  const x = point[0];
+  const y = point[1];
+  let dentro = false;
+
+  for (let i = 0, j = polygonCoords.length - 1; i < polygonCoords.length; j = i++) {
+    const xi = polygonCoords[i][0];
+    const yi = polygonCoords[i][1];
+    const xj = polygonCoords[j][0];
+    const yj = polygonCoords[j][1];
+
+    const intersecta = ((yi > y) !== (yj > y))
+      && (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi);
+
+    if (intersecta) dentro = !dentro;
+  }
+
+  return dentro;
+}
+
+function pixelPareceAgua(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const saturacao = max > 0 ? (max - min) / max : 0;
+  const brilho = (r + g + b) / 3;
+  const azulDominante = b > (g * 1.05) && b > (r * 1.08);
+  const verdeAzulado = g > (r * 1.02) && b > (r * 1.05);
+
+  return (azulDominante || verdeAzulado)
+    && saturacao > 0.12
+    && brilho < 180;
+}
+
+function obterLimiteRejeicaoAgua() {
+  const perfil = String(CONFIG.presetProfile || '').toLowerCase();
+
+  if (perfil === 'trapiche') return 0.42;
+  if (perfil === 'rural') return 0.70;
+  if (perfil === 'urbano') return 0.78;
+  if (perfil === 'industrial') return 0.75;
+
+  return 0.72;
+}
+
+function estimarProporcaoAguaNoPoligono(coordsPixel, sourceCanvas) {
+  if (!sourceCanvas || !coordsPixel || coordsPixel.length < 3) return null;
+
+  const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  coordsPixel.forEach((p) => {
+    minX = Math.min(minX, p[0]);
+    minY = Math.min(minY, p[1]);
+    maxX = Math.max(maxX, p[0]);
+    maxY = Math.max(maxY, p[1]);
+  });
+
+  minX = Math.max(0, Math.floor(minX));
+  minY = Math.max(0, Math.floor(minY));
+  maxX = Math.min(sourceCanvas.width - 1, Math.ceil(maxX));
+  maxY = Math.min(sourceCanvas.height - 1, Math.ceil(maxY));
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  if (width < 2 || height < 2) return null;
+
+  const step = Math.max(1, Math.round(Math.max(width, height) / 90));
+  const data = ctx.getImageData(minX, minY, width, height).data;
+
+  let totalAmostras = 0;
+  let amostrasAgua = 0;
+
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const globalX = minX + x + 0.5;
+      const globalY = minY + y + 0.5;
+
+      if (!pontoDentroPoligonoPixel([globalX, globalY], coordsPixel)) continue;
+
+      const idx = ((y * width) + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+
+      totalAmostras += 1;
+      if (pixelPareceAgua(r, g, b)) {
+        amostrasAgua += 1;
+      }
+    }
+  }
+
+  if (totalAmostras === 0) return null;
+  return amostrasAgua / totalAmostras;
+}
+
 /**
  * FILTRO DIGITAL: Pixels → LatLng com Cascata de Validações
  * 
@@ -3355,7 +3455,7 @@ function applyMorphologicalOperation(ctx, width, height, operationType, kernelSi
  *   • Fusão de próximos melhora visualização (evita fragmentação)
  *   • Todos os features trazem run_id para rastreamento (aprendizado)
  */
-function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeature = null) {
+function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeature = null, sourceCanvas = null) {
   const imgWidth = canvas.width;
   const imgHeight = canvas.height;
   const featuresFinais = [];
@@ -3463,6 +3563,15 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeat
       const area = turf.area(masked);
       if (idx < 3) {
         console.log(`Feature ${idx}: área calculada = ${area.toFixed(6)}m² (original ${coords.length} pontos)`);
+      }
+
+      const proporcaoAgua = estimarProporcaoAguaNoPoligono(coords, sourceCanvas);
+      const limiteAgua = obterLimiteRejeicaoAgua();
+      if (Number.isFinite(proporcaoAgua) && proporcaoAgua > limiteAgua) {
+        if (idx < 8) {
+          console.log(`Feature ${idx}: ❌ REJEITADA POR ÁGUA - proporção ${(proporcaoAgua * 100).toFixed(1)}% > ${(limiteAgua * 100).toFixed(1)}%`);
+        }
+        return;
       }
 
       // AQUI é onde os filtros são aplicados.
