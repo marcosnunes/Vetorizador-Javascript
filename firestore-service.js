@@ -186,9 +186,16 @@ export async function salvarAppBoundaryFirestore(payload = {}) {
     throw new Error('GeoJSON APP inválido para persistência.');
   }
 
+  let geojsonJson = '';
+  try {
+    geojsonJson = JSON.stringify(geojson);
+  } catch {
+    throw new Error('Não foi possível serializar o GeoJSON APP para persistência.');
+  }
+
   const dados = {
     userId,
-    geojson,
+    geojsonJson,
     metadata,
     updatedAt: serverTimestamp(),
     updatedAtIso: new Date().toISOString()
@@ -218,7 +225,21 @@ export async function lerAppBoundaryFirestore() {
     return null;
   }
 
-  return snap.data();
+  const data = snap.data() || {};
+  let geojson = data.geojson || null;
+
+  if (!geojson && typeof data.geojsonJson === 'string' && data.geojsonJson.trim()) {
+    try {
+      geojson = JSON.parse(data.geojsonJson);
+    } catch {
+      throw new Error('APP salva no Firestore está em formato inválido.');
+    }
+  }
+
+  return {
+    ...data,
+    geojson
+  };
 }
 
 /**
