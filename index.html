@@ -244,19 +244,6 @@
           </div>
 
           <div class="control-group">
-            <h3>⚡ Pré-Configurações</h3>
-            <button onclick="aplicarPreset('urbano')" style="background: #28a745; margin-bottom: 5px;">🏘️ Área
-              Urbana</button>
-            <button onclick="aplicarPreset('rural')" style="background: #17a2b8; margin-bottom: 5px;">🌾 Área
-              Rural</button>
-            <button onclick="aplicarPreset('industrial')" style="background: #6c757d; margin-bottom: 5px;">🏭
-              Galpões</button>
-            <button onclick="aplicarPreset('trapiche')" style="background: #0ea5e9; margin-bottom: 5px;">🛶 Trapiches
-              + Telhados</button>
-            <small>Aplica configurações otimizadas</small>
-          </div>
-
-          <div class="control-group">
             <h3>📊 Estatísticas</h3>
             <div id="stats">
               <p><strong>Polígonos Detectados:</strong> <span id="totalPolygons">0</span></p>
@@ -266,6 +253,14 @@
               <p><strong>Baixa Qualidade:</strong> <span id="lowQuality">0</span></p>
               <p><strong>Última Detecção:</strong> <span id="lastProcessTime">-</span></p>
             </div>
+          </div>
+
+          <div class="control-group">
+            <h3>🛡️ APP (Shapefile ZIP)</h3>
+            <input type="file" id="appShpZipInput" accept=".zip" style="margin-bottom: 8px; width: 100%;">
+            <button id="btnCarregarAppZip" type="button">📥 Carregar APP (.zip)</button>
+            <button id="btnLimparAppZip" type="button" class="secondary-btn" style="margin-top: 6px;">🧹 Limpar APP</button>
+            <small id="appStatus" style="display:block; margin-top: 8px;">Nenhum arquivo APP carregado.</small>
           </div>
 
           <div class="control-group" style="background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px;">
@@ -306,6 +301,7 @@
           <div class="control-group">
             <h3>💾 Exportar Dados</h3>
             <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
+            <button id="export-app-report-btn" onclick="exportarRelatorioAppPdf()" style="margin-top: 5px;">📄 Exportar Relatório APP (PDF)</button>
             <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar
               Resultados</button>
           </div>
@@ -342,6 +338,7 @@
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://unpkg.com/@mapbox/shp-write@latest/shpwrite.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
   <script src="vetoriza/pkg/vetoriza.js" type="module"></script>
   <script src="ml-training.js" type="module"></script>
@@ -365,7 +362,7 @@
       document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
 
       // Se for Vetorizador, força redimensionamento do mapa
-      if (tabName === 'vetorizador' && window.map) {
+      if (tabName === 'vetorizador' && typeof window.map?.invalidateSize === 'function') {
         setTimeout(() => {
           window.map.invalidateSize();
         }, 100);

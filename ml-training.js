@@ -425,6 +425,7 @@ function prepararDatasetTreinamento(dataset) {
 
     // Iterar sobre feedback de cada feature
     dataset.feedback.forEach((fb) => {
+      if (fb.trainingEligible === false) return;
       if (fb.runId !== run.runId) return;
       
       // Procurar feature correspondente

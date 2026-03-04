@@ -105,13 +105,13 @@ input[type="file"] {
 /* Preset Buttons */
 .preset-buttons {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
 
 .preset-btn {
-  padding: 12px 8px;
+  padding: 12px 10px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
@@ -121,6 +121,12 @@ input[type="file"] {
   font-weight: 600;
   transition: all 0.3s;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
 }
 
 .preset-btn:hover {
@@ -130,6 +136,11 @@ input[type="file"] {
 
 .preset-btn:active {
   transform: translateY(0);
+}
+
+.preset-btn:focus-visible {
+  outline: 2px solid #0056b3;
+  outline-offset: 2px;
 }
 
 /* Parameter Controls */

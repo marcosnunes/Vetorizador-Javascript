@@ -70,6 +70,35 @@ let searchResultMarker = null;
 const geojsonFeatures = [];
 let activeRunId = null;
 let activeRunStartedAt = null;
+let appBoundaryGeoJSON = null;
+let appBoundaryMetadata = null;
+let currentSelectionMaskFeature = null;
+
+const APP_STORAGE_KEY = 'vetorizador_app_boundary_v1';
+
+const FEEDBACK_QUALITY_MIN_SCORE = 60;
+const REJECTION_REASON_CATEGORIES = [
+  'sombra',
+  'vegetacao',
+  'agua',
+  'rua',
+  'fragmentado',
+  'ruido',
+  'borda'
+];
+
+const TIPOS_BENFEITORIA = {
+  trapiche: 'Trapiche',
+  edificacao: 'Edificação',
+  outra: 'Outra benfeitoria',
+  nao_classificada: 'Não classificada'
+};
+
+const CALIBRACAO_PRESET_LIMITES = {
+  minQualityScore: { min: 20, max: 85 },
+  minArea: { min: 5, max: 220 },
+  edgeThreshold: { min: 45, max: 170 }
+};
 
 const LEARNING_DB_NAME = 'vetorizador_learning_db';
 const LEARNING_DB_VERSION = 1;
@@ -192,7 +221,7 @@ function inicializarToggleMenuLateral() {
     const colapsado = mainContainer.classList.toggle('sidebar-collapsed');
     atualizarEstadoBotao(colapsado);
 
-    if (window.map) {
+    if (typeof window.map?.invalidateSize === 'function') {
       setTimeout(() => {
         window.map.invalidateSize();
       }, 320);
@@ -244,6 +273,18 @@ window.addEventListener('DOMContentLoaded', () => {
     // Listener para atualizar visualização quando checkbox muda
     colorByQuality.addEventListener('change', atualizarVisualizacao);
   }
+
+  const btnCarregarAppZip = document.getElementById('btnCarregarAppZip');
+  if (btnCarregarAppZip) {
+    btnCarregarAppZip.addEventListener('click', carregarAppShapefileZip);
+  }
+
+  const btnLimparAppZip = document.getElementById('btnLimparAppZip');
+  if (btnLimparAppZip) {
+    btnLimparAppZip.addEventListener('click', limparAppPersistida);
+  }
+
+  restaurarAppPersistida();
 
   // ==================== INICIALIZAÇÃO FIREBASE + FILA OFFLINE ====================
   inicializarSistemaAprendizado().catch((err) => {
@@ -375,6 +416,245 @@ function normalizarFeedbackPayload(feedbackPayload = {}) {
   };
 }
 
+function normalizarTextoLivre(value = '') {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function categorizarMotivoRejeicao(motivo = '') {
+  const texto = normalizarTextoLivre(motivo);
+  if (!texto) return 'sem_motivo';
+
+  if (texto.includes('sombra')) return 'sombra';
+  if (texto.includes('veget') || texto.includes('arvore') || texto.includes('mato')) return 'vegetacao';
+  if (texto.includes('agua') || texto.includes('rio') || texto.includes('lago') || texto.includes('reservatorio')) return 'agua';
+  if (texto.includes('rua') || texto.includes('asfalto') || texto.includes('estrada') || texto.includes('pista')) return 'rua';
+  if (texto.includes('fragment') || texto.includes('quebrado') || texto.includes('incompleto')) return 'fragmentado';
+  if (texto.includes('ruido') || texto.includes('noise') || texto.includes('artefato')) return 'ruido';
+  if (texto.includes('borda') || texto.includes('limite') || texto.includes('contorno')) return 'borda';
+
+  return 'outro';
+}
+
+function avaliarQualidadeFeedback(feedbackPayload = {}) {
+  const status = feedbackPayload.feedbackStatus || feedbackPayload.status || 'pendente';
+  const reason = String(feedbackPayload.feedbackReason || feedbackPayload.reason || '').trim();
+  const scoreConfianca = Number(feedbackPayload.featureSnapshot?.confidenceScore || 0);
+  const areaM2 = Number(feedbackPayload.featureSnapshot?.areaM2 || 0);
+  const flags = [];
+  let score = 100;
+
+  if (status === 'rejeitado') {
+    const categoria = categorizarMotivoRejeicao(reason);
+
+    if (reason.length < 3) {
+      score -= 50;
+      flags.push('motivo-curto');
+    }
+
+    if (!REJECTION_REASON_CATEGORIES.includes(categoria)) {
+      score -= 10;
+      flags.push('categoria-fraca');
+    }
+  }
+
+  if (status === 'aprovado' || status === 'correto') {
+    if (scoreConfianca < 20) {
+      score -= 40;
+      flags.push('aprovacao-score-muito-baixo');
+    } else if (scoreConfianca < 35) {
+      score -= 20;
+      flags.push('aprovacao-score-baixo');
+    }
+  }
+
+  if (status === 'editado') {
+    if (!feedbackPayload.editedGeometry || !feedbackPayload.originalGeometry) {
+      score -= 50;
+      flags.push('edicao-sem-geometria');
+    }
+    if (reason.length < 5) {
+      score -= 20;
+      flags.push('edicao-motivo-fraco');
+    }
+  }
+
+  if (Number.isFinite(areaM2) && areaM2 > 0 && areaM2 < Math.max(5, CONFIG.minArea * 0.35)) {
+    score -= 10;
+    flags.push('area-muito-pequena');
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  return {
+    score,
+    flags,
+    aptoTreino: score >= FEEDBACK_QUALITY_MIN_SCORE
+  };
+}
+
+function median(values = []) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+async function calibrarPresetComHistorico(tipoPreset, presetBase) {
+  try {
+    const [runs, feedback] = await Promise.all([
+      idbGetAll('runs'),
+      idbGetAll('feedback')
+    ]);
+
+    if (!Array.isArray(runs) || !Array.isArray(feedback) || runs.length === 0 || feedback.length === 0) {
+      return { applied: false, reason: 'sem_historico' };
+    }
+
+    const runIdsPreset = new Set(
+      runs
+        .filter((run) => run?.config?.presetProfile === tipoPreset)
+        .map((run) => run.runId)
+        .filter(Boolean)
+    );
+
+    if (runIdsPreset.size === 0) {
+      return { applied: false, reason: 'sem_runs_do_preset' };
+    }
+
+    const feedbackElegivel = feedback.filter((fb) => {
+      if (!runIdsPreset.has(fb.runId)) return false;
+      if (fb.trainingEligible === false) return false;
+      const status = fb.label || fb.feedbackStatus || fb.status || '';
+      return status === 'aprovado' || status === 'correto' || status === 'rejeitado';
+    });
+
+    if (feedbackElegivel.length < 12) {
+      return { applied: false, reason: 'amostra_pequena', sample: feedbackElegivel.length };
+    }
+
+    const aprovados = feedbackElegivel.filter((fb) => {
+      const status = fb.label || fb.feedbackStatus || fb.status || '';
+      return status === 'aprovado' || status === 'correto';
+    });
+    const rejeitados = feedbackElegivel.filter((fb) => (fb.label || fb.feedbackStatus || fb.status || '') === 'rejeitado');
+
+    const approvedScores = aprovados
+      .map((fb) => Number(fb.featureSnapshot?.confidenceScore ?? fb.finalQualityScore ?? NaN))
+      .filter((n) => Number.isFinite(n));
+    const rejectedScores = rejeitados
+      .map((fb) => Number(fb.featureSnapshot?.confidenceScore ?? fb.finalQualityScore ?? NaN))
+      .filter((n) => Number.isFinite(n));
+
+    const approvedAreas = aprovados
+      .map((fb) => Number(fb.featureSnapshot?.areaM2 ?? NaN))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const rejectedAreas = rejeitados
+      .map((fb) => Number(fb.featureSnapshot?.areaM2 ?? NaN))
+      .filter((n) => Number.isFinite(n) && n > 0);
+
+    const baseQuality = Number(presetBase.minQualityScore);
+    const baseArea = Number(presetBase.minArea);
+    const baseEdge = Number(presetBase.edgeThreshold);
+
+    const medApprovedScore = median(approvedScores);
+    const medRejectedScore = median(rejectedScores);
+    const medApprovedArea = median(approvedAreas);
+    const medRejectedArea = median(rejectedAreas);
+
+    const aprovadosBaixoScore = approvedScores.filter((s) => s < baseQuality).length;
+    const rejeitadosAltoScore = rejectedScores.filter((s) => s >= baseQuality).length;
+    const ratioAprovadosBaixo = approvedScores.length > 0 ? aprovadosBaixoScore / approvedScores.length : 0;
+    const ratioRejeitadosAlto = rejectedScores.length > 0 ? rejeitadosAltoScore / rejectedScores.length : 0;
+
+    let deltaQuality = 0;
+    deltaQuality += (ratioRejeitadosAlto * 14);
+    deltaQuality -= (ratioAprovadosBaixo * 12);
+
+    if (medApprovedScore && medRejectedScore) {
+      const midpoint = (medApprovedScore + medRejectedScore) / 2;
+      deltaQuality += (midpoint - baseQuality) * 0.18;
+    }
+
+    const aprovadosPequenos = approvedAreas.filter((a) => a < baseArea).length;
+    const rejeitadosPequenos = rejectedAreas.filter((a) => a < baseArea).length;
+    const ratioAprovadosPequenos = approvedAreas.length > 0 ? aprovadosPequenos / approvedAreas.length : 0;
+    const ratioRejeitadosPequenos = rejectedAreas.length > 0 ? rejeitadosPequenos / rejectedAreas.length : 0;
+
+    let deltaArea = 0;
+    deltaArea += ratioRejeitadosPequenos * 8;
+    deltaArea -= ratioAprovadosPequenos * 7;
+
+    if (medApprovedArea && medRejectedArea) {
+      const midpointArea = (medApprovedArea + medRejectedArea) / 2;
+      deltaArea += (midpointArea - baseArea) * 0.12;
+    }
+
+    const categoriasRejeicao = rejeitados.reduce((acc, fb) => {
+      const cat = fb.hardNegativeCategory || categorizarMotivoRejeicao(fb.feedbackReason || fb.reason || '');
+      acc[cat] = (acc[cat] || 0) + 1;
+      return acc;
+    }, {});
+
+    let deltaEdge = 0;
+    const totalRejeitados = rejeitados.length || 1;
+    const ratioRuidoSombra = ((categoriasRejeicao.ruido || 0) + (categoriasRejeicao.sombra || 0)) / totalRejeitados;
+    const ratioFragmentado = (categoriasRejeicao.fragmentado || 0) / totalRejeitados;
+    deltaEdge += ratioRuidoSombra * 10;
+    deltaEdge -= ratioFragmentado * 8;
+
+    const ajustes = {
+      minQualityScore: Math.round(clamp(
+        baseQuality + deltaQuality,
+        CALIBRACAO_PRESET_LIMITES.minQualityScore.min,
+        CALIBRACAO_PRESET_LIMITES.minQualityScore.max
+      )),
+      minArea: Number(clamp(
+        baseArea + deltaArea,
+        CALIBRACAO_PRESET_LIMITES.minArea.min,
+        CALIBRACAO_PRESET_LIMITES.minArea.max
+      ).toFixed(1)),
+      edgeThreshold: Math.round(clamp(
+        baseEdge + deltaEdge,
+        CALIBRACAO_PRESET_LIMITES.edgeThreshold.min,
+        CALIBRACAO_PRESET_LIMITES.edgeThreshold.max
+      ))
+    };
+
+    const changed = (
+      ajustes.minQualityScore !== presetBase.minQualityScore ||
+      ajustes.minArea !== presetBase.minArea ||
+      ajustes.edgeThreshold !== presetBase.edgeThreshold
+    );
+
+    return {
+      applied: changed,
+      ajustes,
+      stats: {
+        amostra: feedbackElegivel.length,
+        aprovados: aprovados.length,
+        rejeitados: rejeitados.length,
+        medApprovedScore,
+        medRejectedScore,
+        medApprovedArea,
+        medRejectedArea
+      }
+    };
+  } catch (error) {
+    console.warn('⚠️ Calibração de preset não aplicada:', error);
+    return { applied: false, reason: 'erro', error: error?.message || String(error) };
+  }
+}
+
 // ==================== ATUALIZAR INDICADOR DE CONEXÃO ====================
 function atualizarIndicadorConexao() {
   const indicador = document.getElementById('connection-status');
@@ -484,8 +764,375 @@ async function buscarLocalNoMapa() {
   }
 }
 
+function atualizarStatusAppUi(mensagem, isErro = false) {
+  const status = document.getElementById('appStatus');
+  if (!status) return;
+  status.textContent = mensagem;
+  status.style.color = isErro ? '#b91c1c' : '#374151';
+}
+
+function arrayBufferParaBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function normalizarGeoJsonApp(geojson) {
+  if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
+    throw new Error('GeoJSON APP inválido: esperado FeatureCollection com features.');
+  }
+
+  const featuresValidas = geojson.features.filter((feature) => {
+    const tipo = feature?.geometry?.type;
+    return tipo === 'Polygon' || tipo === 'MultiPolygon';
+  });
+
+  if (featuresValidas.length === 0) {
+    throw new Error('APP sem polígonos válidos (Polygon/MultiPolygon).');
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features: featuresValidas
+  };
+}
+
+function persistirAppBoundary(geojson, metadata = {}) {
+  appBoundaryGeoJSON = geojson;
+  appBoundaryMetadata = {
+    loadedAt: new Date().toISOString(),
+    ...metadata
+  };
+
+  localStorage.setItem(APP_STORAGE_KEY, JSON.stringify({
+    geojson: appBoundaryGeoJSON,
+    metadata: appBoundaryMetadata
+  }));
+}
+
+function restaurarAppPersistida() {
+  try {
+    const raw = localStorage.getItem(APP_STORAGE_KEY);
+    if (!raw) {
+      atualizarStatusAppUi('Nenhum arquivo APP carregado.');
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    appBoundaryGeoJSON = normalizarGeoJsonApp(parsed?.geojson);
+    appBoundaryMetadata = parsed?.metadata || null;
+
+    const qtd = appBoundaryGeoJSON.features.length;
+    const nomeArquivo = appBoundaryMetadata?.fileName || 'arquivo salvo';
+    atualizarStatusAppUi(`APP ativa (${qtd} polígonos) • ${nomeArquivo}`);
+  } catch (err) {
+    console.warn('Falha ao restaurar APP persistida, limpando cache local:', err);
+    localStorage.removeItem(APP_STORAGE_KEY);
+    appBoundaryGeoJSON = null;
+    appBoundaryMetadata = null;
+    atualizarStatusAppUi('Nenhum arquivo APP carregado.');
+  }
+}
+
+function limparAppPersistida() {
+  appBoundaryGeoJSON = null;
+  appBoundaryMetadata = null;
+  localStorage.removeItem(APP_STORAGE_KEY);
+  atualizarStatusAppUi('Nenhum arquivo APP carregado.');
+  alert('🧹 APP removida do sistema.');
+}
+
+async function carregarAppShapefileZip() {
+  const input = document.getElementById('appShpZipInput');
+  const file = input?.files?.[0];
+
+  if (!file) {
+    alert('Selecione um arquivo shapefile compactado (.zip).');
+    return;
+  }
+
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    alert('Arquivo inválido. Envie um shapefile no formato ZIP.');
+    return;
+  }
+
+  loaderText.textContent = '📥 Convertendo shapefile APP para GeoJSON...';
+  loader.style.display = 'flex';
+  atualizarStatusAppUi('Processando APP...');
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zipBase64 = arrayBufferParaBase64(arrayBuffer);
+
+    let geojson = null;
+    let source = 'shapefile-zip-backend';
+
+    try {
+      const response = await fetch('/api/shp-to-geojson', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          zipBase64
+        })
+      });
+
+      const rawText = await response.text();
+      let payload = null;
+      if (rawText) {
+        try {
+          payload = JSON.parse(rawText);
+        } catch {
+          payload = null;
+        }
+      }
+
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || `Falha ao converter APP (${response.status})`);
+      }
+
+      geojson = normalizarGeoJsonApp(payload.geojson);
+    } catch (backendError) {
+      console.warn('⚠️ Conversão backend indisponível, usando fallback local (shpjs):', backendError?.message || backendError);
+      loaderText.textContent = '📥 Backend indisponível; convertendo APP localmente...';
+      geojson = await converterShapefileZipLocal(arrayBuffer);
+      source = 'shapefile-zip-frontend-fallback';
+    }
+
+    persistirAppBoundary(geojson, {
+      fileName: file.name,
+      source
+    });
+
+    atualizarStatusAppUi(`APP ativa (${geojson.features.length} polígonos) • ${file.name}`);
+    alert(`✅ APP carregada com sucesso!\n\nPolígonos APP: ${geojson.features.length}\n\nA camada foi salva de forma oculta para cálculo de sobreposição.`);
+  } catch (error) {
+    console.error('Erro ao carregar APP:', error);
+    atualizarStatusAppUi(`Erro ao carregar APP: ${error.message}`, true);
+    alert(`❌ Erro ao carregar APP\n\n${error.message}`);
+  } finally {
+    loader.style.display = 'none';
+  }
+}
+
+function normalizarResultadoShpJs(result) {
+  if (!result) return null;
+
+  if (result.type === 'FeatureCollection' && Array.isArray(result.features)) {
+    return result;
+  }
+
+  if (Array.isArray(result)) {
+    const features = result
+      .filter((item) => item?.type === 'FeatureCollection' && Array.isArray(item.features))
+      .flatMap((item) => item.features || []);
+
+    return {
+      type: 'FeatureCollection',
+      features
+    };
+  }
+
+  return null;
+}
+
+async function converterShapefileZipLocal(arrayBuffer) {
+  const moduleShp = await import('shpjs');
+  const shp = moduleShp?.default || moduleShp;
+  const bruto = await shp(arrayBuffer);
+  const geojson = normalizarResultadoShpJs(bruto);
+
+  if (!geojson) {
+    throw new Error('Não foi possível interpretar o ZIP da APP localmente.');
+  }
+
+  return normalizarGeoJsonApp(geojson);
+}
+
+function intersectSafe(featureA, featureB) {
+  try {
+    return turf.intersect(featureA, featureB);
+  } catch {
+    // compatibilidade com assinatura que recebe FeatureCollection
+  }
+
+  try {
+    return turf.intersect(turf.featureCollection([featureA, featureB]));
+  } catch {
+    return null;
+  }
+}
+
+function normalizarTipoBenfeitoria(tipo) {
+  const valor = String(tipo || '').toLowerCase().trim();
+  if (valor === 'trapiche') return 'trapiche';
+  if (valor === 'edificacao' || valor === 'edificação') return 'edificacao';
+  if (valor === 'outra' || valor === 'outra_benfeitoria') return 'outra';
+  return 'nao_classificada';
+}
+
+function obterRotuloTipoBenfeitoria(tipo) {
+  const key = normalizarTipoBenfeitoria(tipo);
+  return TIPOS_BENFEITORIA[key] || TIPOS_BENFEITORIA.nao_classificada;
+}
+
+function obterMascaraVetorizacaoAtiva() {
+  if (!currentSelectionMaskFeature) return null;
+  const tipo = currentSelectionMaskFeature?.geometry?.type;
+  if (tipo !== 'Polygon' && tipo !== 'MultiPolygon') return null;
+  return currentSelectionMaskFeature;
+}
+
+function recortarAppDoRequerente() {
+  const mask = obterMascaraVetorizacaoAtiva();
+  if (!appBoundaryGeoJSON || !Array.isArray(appBoundaryGeoJSON.features) || !mask) {
+    return turf.featureCollection([]);
+  }
+
+  const recortes = [];
+  for (const appFeature of appBoundaryGeoJSON.features) {
+    try {
+      if (!turf.booleanIntersects(appFeature, mask)) continue;
+
+      let clipped = null;
+      if (turf.booleanWithin(appFeature, mask)) {
+        clipped = appFeature;
+      } else {
+        clipped = intersectSafe(appFeature, mask);
+      }
+
+      if (!clipped) continue;
+      recortes.push(clipped);
+    } catch (error) {
+      console.warn('⚠️ Falha ao recortar APP pela máscara de vetorização:', error);
+    }
+  }
+
+  return turf.featureCollection(recortes);
+}
+
+function gerarRelatorioIntersecaoApp() {
+  const appDoRequerente = recortarAppDoRequerente();
+  const appFeatures = appDoRequerente.features || [];
+  const detalhes = [];
+  let areaTotalPoligonos = 0;
+  let areaTotalIntersecao = 0;
+  const areaAppDoRequerente = appFeatures.reduce((acc, f) => acc + turf.area(f), 0);
+
+  for (const feature of geojsonFeatures) {
+    const areaPoligono = turf.area(feature);
+    areaTotalPoligonos += areaPoligono;
+
+    let areaIntersecao = 0;
+
+    for (const appFeature of appFeatures) {
+      const intersecao = intersectSafe(feature, appFeature);
+      if (!intersecao) continue;
+      areaIntersecao += turf.area(intersecao);
+    }
+
+    areaTotalIntersecao += areaIntersecao;
+
+    detalhes.push({
+      id: feature?.properties?.id || '-',
+      tipoBenfeitoria: normalizarTipoBenfeitoria(feature?.properties?.tipo_benfeitoria),
+      tipoBenfeitoriaLabel: obterRotuloTipoBenfeitoria(feature?.properties?.tipo_benfeitoria),
+      areaPoligonoM2: areaPoligono,
+      areaIntersecaoM2: areaIntersecao,
+      percentualIntersecao: areaPoligono > 0 ? (areaIntersecao / areaPoligono) * 100 : 0,
+      taxaOcupacao: areaPoligono > 0 ? (areaIntersecao / areaPoligono) * 100 : 0
+    });
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    appMetadata: appBoundaryMetadata || {},
+    appCarregada: Boolean(appBoundaryGeoJSON),
+    mascaraVetorizacaoAtiva: Boolean(obterMascaraVetorizacaoAtiva()),
+    totalPoligonos: geojsonFeatures.length,
+    areaAppDoRequerente,
+    areaTotalPoligonos,
+    areaTotalIntersecao,
+    areaOcupada: areaTotalIntersecao,
+    percentualSobreposicaoGeral: areaTotalPoligonos > 0
+      ? (areaTotalIntersecao / areaTotalPoligonos) * 100
+      : 0,
+    taxaOcupacao: areaTotalPoligonos > 0
+      ? (areaTotalIntersecao / areaTotalPoligonos) * 100
+      : 0,
+    detalhes
+  };
+}
+
+function exportarRelatorioAppPdf() {
+  if (geojsonFeatures.length === 0) {
+    alert('⚠️ Não há polígonos vetorizados para gerar relatório.');
+    return;
+  }
+
+  const jsPDF = window.jspdf?.jsPDF;
+  if (!jsPDF) {
+    alert('❌ Biblioteca de PDF não carregada. Recarregue a página.');
+    return;
+  }
+
+  let relatorio;
+  try {
+    relatorio = gerarRelatorioIntersecaoApp();
+  } catch (error) {
+    alert(`❌ Erro ao calcular relatório: ${error.message}`);
+    return;
+  }
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const dataHora = new Date(relatorio.generatedAt).toLocaleString('pt-BR');
+  const appNome = relatorio.appCarregada
+    ? (relatorio.appMetadata?.fileName || 'APP carregada')
+    : 'Não carregada';
+
+  let y = 12;
+  const addLine = (texto, espacamento = 6) => {
+    if (y > 285) {
+      doc.addPage();
+      y = 12;
+    }
+    doc.text(texto, 12, y);
+    y += espacamento;
+  };
+
+  doc.setFontSize(14);
+  addLine('Relatório Técnico Preliminar - Ocupação em APP', 8);
+  doc.setFontSize(10);
+  addLine(`Data e hora da análise: ${dataHora}`);
+  addLine(`Base APP utilizada: ${appNome}`);
+  addLine(`APP do requerente (m²): ${relatorio.areaAppDoRequerente.toFixed(2)}`);
+  addLine(`Quantidade de benfeitorias vetorizadas: ${relatorio.totalPoligonos}`);
+  addLine(`Área total das benfeitorias (m²): ${relatorio.areaTotalPoligonos.toFixed(2)}`);
+  addLine(`Área ocupada em APP (m²): ${relatorio.areaOcupada.toFixed(2)}`);
+  addLine(`Taxa de ocupação da benfeitoria em APP (%): ${relatorio.taxaOcupacao.toFixed(2)}`);
+  addLine(`Sobreposição geral (%): ${relatorio.percentualSobreposicaoGeral.toFixed(2)}`);
+  addLine('Observação: valores 0,00 m² podem indicar ausência de APP carregada, APP fora da máscara ou ausência de interseção.', 5);
+  addLine('');
+  addLine('Detalhamento por benfeitoria vetorizada:');
+
+  relatorio.detalhes.forEach((item) => {
+    addLine(
+      `${item.id} | Classe: ${item.tipoBenfeitoriaLabel} | Área da benfeitoria: ${item.areaPoligonoM2.toFixed(2)} m² | Área ocupada em APP: ${item.areaIntersecaoM2.toFixed(2)} m² | Taxa de ocupação: ${item.taxaOcupacao.toFixed(2)}%`,
+      5
+    );
+  });
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  doc.save(`relatorio_intersecao_app_${stamp}.pdf`);
+}
+
 // Função para aplicar pré-configurações
-function aplicarPreset(tipo) {
+async function aplicarPreset(tipo) {
   let preset;
   
   switch(tipo) {
@@ -557,6 +1204,16 @@ function aplicarPreset(tipo) {
     default:
       return;
   }
+
+  const resultadoCalibracao = await calibrarPresetComHistorico(tipo, preset);
+  if (resultadoCalibracao?.applied) {
+    preset = {
+      ...preset,
+      ...resultadoCalibracao.ajustes,
+      nome: `${preset.nome} • Calibrado`
+    };
+    console.log('🤖 Preset calibrado automaticamente:', resultadoCalibracao);
+  }
   
   // Aplicar configurações
   CONFIG.edgeThreshold = preset.edgeThreshold;
@@ -570,6 +1227,7 @@ function aplicarPreset(tipo) {
   CONFIG.clusterEps = preset.clusterEps;
   CONFIG.clusterMinPts = preset.clusterMinPts;
   CONFIG.minClusterSize = preset.minClusterSize;
+  CONFIG.presetProfile = tipo;
   
   // Atualizar controles UI (sliders e inputs)
   document.getElementById('edgeThreshold').value = preset.edgeThreshold;
@@ -594,7 +1252,13 @@ function aplicarPreset(tipo) {
   document.getElementById('minClusterSize').value = preset.minClusterSize;
   document.getElementById('minClusterSizeInput').value = preset.minClusterSize;
   
-  alert(`✅ Preset "${preset.nome}" aplicado!\n\n🎯 Configurações profissionais ativadas:\n• Fusão automática de fragmentos\n• Filtros de qualidade otimizados\n• Geometrias simplificadas`);
+  let mensagem = `✅ Preset "${preset.nome}" aplicado!\n\n🎯 Configurações profissionais ativadas:\n• Fusão automática de fragmentos\n• Filtros de qualidade otimizados\n• Geometrias simplificadas`;
+
+  if (resultadoCalibracao?.applied) {
+    mensagem += `\n\n🤖 Calibração automática aplicada\nAmostra usada: ${resultadoCalibracao.stats?.amostra || 0} feedbacks elegíveis`;
+  }
+
+  alert(mensagem);
 }
 
 // Função para resetar parâmetros
@@ -610,7 +1274,8 @@ function resetarParametros() {
     clusteringEnabled: true,
     clusterEps: 2.5,
     clusterMinPts: 6,
-    minClusterSize: 40
+    minClusterSize: 40,
+    presetProfile: 'manual'
   };
   
   // Atualizar controles UI (sliders e inputs)
@@ -720,6 +1385,30 @@ function atualizarVisualizacao() {
   }
 }
 
+function removerPoligonoRejeitado(featureId) {
+  if (!featureId) return;
+
+  const idx = geojsonFeatures.findIndex((f) => f.properties?.id === featureId);
+  if (idx >= 0) {
+    geojsonFeatures.splice(idx, 1);
+  }
+
+  if (window.lastGeoJSONLayer && typeof window.lastGeoJSONLayer.eachLayer === 'function') {
+    const layersParaRemover = [];
+    window.lastGeoJSONLayer.eachLayer((layer) => {
+      if (layer?.feature?.properties?.id === featureId) {
+        layersParaRemover.push(layer);
+      }
+    });
+
+    layersParaRemover.forEach((layer) => {
+      window.lastGeoJSONLayer.removeLayer(layer);
+    });
+  }
+
+  atualizarEstatisticas();
+}
+
 function gerarRunId() {
   const random = Math.random().toString(36).slice(2, 8);
   return `run_${Date.now()}_${random}`;
@@ -743,6 +1432,7 @@ function criarPopupFeedback(feature) {
   const feedbackStatus = props.feedback_status || 'pendente';
   const feedbackReason = props.feedback_reason || '-';
   const featureId = props.id || '';
+  const tipoAtual = normalizarTipoBenfeitoria(props.tipo_benfeitoria);
 
   return `
     <strong>ID:</strong> ${props.id}<br>
@@ -751,14 +1441,36 @@ function criarPopupFeedback(feature) {
     <strong>Qualidade:</strong> ${props.quality}<br>
     <strong>Compacidade:</strong> ${props.compactness}<br>
     <strong>Vértices:</strong> ${props.vertices}<br>
+    <strong>Tipo:</strong> ${obterRotuloTipoBenfeitoria(tipoAtual)}<br>
     <strong>Feedback:</strong> ${obterTextoFeedback(feedbackStatus)}<br>
     <strong>Motivo:</strong> ${feedbackReason}<br>
+    <div style="margin-top: 8px;">
+      <label for="tipo_${featureId}"><strong>Classificação:</strong></label><br>
+      <select id="tipo_${featureId}" onchange="definirTipoBenfeitoria('${featureId}', this.value)">
+        <option value="nao_classificada" ${tipoAtual === 'nao_classificada' ? 'selected' : ''}>Não classificada</option>
+        <option value="trapiche" ${tipoAtual === 'trapiche' ? 'selected' : ''}>Trapiche</option>
+        <option value="edificacao" ${tipoAtual === 'edificacao' ? 'selected' : ''}>Edificação</option>
+        <option value="outra" ${tipoAtual === 'outra' ? 'selected' : ''}>Outra benfeitoria</option>
+      </select>
+    </div>
     <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
       <button onclick="marcarFeedbackPoligono('${featureId}', 'aprovado')">✅ Aprovar</button>
       <button onclick="marcarFeedbackPoligono('${featureId}', 'rejeitado')">❌ Rejeitar</button>
       <button onclick="marcarFeedbackPoligono('${featureId}', 'editado')">✏️ Editado</button>
     </div>
   `;
+}
+
+function definirTipoBenfeitoria(featureId, tipo) {
+  const feature = geojsonFeatures.find((f) => f.properties?.id === featureId);
+  if (!feature) return;
+
+  const tipoNormalizado = normalizarTipoBenfeitoria(tipo);
+  feature.properties.tipo_benfeitoria = tipoNormalizado;
+  feature.properties.feedback_updated_at = new Date().toISOString();
+
+  atualizarVisualizacao();
+  mostrarNotificacao(`🏷️ Tipo atualizado para: ${obterRotuloTipoBenfeitoria(tipoNormalizado)}`, 'info');
 }
 
 function inicializarBancoAprendizado() {
@@ -903,18 +1615,38 @@ async function salvarRunAprendizado(runPayload) {
  */
 async function salvarFeedbackAprendizado(feedbackPayload) {
   const feedbackNormalizado = normalizarFeedbackPayload(feedbackPayload);
+  const tipoBenfeitoria = normalizarTipoBenfeitoria(
+    feedbackPayload.tipoBenfeitoria || feedbackPayload.featureSnapshot?.tipoBenfeitoria
+  );
+  const avaliacaoQualidade = avaliarQualidadeFeedback({
+    ...feedbackPayload,
+    ...feedbackNormalizado
+  });
+  const statusNormalizado = feedbackNormalizado.status;
+  const hardNegativeCategory = statusNormalizado === 'rejeitado'
+    ? categorizarMotivoRejeicao(feedbackNormalizado.reason)
+    : null;
 
-  // Salva localmente no IndexedDB (sempre)
-  await idbPut('feedback', {
+  const registroFeedback = {
     ...feedbackPayload,
     ...feedbackNormalizado,
-    feedbackStatus: feedbackNormalizado.status,
+    label: statusNormalizado,
+    feedbackStatus: statusNormalizado,
     feedbackReason: feedbackNormalizado.reason,
+    tipoBenfeitoria,
     editedGeometry: feedbackNormalizado.editedGeometry,
-    timestamp: feedbackNormalizado.timestamp
-  });
+    timestamp: feedbackNormalizado.timestamp,
+    finalQualityScore: Number(feedbackPayload.featureSnapshot?.confidenceScore || 0),
+    hardNegativeCategory,
+    trainingEligible: avaliacaoQualidade.aptoTreino,
+    dataQualityScore: avaliacaoQualidade.score,
+    dataQualityFlags: avaliacaoQualidade.flags
+  };
 
-  console.log('✅ Feedback salvo em IndexedDB:', feedbackPayload);
+  // Salva localmente no IndexedDB (sempre)
+  await idbPut('feedback', registroFeedback);
+
+  console.log('✅ Feedback salvo em IndexedDB:', registroFeedback);
 
   // Tenta salvar no Firestore se online e inicializado
   if (firebaseInicializado && estaOnline()) {
@@ -922,7 +1654,15 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
       await salvarFeedbackFirestore(
         feedbackPayload.runId, 
         feedbackPayload.featureId, 
-        feedbackNormalizado
+        {
+          ...feedbackNormalizado,
+          label: statusNormalizado,
+          tipoBenfeitoria,
+          trainingEligible: avaliacaoQualidade.aptoTreino,
+          dataQualityScore: avaliacaoQualidade.score,
+          dataQualityFlags: avaliacaoQualidade.flags,
+          hardNegativeCategory
+        }
       );
       console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
     } catch (error) {
@@ -930,7 +1670,15 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
       await adicionarNaFila('feedback', {
         runId: feedbackPayload.runId,
         featureId: feedbackPayload.featureId,
-        feedback: feedbackNormalizado
+        feedback: {
+          ...feedbackNormalizado,
+          label: statusNormalizado,
+          tipoBenfeitoria,
+          trainingEligible: avaliacaoQualidade.aptoTreino,
+          dataQualityScore: avaliacaoQualidade.score,
+          dataQualityFlags: avaliacaoQualidade.flags,
+          hardNegativeCategory
+        }
       });
     }
   } else {
@@ -938,7 +1686,15 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
     await adicionarNaFila('feedback', {
       runId: feedbackPayload.runId,
       featureId: feedbackPayload.featureId,
-      feedback: feedbackNormalizado
+      feedback: {
+        ...feedbackNormalizado,
+        label: statusNormalizado,
+        tipoBenfeitoria,
+        trainingEligible: avaliacaoQualidade.aptoTreino,
+        dataQualityScore: avaliacaoQualidade.score,
+        dataQualityFlags: avaliacaoQualidade.flags,
+        hardNegativeCategory
+      }
     });
   }
 
@@ -1039,6 +1795,14 @@ async function marcarFeedbackPoligono(featureId, status) {
     featureId: featureId,
     feedbackStatus: status,
     feedbackReason: feedbackReason,
+    featureSnapshot: {
+      confidenceScore: Number(feature.properties.confidence_score || 0),
+      areaM2: Number(feature.properties.area_m2 || 0),
+      tipoBenfeitoria: normalizarTipoBenfeitoria(feature.properties.tipo_benfeitoria),
+      quality: feature.properties.quality || '',
+      compactness: Number(feature.properties.compactness || 0),
+      vertices: Number(feature.properties.vertices || 0)
+    },
     timestamp: new Date().toISOString()
   };
 
@@ -1050,6 +1814,13 @@ async function marcarFeedbackPoligono(featureId, status) {
       status,
       feedbackReason
     );
+
+    if (status === 'rejeitado') {
+      removerPoligonoRejeitado(featureId);
+      mostrarNotificacao('🗑️ Polígono rejeitado removido e registrado para aprendizado.', 'info');
+      return;
+    }
+
     atualizarVisualizacao();
   } catch (err) {
     console.error('Erro ao salvar feedback no banco local:', err);
@@ -1217,6 +1988,15 @@ function ativarEdicaoPoligono(featureId, feature) {
           featureId: featureId,
           feedbackStatus: 'editado',
           feedbackReason: motivo,
+          tipoBenfeitoria: normalizarTipoBenfeitoria(feature.properties.tipo_benfeitoria),
+          featureSnapshot: {
+            confidenceScore: Number(feature.properties.confidence_score || 0),
+            areaM2: Number(feature.properties.area_m2 || 0),
+            tipoBenfeitoria: normalizarTipoBenfeitoria(feature.properties.tipo_benfeitoria),
+            quality: feature.properties.quality || '',
+            compactness: Number(feature.properties.compactness || 0),
+            vertices: Number(feature.properties.vertices || 0)
+          },
           geometriaOriginal: geometriaOriginal,
           geometriaCorrigida: geometriaEditada,
           editedGeometry: geometriaEditada,
@@ -1985,6 +2765,8 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
   loader.style.display = 'flex';
   activeRunId = gerarRunId();
   activeRunStartedAt = new Date().toISOString();
+  const selectionMaskGeoJSON = selectionLayer?.toGeoJSON?.() || null;
+  currentSelectionMaskFeature = selectionMaskGeoJSON;
 
   // Usamos os bounds do polígono desenhado para a captura
   leafletImage(map, async (err, mainCanvas) => {
@@ -2290,7 +3072,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
         debugLog('📍 [DEBUG] Features recebidas:', geojsonResult.features?.length || 0);
 
         // Converte coordenadas de pixel (0,0) para Lat/Lng reais
-        const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds);
+        const geojsonConvertido = converterPixelsParaLatLng(geojsonResult, maskCanvas, bounds, selectionMaskGeoJSON);
         debugLog(`📍 [DEBUG] Conversão para LatLng completa: ${geojsonConvertido.features.length} features`);
         debugLog('📍 [DEBUG] Primeiros dados de features:', geojsonConvertido.features.slice(0, 2));
         relatorio.resultadoFinal = {
@@ -2494,7 +3276,7 @@ function applyMorphologicalOperation(ctx, width, height, operationType, kernelSi
  *   • Fusão de próximos melhora visualização (evita fragmentação)
  *   • Todos os features trazem run_id para rastreamento (aprendizado)
  */
-function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
+function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeature = null) {
   const imgWidth = canvas.width;
   const imgHeight = canvas.height;
   const featuresFinais = [];
@@ -2514,13 +3296,15 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
 
   if (!geojson || !geojson.features) return turf.featureCollection([]);
 
-  // ✨ NOVO: Criar polígono da área de seleção para filtrar features fora dela
-  const selectionBounds = turf.bboxPolygon([
-    mapBounds.getWest(),
-    mapBounds.getSouth(),
-    mapBounds.getEast(),
-    mapBounds.getNorth()
-  ]);
+  // Usa polígono exato da seleção quando disponível; fallback para bbox.
+  const selectionMask = selectionMaskFeature && (selectionMaskFeature.geometry?.type === 'Polygon' || selectionMaskFeature.geometry?.type === 'MultiPolygon')
+    ? selectionMaskFeature
+    : turf.bboxPolygon([
+      mapBounds.getWest(),
+      mapBounds.getSouth(),
+      mapBounds.getEast(),
+      mapBounds.getNorth()
+    ]);
 
   geojson.features.forEach((feature, idx) => {
     // Garante que é polígono
@@ -2560,27 +3344,52 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
       const simplified = turf.simplify(poly, { tolerance: TOLERANCIA_SIMPLIFICACAO, highQuality: true });
       if (idx < 3) console.log(`Feature ${idx}: polígono simplificado`);
 
-      const area = turf.area(simplified);
-      if (idx < 3) {
-        console.log(`Feature ${idx}: área calculada = ${area.toFixed(6)}m² (original ${coords.length} pontos)`);
-      }
-
-      // ✨ NOVO: Filtro 0 - Verificar se polígono está dentro da área de seleção
+      // Filtro espacial exato: mantém apenas a parte dentro da seleção desenhada.
+      let masked = null;
       try {
-        const dentroArea = turf.booleanWithin(simplified, selectionBounds);
-        if (!dentroArea) {
+        if (!turf.booleanIntersects(simplified, selectionMask)) {
           console.log(`Feature ${idx}: ❌ REJEITADA - Fora da área de seleção`);
           return;
         }
+
+        if (turf.booleanWithin(simplified, selectionMask)) {
+          masked = simplified;
+        } else {
+          masked = intersectSafe(simplified, selectionMask);
+          if (!masked) {
+            console.log(`Feature ${idx}: ❌ REJEITADA - Interseção vazia com área de seleção`);
+            return;
+          }
+        }
       } catch (error) {
-        console.warn(`Feature ${idx}: ⚠️ Erro ao verificar bounds:`, error);
-        // Continua mesmo com erro no filtro
+        console.warn(`Feature ${idx}: ⚠️ Erro ao aplicar máscara da seleção:`, error);
+        return;
+      }
+
+      // Se vier MultiPolygon após recorte, preserva o maior fragmento para footprint principal.
+      if (masked.geometry?.type === 'MultiPolygon') {
+        const partes = masked.geometry.coordinates
+          .map(coordsMulti => turf.polygon(coordsMulti))
+          .filter(Boolean)
+          .sort((a, b) => turf.area(b) - turf.area(a));
+
+        if (partes.length === 0) {
+          console.log(`Feature ${idx}: ❌ REJEITADA - Recorte gerou geometria inválida`);
+          return;
+        }
+
+        masked = partes[0];
+      }
+
+      const area = turf.area(masked);
+      if (idx < 3) {
+        console.log(`Feature ${idx}: área calculada = ${area.toFixed(6)}m² (original ${coords.length} pontos)`);
       }
 
       // AQUI é onde os filtros são aplicados.
       if (area >= MIN_AREA_METERS) {
         // Limpar geometria: remove buracos e corrige auto-interseções
-        let cleaned = limparGeometria(simplified);
+        let cleaned = limparGeometria(masked);
         
         // Calcular score de confiança
         const qualityScore = calcularScoreConfianca(cleaned);
@@ -2594,6 +3403,7 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
             compactness: qualityScore.compactness,
             vertices: qualityScore.vertices,
             quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa',
+            tipo_benfeitoria: 'nao_classificada',
             run_id: activeRunId,
             feedback_status: 'pendente',
             feedback_reason: ''
@@ -2626,24 +3436,51 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds) {
   
   // Recalcula propriedades após fusão e reaplica filtros finais
   const finaisComPropriedades = mesclados.map((feature, idx) => {
-    const area = turf.area(feature);
-    const qualityScore = calcularScoreConfianca(feature);
+    // Reaplica máscara da seleção após fusão para evitar vazamento geométrico.
+    let maskedPosFusao = null;
+    if (turf.booleanWithin(feature, selectionMask)) {
+      maskedPosFusao = feature;
+    } else {
+      maskedPosFusao = intersectSafe(feature, selectionMask);
+    }
+
+    if (!maskedPosFusao) {
+      return null;
+    }
+
+    if (maskedPosFusao.geometry?.type === 'MultiPolygon') {
+      const partes = maskedPosFusao.geometry.coordinates
+        .map(coordsMulti => turf.polygon(coordsMulti))
+        .filter(Boolean)
+        .sort((a, b) => turf.area(b) - turf.area(a));
+      maskedPosFusao = partes[0] || null;
+    }
+
+    if (!maskedPosFusao) {
+      return null;
+    }
+
+    const featureLimpa = limparGeometria(maskedPosFusao);
+    const area = turf.area(featureLimpa);
+    const qualityScore = calcularScoreConfianca(featureLimpa);
     const propsAnteriores = feature.properties || {};
     
-    feature.properties = {
+    featureLimpa.properties = {
       id: `imovel_${geojsonFeatures.length + idx + 1}`,
       area_m2: area.toFixed(2),
       confidence_score: qualityScore.score,
       compactness: qualityScore.compactness,
       vertices: qualityScore.vertices,
       quality: qualityScore.score >= 70 ? 'alta' : qualityScore.score >= 40 ? 'media' : 'baixa',
+      tipo_benfeitoria: normalizarTipoBenfeitoria(propsAnteriores.tipo_benfeitoria),
       run_id: propsAnteriores.run_id || activeRunId,
       feedback_status: propsAnteriores.feedback_status || 'pendente',
       feedback_reason: propsAnteriores.feedback_reason || ''
     };
     
-    return feature;
+    return featureLimpa;
   }).filter((feature) => {
+    if (!feature) return false;
     const area = Number(feature.properties.area_m2 || 0);
     const score = Number(feature.properties.confidence_score || 0);
     return area >= CONFIG.minArea && score >= CONFIG.minQualityScore;
@@ -2793,5 +3630,7 @@ window.aplicarPreset = aplicarPreset;
 window.resetarParametros = resetarParametros;
 window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
+window.definirTipoBenfeitoria = definirTipoBenfeitoria;
 window.buscarLocalNoMapa = buscarLocalNoMapa;
 window.idbGetAll = idbGetAll;  // ✨ Para continuous-learning.js
+window.exportarRelatorioAppPdf = exportarRelatorioAppPdf;

@@ -4,5 +4,8 @@
   "private": true,
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "shpjs": "^6.2.0"
   }
 }

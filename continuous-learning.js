@@ -12,6 +12,14 @@ let dashboardMetricas = {
   acuraciaQualidade: 0
 };
 
+function obterRotuloFeedback(fb = {}) {
+  return fb.label || fb.feedbackStatus || fb.status || fb.feedbackStatus || 'neutro';
+}
+
+function filtrarFeedbackElegivelTreino(feedback = []) {
+  return feedback.filter((fb) => fb.trainingEligible !== false);
+}
+
 // ==================== PARTE 1: MONITORAMENTO CONTÍNUO ====================
 
 // Atualizar contador de exemplos coletados
@@ -19,10 +27,11 @@ async function atualizarContagemExemplos() {
   try {
     const idbGetAll = window.idbGetAll || (() => []);
     const feedback = await idbGetAll('feedback');
-    exemploColetados = feedback.length;
+    const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
+    exemploColetados = feedbackElegivel.length;
     
     console.log(`📊 Exemplos coletados: ${exemploColetados}`);
-    console.log(`📦 Dados feedback recuperados:`, feedback);
+    console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}`);
 
     // ✨ Atualizar UI da barra de progresso
     atualizarUIAprendizadoContinuo(exemploColetados);
@@ -169,22 +178,22 @@ function calcularMetricasQualidade(feedbackData) {
   try {
     // Verdadeiros positivos: features aprovadas com qualidade alta
     const tp = feedbackData.filter(fb => 
-      fb.label === 'aprovado' && fb.finalQualityScore >= 70
+      (obterRotuloFeedback(fb) === 'aprovado' || obterRotuloFeedback(fb) === 'correto') && fb.finalQualityScore >= 70
     ).length;
 
     // Falsos positivos: features rejeitadas mas marcadas como boas
     const fp = feedbackData.filter(fb => 
-      fb.label === 'rejeitado' && fb.finalQualityScore >= 60
+      obterRotuloFeedback(fb) === 'rejeitado' && fb.finalQualityScore >= 60
     ).length;
 
     // Falsos negativos: features rejeitadas mas deveriam ser aceitas
     const fn = feedbackData.filter(fb => 
-      fb.label === 'rejeitado' && fb.feedback?.includes('deveria')
+      obterRotuloFeedback(fb) === 'rejeitado' && String(fb.feedbackReason || fb.feedback || '').includes('deveria')
     ).length;
 
     // Verdadeiros negativos: features rejeitadas corretamente
     const tn = feedbackData.filter(fb => 
-      fb.label === 'rejeitado' && fb.finalQualityScore < 60
+      obterRotuloFeedback(fb) === 'rejeitado' && fb.finalQualityScore < 60
     ).length;
 
     const precision = tp / (tp + fp) || 0;
@@ -212,15 +221,16 @@ async function atualizarDashboardMetricas() {
     // Obter feedback para cálculo de métricas
     const idbGetAll = window.idbGetAll || (() => []);
     const feedback = await idbGetAll('feedback');
+    const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
     const runs = await idbGetAll('runs');
 
-    if (feedback.length === 0) {
+    if (feedbackElegivel.length === 0) {
       console.log('⚠️ Sem dados de feedback para calcular métricas');
       return null;
     }
 
     // Calcular qualidade
-    const metricas = calcularMetricasQualidade(feedback);
+    const metricas = calcularMetricasQualidade(feedbackElegivel);
     
     if (metricas) {
       dashboardMetricas.precision = metricas.precision;
