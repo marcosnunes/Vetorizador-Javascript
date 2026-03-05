@@ -23,8 +23,8 @@ import {
 } from 'firebase/firestore';
 import { obterFirestore, obterUsuarioAtual } from './firebase-config.js';
 
-function obterRefAppBoundaryUsuario(db, userId) {
-  return doc(db, 'users', userId, 'settings', 'appBoundary');
+function obterRefAppBoundaryGlobal(db) {
+  return doc(db, 'shared', 'global_app_boundary');
 }
 
 function obterRefModeloGlobal(db) {
@@ -170,9 +170,9 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
   }
 }
 
-// ==================== APP BOUNDARY (USUÁRIO) ====================
+// ==================== APP BOUNDARY (GLOBAL COMPARTILHADA) ====================
 /**
- * Salva a APP carregada para o usuário atual.
+ * Salva a APP carregada em documento global compartilhado.
  * @param {Object} payload - {geojson, metadata}
  */
 export async function salvarAppBoundaryFirestore(payload = {}) {
@@ -180,7 +180,7 @@ export async function salvarAppBoundaryFirestore(payload = {}) {
   const userId = obterUsuarioAtual();
 
   if (!userId) {
-    throw new Error('Usuário não autenticado para salvar APP.');
+    throw new Error('Sessão anônima não autenticada para salvar APP global.');
   }
 
   const geojson = payload?.geojson;
@@ -198,20 +198,20 @@ export async function salvarAppBoundaryFirestore(payload = {}) {
   }
 
   const dados = {
-    userId,
+    updatedBy: userId,
     geojsonJson,
     metadata,
     updatedAt: serverTimestamp(),
     updatedAtIso: new Date().toISOString()
   };
 
-  const ref = obterRefAppBoundaryUsuario(db, userId);
+  const ref = obterRefAppBoundaryGlobal(db);
   await setDoc(ref, dados);
   return true;
 }
 
 /**
- * Lê a APP salva para o usuário atual.
+ * Lê a APP global compartilhada.
  * @returns {Object|null}
  */
 export async function lerAppBoundaryFirestore() {
@@ -222,7 +222,7 @@ export async function lerAppBoundaryFirestore() {
     return null;
   }
 
-  const ref = obterRefAppBoundaryUsuario(db, userId);
+  const ref = obterRefAppBoundaryGlobal(db);
   const snap = await getDoc(ref);
 
   if (!snap.exists()) {
@@ -247,7 +247,7 @@ export async function lerAppBoundaryFirestore() {
 }
 
 /**
- * Remove a APP salva para o usuário atual.
+ * Remove a APP global compartilhada.
  */
 export async function limparAppBoundaryFirestore() {
   const db = obterFirestore();
@@ -257,7 +257,7 @@ export async function limparAppBoundaryFirestore() {
     return false;
   }
 
-  const ref = obterRefAppBoundaryUsuario(db, userId);
+  const ref = obterRefAppBoundaryGlobal(db);
   await deleteDoc(ref);
   return true;
 }

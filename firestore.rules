@@ -68,5 +68,11 @@ service cloud.firestore {
       // proteção operacional
       allow delete: if false;
     }
+
+    // ==================== APP GLOBAL ====================
+    match /shared/global_app_boundary {
+      // qualquer usuário anônimo autenticado pode consumir e atualizar APP global
+      allow read, create, update, delete: if isAnonymousAuthenticated();
+    }
   }
 }

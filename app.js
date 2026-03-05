@@ -838,7 +838,7 @@ async function persistirAppBoundary(geojson, metadata = {}) {
         geojson: appBoundaryGeoJSON,
         metadata: appBoundaryMetadata
       });
-      console.log('✅ APP persistida no Firestore para o usuário atual.');
+      console.log('✅ APP persistida no Firestore global compartilhado.');
     } catch (error) {
       console.warn('⚠️ Não foi possível persistir APP no Firestore. Mantido em cache local.', error);
     }
@@ -894,7 +894,7 @@ async function restaurarAppPersistidaDoFirestoreSeNecessario() {
     const qtd = appBoundaryGeoJSON.features.length;
     const nomeArquivo = appBoundaryMetadata?.fileName || 'arquivo salvo na nuvem';
     atualizarStatusAppUi(`APP ativa (${qtd} polígonos) • ${nomeArquivo}`);
-    console.log('☁️ APP restaurada do Firestore para esta instância.');
+    console.log('☁️ APP global restaurada do Firestore para esta instância.');
   } catch (error) {
     if (String(error?.message || '').includes('inválido')) {
       console.warn('⚠️ APP remota ignorada por formato inválido:', error?.message || error);
@@ -912,7 +912,7 @@ async function limparAppPersistida() {
   if (firebaseInicializado && estaOnline()) {
     try {
       await limparAppBoundaryFirestore();
-      console.log('✅ APP removida do Firestore para o usuário atual.');
+      console.log('✅ APP removida do Firestore global compartilhado.');
     } catch (error) {
       console.warn('⚠️ Não foi possível remover APP no Firestore.', error);
     }
