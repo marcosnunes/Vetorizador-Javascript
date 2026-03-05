@@ -1730,68 +1730,55 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
 
   console.log('✅ Feedback salvo em IndexedDB:', registroFeedback);
 
-  // Tenta salvar no Firestore se online e inicializado
-  if (firebaseInicializado && estaOnline()) {
+  const payloadFirestore = {
+    ...feedbackNormalizado,
+    label: statusNormalizado,
+    tipoBenfeitoria,
+    trainingEligible: avaliacaoQualidade.aptoTreino,
+    dataQualityScore: avaliacaoQualidade.score,
+    dataQualityFlags: avaliacaoQualidade.flags,
+    hardNegativeCategory
+  };
+
+  // Sincronização remota em background (não bloquear UX do feedback)
+  void (async () => {
+    if (firebaseInicializado && estaOnline()) {
+      try {
+        await salvarFeedbackFirestore(
+          feedbackPayload.runId,
+          feedbackPayload.featureId,
+          payloadFirestore
+        );
+        console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
+        return;
+      } catch (error) {
+        console.error('❌ Erro ao salvar feedback no Firestore - adicionando à fila offline:', error);
+      }
+    }
+
     try {
-      await salvarFeedbackFirestore(
-        feedbackPayload.runId, 
-        feedbackPayload.featureId, 
-        {
-          ...feedbackNormalizado,
-          label: statusNormalizado,
-          tipoBenfeitoria,
-          trainingEligible: avaliacaoQualidade.aptoTreino,
-          dataQualityScore: avaliacaoQualidade.score,
-          dataQualityFlags: avaliacaoQualidade.flags,
-          hardNegativeCategory
-        }
-      );
-      console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
-    } catch (error) {
-      console.error('❌ Erro ao salvar feedback no Firestore - adicionando à fila offline:', error);
       await adicionarNaFila('feedback', {
         runId: feedbackPayload.runId,
         featureId: feedbackPayload.featureId,
-        feedback: {
-          ...feedbackNormalizado,
-          label: statusNormalizado,
-          tipoBenfeitoria,
-          trainingEligible: avaliacaoQualidade.aptoTreino,
-          dataQualityScore: avaliacaoQualidade.score,
-          dataQualityFlags: avaliacaoQualidade.flags,
-          hardNegativeCategory
-        }
+        feedback: payloadFirestore
       });
+    } catch (queueError) {
+      console.error('❌ Erro ao enfileirar feedback para sincronização:', queueError);
     }
-  } else {
-    // Adiciona à fila offline para sincronização posterior
-    await adicionarNaFila('feedback', {
-      runId: feedbackPayload.runId,
-      featureId: feedbackPayload.featureId,
-      feedback: {
-        ...feedbackNormalizado,
-        label: statusNormalizado,
-        tipoBenfeitoria,
-        trainingEligible: avaliacaoQualidade.aptoTreino,
-        dataQualityScore: avaliacaoQualidade.score,
-        dataQualityFlags: avaliacaoQualidade.flags,
-        hardNegativeCategory
-      }
-    });
-  }
+  })();
 
   // ✨ CRÍTICO: Atualizar contagem de exemplos para aprendizado contínuo
-  // Isso dispara sugestão de retreinamento a cada 100 exemplos
+  // Isso pode consultar dataset global e ser pesado; rodar em background
   if (window.atualizarContagemExemplos) {
-    try {
-      console.log('🔄 Chamando atualizarContagemExemplos...');
-      await window.atualizarContagemExemplos();
-      console.log('✅ atualizarContagemExemplos completado');
-    } catch (err) {
-      debugLog('⚠️ Erro ao atualizar contagem de exemplos:', err);
-    }
-  } else {
-    console.warn('❌ window.atualizarContagemExemplos não está disponível!');
+    setTimeout(() => {
+      window.atualizarContagemExemplos()
+        .then(() => {
+          console.log('✅ atualizarContagemExemplos completado (background)');
+        })
+        .catch((err) => {
+          debugLog('⚠️ Erro ao atualizar contagem de exemplos:', err);
+        });
+    }, 0);
   }
 }
 
