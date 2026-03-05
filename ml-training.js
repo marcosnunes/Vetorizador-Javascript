@@ -3,12 +3,13 @@
 // Entrada: Imagem processada + parâmetros CV
 // Saída: Qualidade predita + ajustes de parâmetros recomendados
 
-import { salvarModeloGlobalFirestore, lerModeloGlobalFirestore } from './firestore-service.js';
+import { salvarModeloGlobalFirestore, lerModeloGlobalFirestore, salvarFeedbackFirestore } from './firestore-service.js';
 
 let modeloTreinado = null;
 let ultimoRelatorioLimpezaML = null;
 let ultimaConscienciaML = null;
 let versaoModeloGlobalAtiva = null;
+let ultimoOutliersDetectados = [];
 
 const DEFAULT_TRAINING_CONFIG = {
   edgeThreshold: 90,
@@ -248,6 +249,7 @@ function higienizarExemplosTreinamento(exemplosBrutos) {
   if (!Array.isArray(exemplosBrutos) || exemplosBrutos.length === 0) {
     return {
       exemplosFiltrados: [],
+      outliersDetectados: [],
       relatorio: {
         totalOriginal: 0,
         removidosOutlierMAD: 0,
@@ -268,11 +270,16 @@ function higienizarExemplosTreinamento(exemplosBrutos) {
   const suspeitosKMeans = detectarSuspeitosPorKMeans(vetoresAnalise);
 
   const suspeitosTotais = new Set([...outliersMAD, ...suspeitosKMeans]);
+  const outliersDetectados = exemplosBrutos
+    .filter((_, idx) => suspeitosTotais.has(idx))
+    .map((ex) => ex.meta)
+    .filter((meta) => meta?.runId && meta?.featureId);
   const exemplosFiltrados = exemplosBrutos.filter((_, idx) => !suspeitosTotais.has(idx));
 
   if (exemplosFiltrados.length < 5) {
     return {
       exemplosFiltrados: exemplosBrutos,
+      outliersDetectados: [],
       relatorio: {
         totalOriginal: exemplosBrutos.length,
         removidosOutlierMAD: 0,
@@ -290,6 +297,7 @@ function higienizarExemplosTreinamento(exemplosBrutos) {
 
   return {
     exemplosFiltrados,
+    outliersDetectados,
     relatorio: {
       totalOriginal: exemplosBrutos.length,
       removidosOutlierMAD: outliersMAD.size,
@@ -468,12 +476,21 @@ function prepararDatasetTreinamento(dataset) {
           ajustesRecomendados.contrastBoost,
           ajustesRecomendados.minArea,
           ajustesRecomendados.simplification
-        ]
+        ],
+        meta: {
+          feedbackId: fb.feedbackId || fb.id || null,
+          runId: fb.runId,
+          featureId: fb.featureId,
+          status: rotuloFeedback,
+          reason: fb.reason || fb.feedbackReason || '',
+          timestamp: fb.timestamp || fb.createdAt || null
+        }
       });
     });
   });
 
-  const { exemplosFiltrados, relatorio } = higienizarExemplosTreinamento(exemplosBrutos);
+  const { exemplosFiltrados, outliersDetectados, relatorio } = higienizarExemplosTreinamento(exemplosBrutos);
+  ultimoOutliersDetectados = Array.isArray(outliersDetectados) ? outliersDetectados : [];
   ultimoRelatorioLimpezaML = {
     ...relatorio,
     generatedAt: new Date().toISOString()
@@ -496,6 +513,84 @@ function prepararDatasetTreinamento(dataset) {
   }
 
   return exemplosFiltrados;
+}
+
+async function autoSanitizarOutliersPersistidos(outliers = []) {
+  if (!Array.isArray(outliers) || outliers.length === 0) {
+    return { total: 0, local: 0, remoto: 0 };
+  }
+
+  const dedup = new Map();
+  outliers.forEach((item) => {
+    if (!item?.runId || !item?.featureId) return;
+    dedup.set(`${item.runId}::${item.featureId}`, item);
+  });
+
+  const candidatos = [...dedup.values()];
+  if (candidatos.length === 0) {
+    return { total: 0, local: 0, remoto: 0 };
+  }
+
+  const flags = ['auto_outlier_sanitized'];
+  const outlierDetectedAt = new Date().toISOString();
+  let localAtualizados = 0;
+  let remotosAtualizados = 0;
+
+  try {
+    if (typeof window.idbGetAll === 'function' && typeof window.idbPut === 'function') {
+      const feedbackLocal = await window.idbGetAll('feedback');
+      const indiceLocal = new Map(
+        (feedbackLocal || []).map((fb) => [`${fb.runId}::${fb.featureId}`, fb])
+      );
+
+      for (const item of candidatos) {
+        const chave = `${item.runId}::${item.featureId}`;
+        const atual = indiceLocal.get(chave);
+        if (!atual) continue;
+
+        if (atual.trainingEligible === false && atual.outlierAutoSanitized === true) {
+          continue;
+        }
+
+        await window.idbPut('feedback', {
+          ...atual,
+          trainingEligible: false,
+          outlierAutoSanitized: true,
+          outlierDetectedAt,
+          dataQualityFlags: Array.from(new Set([...(atual.dataQualityFlags || []), ...flags]))
+        });
+        localAtualizados += 1;
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Falha ao auto-sanitizar outliers no IndexedDB:', error?.message || error);
+  }
+
+  if (navigator.onLine) {
+    for (const item of candidatos) {
+      try {
+        await salvarFeedbackFirestore(item.runId, item.featureId, {
+          status: item.status || 'pendente',
+          label: item.status || 'pendente',
+          reason: item.reason || 'Outlier identificado automaticamente',
+          trainingEligible: false,
+          outlierAutoSanitized: true,
+          outlierDetectedAt,
+          dataQualityFlags: flags,
+          timestamp: item.timestamp || outlierDetectedAt
+        });
+        remotosAtualizados += 1;
+      } catch (error) {
+        console.warn(`⚠️ Não foi possível sanitizar feedback remoto ${item.featureId}:`, error?.message || error);
+      }
+    }
+  }
+
+  return {
+    total: candidatos.length,
+    local: localAtualizados,
+    remoto: remotosAtualizados
+  };
 }
 
 // Recomendar ajustes baseado em feedback
@@ -590,6 +685,11 @@ async function treinarModeloML(dataset) {
   if (!exemplos || exemplos.length < 5) {
     alert('❌ Dataset insuficiente para treinamento!\n\nMínimo: 5 exemplos de feedback\nVocê tem: ' + (exemplos?.length || 0));
     return false;
+  }
+
+  if (ultimoOutliersDetectados.length > 0) {
+    const resultadoSanitizacao = await autoSanitizarOutliersPersistidos(ultimoOutliersDetectados);
+    console.log('🧼 Auto-sanitização de outliers concluída:', resultadoSanitizacao);
   }
 
   // Criar modelo

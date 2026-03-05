@@ -3810,5 +3810,6 @@ window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
 window.definirTipoBenfeitoria = definirTipoBenfeitoria;
 window.buscarLocalNoMapa = buscarLocalNoMapa;
+window.idbPut = idbPut;
 window.idbGetAll = idbGetAll;  // ✨ Para continuous-learning.js
 window.exportarRelatorioAppPdf = exportarRelatorioAppPdf;

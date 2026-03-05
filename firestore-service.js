@@ -149,6 +149,29 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
       createdAt: timestampSeguro // Fallback para offline
     };
 
+    if (feedback?.label) {
+      dadosFeedback.label = feedback.label;
+    }
+    if (typeof feedback?.trainingEligible === 'boolean') {
+      dadosFeedback.trainingEligible = feedback.trainingEligible;
+    }
+    if (Number.isFinite(feedback?.dataQualityScore)) {
+      dadosFeedback.dataQualityScore = feedback.dataQualityScore;
+    }
+    if (Array.isArray(feedback?.dataQualityFlags)) {
+      dadosFeedback.dataQualityFlags = feedback.dataQualityFlags;
+    }
+    if (feedback?.hardNegativeCategory) {
+      dadosFeedback.hardNegativeCategory = feedback.hardNegativeCategory;
+    }
+    if (feedback?.tipoBenfeitoria) {
+      dadosFeedback.tipoBenfeitoria = feedback.tipoBenfeitoria;
+    }
+    if (feedback?.outlierAutoSanitized === true) {
+      dadosFeedback.outlierAutoSanitized = true;
+      dadosFeedback.outlierDetectedAt = feedback.outlierDetectedAt || timestampSeguro;
+    }
+
     // Adiciona geometrias apenas se existirem (evita undefined)
     if (feedback?.editedGeometry || feedback?.geometriaCorrigida) {
       const geom = feedback.editedGeometry || feedback.geometriaCorrigida;
