@@ -3,9 +3,12 @@
 // Entrada: Imagem processada + parâmetros CV
 // Saída: Qualidade predita + ajustes de parâmetros recomendados
 
+import { salvarModeloGlobalFirestore, lerModeloGlobalFirestore } from './firestore-service.js';
+
 let modeloTreinado = null;
 let ultimoRelatorioLimpezaML = null;
 let ultimaConscienciaML = null;
+let versaoModeloGlobalAtiva = null;
 
 const DEFAULT_TRAINING_CONFIG = {
   edgeThreshold: 90,
@@ -512,6 +515,72 @@ function recomendarAjustes(feature, feedback, run) {
   };
 }
 
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const subArray = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, subArray);
+  }
+
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64) {
+  const binary = atob(String(base64 || ''));
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes.buffer;
+}
+
+async function extrairArtefatosModelo(modelo) {
+  let artifactsCapturados = null;
+
+  await modelo.save(window.tf.io.withSaveHandler(async (modelArtifacts) => {
+    artifactsCapturados = modelArtifacts;
+
+    return {
+      modelArtifactsInfo: {
+        dateSaved: new Date(),
+        modelTopologyType: 'JSON',
+        modelTopologyBytes: JSON.stringify(modelArtifacts.modelTopology || {}).length,
+        weightSpecsBytes: JSON.stringify(modelArtifacts.weightSpecs || []).length,
+        weightDataBytes: modelArtifacts.weightData?.byteLength || 0
+      }
+    };
+  }));
+
+  return artifactsCapturados;
+}
+
+async function publicarModeloGlobalFirestore(modelo, metadata = {}) {
+  const artifacts = await extrairArtefatosModelo(modelo);
+  if (!artifacts?.modelTopology || !artifacts?.weightSpecs || !artifacts?.weightData) {
+    throw new Error('Artefatos do modelo inválidos para publicação global.');
+  }
+
+  const payload = {
+    modelTopology: artifacts.modelTopology,
+    weightSpecs: artifacts.weightSpecs,
+    weightDataBase64: arrayBufferToBase64(artifacts.weightData),
+    metadata: {
+      ...metadata,
+      weightDataBytes: artifacts.weightData.byteLength || 0
+    }
+  };
+
+  const publishResult = await salvarModeloGlobalFirestore(payload);
+  versaoModeloGlobalAtiva = publishResult?.version || null;
+  return publishResult;
+}
+
 // Treinar modelo com dataset
 async function treinarModeloML(dataset) {
   console.log('🧠 Iniciando treinamento do modelo ML...');
@@ -572,6 +641,18 @@ async function treinarModeloML(dataset) {
     const lossInicial = history.history.loss[0].toFixed(4);
     const lossFinal = history.history.loss[history.history.loss.length - 1].toFixed(4);
     const melhoria = (((parseFloat(lossInicial) - parseFloat(lossFinal)) / parseFloat(lossInicial)) * 100).toFixed(1);
+
+    try {
+      const publishResult = await publicarModeloGlobalFirestore(modelo, {
+        source: dataset?.source || 'desconhecida',
+        exemplosTotal: exemplos.length,
+        lossFinal: Number(lossFinal),
+        generatedAt: new Date().toISOString()
+      });
+      console.log(`🌐 Modelo global atualizado com sucesso (v${publishResult?.version || 'n/a'})`);
+    } catch (publishError) {
+      console.warn('⚠️ Não foi possível publicar modelo global no Firestore:', publishError?.message || publishError);
+    }
 
     console.log('✅ Modelo treinado com sucesso!');
     console.log('📈 Loss inicial:', lossInicial);
@@ -678,6 +759,35 @@ async function carregarModeloLocalStorage() {
   }
 }
 
+async function carregarModeloGlobalFirestore() {
+  try {
+    const data = await lerModeloGlobalFirestore();
+    if (!data) {
+      console.log('⚠️ Nenhum modelo global encontrado no Firestore');
+      return null;
+    }
+
+    const weightData = base64ToArrayBuffer(data.weightDataBase64);
+    const handler = window.tf.io.fromMemory(data.modelTopology, data.weightSpecs, weightData);
+    const modelo = await window.tf.loadLayersModel(handler);
+
+    modeloTreinado = modelo;
+    versaoModeloGlobalAtiva = data.version || null;
+
+    try {
+      await salvarModeloLocalStorage(modelo);
+    } catch {
+      // best-effort cache local
+    }
+
+    console.log(`✅ Modelo global carregado do Firestore (v${data.version || 'n/a'})`);
+    return modelo;
+  } catch (error) {
+    console.warn('⚠️ Falha ao carregar modelo global do Firestore:', error?.message || error);
+    return null;
+  }
+}
+
 // Auto-ajustar parâmetros com modelo ML
 async function autoajustarParametrosML() {
   if (!modeloTreinado) {
@@ -736,7 +846,9 @@ async function autoajustarParametrosML() {
 window.treinarModeloML = treinarModeloML;
 window.autoajustarParametrosML = autoajustarParametrosML;
 window.carregarModeloLocalStorage = carregarModeloLocalStorage;
+window.carregarModeloGlobalFirestore = carregarModeloGlobalFirestore;
 window.fazerPredictionML = fazerPredictionML;
 window.obterRelatorioLimpezaML = () => ultimoRelatorioLimpezaML;
 window.obterConscienciaML = () => ultimaConscienciaML;
 window.logConscienciaML = () => atualizarConscienciaML({ fase: 'manual', observacao: 'Snapshot manual solicitado pela equipe.' });
+window.obterVersaoModeloGlobal = () => versaoModeloGlobalAtiva;

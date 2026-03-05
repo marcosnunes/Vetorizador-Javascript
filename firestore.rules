@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAnonymousAuthenticated() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function isOwner(userId) {
+      return isAnonymousAuthenticated() && request.auth.uid == userId;
+    }
+
+    function runExists(runId) {
+      return exists(/databases/$(database)/documents/runs/$(runId));
+    }
+
+    function isRunOwner(runId) {
+      return isAnonymousAuthenticated()
+        && runExists(runId)
+        && get(/databases/$(database)/documents/runs/$(runId)).data.userId == request.auth.uid;
+    }
+
+    // Ambiente anônimo: qualquer sessão anônima autenticada pode publicar modelo global.
+    function canPublishGlobalModel() {
+      return isAnonymousAuthenticated();
+    }
+
+    // ==================== APP PERSISTIDA POR USUÁRIO ====================
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /settings/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // ==================== RUNS ====================
+    match /runs/{runId} {
+      // leitura global para dataset compartilhado (usuários autenticados)
+      allow read: if isAnonymousAuthenticated();
+
+      allow create: if isAnonymousAuthenticated()
+                    && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isRunOwner(runId);
+
+      match /features/{featureId} {
+        allow read: if isAnonymousAuthenticated();
+        allow write: if isRunOwner(runId);
+      }
+
+      match /feedback/{feedbackId} {
+        allow read: if isAnonymousAuthenticated();
+        allow create: if isRunOwner(runId)
+                      && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if isRunOwner(runId);
+      }
+    }
+
+    // ==================== MODELO GLOBAL ====================
+    match /shared/global_ml_model {
+      // qualquer usuário anônimo autenticado pode consumir
+      allow read: if isAnonymousAuthenticated();
+
+      // publicação restrita
+      allow create, update: if canPublishGlobalModel();
+
+      // proteção operacional
+      allow delete: if false;
+    }
+  }
+}

@@ -14,6 +14,16 @@ async function autocarregarModeloML() {
       return false;
     }
 
+    if (window.carregarModeloGlobalFirestore) {
+      const modeloGlobal = await window.carregarModeloGlobalFirestore();
+      if (modeloGlobal) {
+        modeloAutocarregado = modeloGlobal;
+        autoInferenceAtivo = true;
+        console.log('✅ Modelo global auto-carregado para inferência');
+        return true;
+      }
+    }
+
     const modelo = await window.carregarModeloLocalStorage();
     if (modelo) {
       modeloAutocarregado = modelo;

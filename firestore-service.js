@@ -27,6 +27,10 @@ function obterRefAppBoundaryUsuario(db, userId) {
   return doc(db, 'users', userId, 'settings', 'appBoundary');
 }
 
+function obterRefModeloGlobal(db) {
+  return doc(db, 'shared', 'global_ml_model');
+}
+
 // ==================== SALVAR RUN ====================
 /**
  * Salva uma nova execução de vetorização
@@ -418,4 +422,166 @@ export async function exportarDatasetCompleto() {
     console.error('❌ Erro ao exportar dataset:', error);
     throw error;
   }
+}
+
+// ==================== DATASET GLOBAL COMPARTILHADO (TODOS USUÁRIOS) ====================
+/**
+ * Exporta dataset de aprendizado compartilhado entre usuários anônimos.
+ * Uso principal: retreinamento e contagem global de exemplos.
+ *
+ * @param {number} maxRuns - Limite de runs para evitar payload excessivo
+ * @returns {Object} Dataset normalizado para pipeline de ML
+ */
+export async function exportarDatasetCompartilhadoFirestore(maxRuns = 300) {
+  const db = obterFirestore();
+
+  try {
+    console.log(`🌐 Coletando dataset global compartilhado (até ${maxRuns} runs)...`);
+
+    const runsRef = collection(db, 'runs');
+
+    let runsSnap;
+    try {
+      const qOrdenada = query(runsRef, orderBy('timestamp', 'desc'), limit(maxRuns));
+      runsSnap = await getDocs(qOrdenada);
+    } catch (orderError) {
+      console.warn('⚠️ Fallback consulta runs sem orderBy(timestamp):', orderError?.message || orderError);
+      const qFallback = query(runsRef, limit(maxRuns));
+      runsSnap = await getDocs(qFallback);
+    }
+
+    const dataset = {
+      exportDate: new Date().toISOString(),
+      scope: 'global-shared',
+      totalRuns: runsSnap.size,
+      runs: [],
+      feedback: []
+    };
+
+    for (const runDoc of runsSnap.docs) {
+      const runData = runDoc.data() || {};
+      const runId = runData.runId || runDoc.id;
+
+      const featuresSnap = await getDocs(collection(runDoc.ref, 'features'));
+      const feedbackSnap = await getDocs(collection(runDoc.ref, 'feedback'));
+
+      const features = [];
+      featuresSnap.forEach((featureDoc) => {
+        const featureData = featureDoc.data() || {};
+        features.push({
+          ...featureData,
+          featureId: featureData.id || featureData.featureId || featureDoc.id
+        });
+      });
+
+      dataset.runs.push({
+        runId,
+        config: runData.config || {},
+        createdAt: runData.createdAt || null,
+        presetProfile: runData?.config?.presetProfile || null,
+        features
+      });
+
+      feedbackSnap.forEach((feedbackDoc) => {
+        const feedbackData = feedbackDoc.data() || {};
+        const status = feedbackData.status || feedbackData.feedbackStatus || feedbackData.label || 'pendente';
+
+        dataset.feedback.push({
+          ...feedbackData,
+          runId,
+          featureId: feedbackData.featureId || feedbackDoc.id,
+          status,
+          feedbackStatus: status,
+          label: feedbackData.label || status,
+          feedbackReason: feedbackData.reason || feedbackData.feedbackReason || ''
+        });
+      });
+    }
+
+    console.log(`✅ Dataset global exportado: ${dataset.runs.length} runs, ${dataset.feedback.length} feedbacks`);
+    return dataset;
+  } catch (error) {
+    console.error('❌ Erro ao exportar dataset global compartilhado:', error);
+    throw error;
+  }
+}
+
+// ==================== MODELO GLOBAL COMPARTILHADO ====================
+/**
+ * Publica o modelo global compartilhado no Firestore.
+ * Espera artefatos no formato do TensorFlow.js IOHandler.
+ *
+ * @param {Object} payload - {modelTopology, weightSpecs, weightDataBase64, metadata?}
+ */
+export async function salvarModeloGlobalFirestore(payload = {}) {
+  const db = obterFirestore();
+  const userId = obterUsuarioAtual();
+
+  const modelTopology = payload?.modelTopology;
+  const weightSpecs = payload?.weightSpecs;
+  const weightDataBase64 = String(payload?.weightDataBase64 || '');
+  const metadata = payload?.metadata || {};
+
+  if (!modelTopology || !Array.isArray(weightSpecs) || !weightDataBase64) {
+    throw new Error('Payload de modelo global inválido: topology/specs/weights ausentes.');
+  }
+
+  const tamanhoAproximado =
+    JSON.stringify(modelTopology).length +
+    JSON.stringify(weightSpecs).length +
+    weightDataBase64.length;
+
+  if (tamanhoAproximado > 850000) {
+    throw new Error('Modelo global excede limite seguro para documento Firestore.');
+  }
+
+  const versao = Number(metadata?.version) || Date.now();
+
+  const dados = {
+    version: versao,
+    modelTopology,
+    weightSpecs,
+    weightDataBase64,
+    modelFormat: 'tfjs-layers-model',
+    generatedBy: userId || 'anon',
+    metadata: {
+      ...metadata,
+      publishedAtIso: new Date().toISOString()
+    },
+    updatedAt: serverTimestamp(),
+    updatedAtIso: new Date().toISOString()
+  };
+
+  const ref = obterRefModeloGlobal(db);
+  await setDoc(ref, dados);
+  console.log(`✅ Modelo global publicado (v${versao})`);
+  return { version: versao };
+}
+
+/**
+ * Lê o modelo global compartilhado no Firestore.
+ * @returns {Object|null}
+ */
+export async function lerModeloGlobalFirestore() {
+  const db = obterFirestore();
+  const ref = obterRefModeloGlobal(db);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) {
+    return null;
+  }
+
+  const data = snap.data() || {};
+  if (!data.modelTopology || !Array.isArray(data.weightSpecs) || !data.weightDataBase64) {
+    return null;
+  }
+
+  return {
+    version: data.version || null,
+    modelTopology: data.modelTopology,
+    weightSpecs: data.weightSpecs,
+    weightDataBase64: data.weightDataBase64,
+    metadata: data.metadata || {},
+    updatedAtIso: data.updatedAtIso || null
+  };
 }

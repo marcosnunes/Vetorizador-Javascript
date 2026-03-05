@@ -5,7 +5,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 
 // ==================== CONFIGURAÇÃO ====================
 // Credenciais do projeto: Vetorizador-Inteligente
@@ -34,8 +34,22 @@ export function inicializarFirebase() {
     // Autenticação anônima automática
     onAuthStateChanged(auth, (user) => {
       if (user) {
-        usuarioAtual = user.uid;
-        console.log(`🔐 Usuário autenticado: ${user.uid.substring(0, 8)}...`);
+        if (user.isAnonymous) {
+          usuarioAtual = user.uid;
+          console.log(`🔐 Usuário anônimo autenticado: ${user.uid.substring(0, 8)}...`);
+          return;
+        }
+
+        console.warn('⚠️ Sessão não anônima detectada. Forçando reautenticação anônima...');
+        signOut(auth)
+          .then(() => signInAnonymously(auth))
+          .then((credential) => {
+            usuarioAtual = credential.user.uid;
+            console.log(`🆕 Novo usuário anônimo: ${usuarioAtual.substring(0, 8)}...`);
+          })
+          .catch((error) => {
+            console.error('❌ Erro ao forçar sessão anônima:', error);
+          });
       } else {
         // Auto-login anônimo se não houver usuário
         signInAnonymously(auth)

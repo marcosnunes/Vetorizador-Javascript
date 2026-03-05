@@ -1,6 +1,8 @@
 // ==================== CONTINUOUS LEARNING MODULE ====================
 // Auto-retrains model every 100 examples, tracks metrics, and provides REST API
 
+import { exportarDatasetCompartilhadoFirestore } from './firestore-service.js';
+
 let exemploColetados = 0;
 let ultimoTreinamento = null;
 let dashboardMetricas = {
@@ -12,6 +14,10 @@ let dashboardMetricas = {
   acuraciaQualidade: 0
 };
 
+const DATASET_COMPARTILHADO_CACHE_MS = 60000;
+let ultimoDatasetCompartilhado = null;
+let ultimoDatasetCompartilhadoAt = 0;
+
 function obterRotuloFeedback(fb = {}) {
   return fb.label || fb.feedbackStatus || fb.status || fb.feedbackStatus || 'neutro';
 }
@@ -20,18 +26,69 @@ function filtrarFeedbackElegivelTreino(feedback = []) {
   return feedback.filter((fb) => fb.trainingEligible !== false);
 }
 
+async function obterDatasetLocalTreino() {
+  const idbGetAll = window.idbGetAll || (() => []);
+  const runs = await idbGetAll('runs');
+  const feedback = await idbGetAll('feedback');
+
+  return {
+    exportedAt: new Date().toISOString(),
+    app: 'vetorizador-edificacoes',
+    version: 'fase5-continuous-learning',
+    source: 'indexeddb-local',
+    runs,
+    feedback,
+    exemplosTotal: feedback.length
+  };
+}
+
+async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {}) {
+  const agora = Date.now();
+  const cacheValido =
+    !forcarAtualizacao &&
+    ultimoDatasetCompartilhado &&
+    (agora - ultimoDatasetCompartilhadoAt) < DATASET_COMPARTILHADO_CACHE_MS;
+
+  if (cacheValido) {
+    return ultimoDatasetCompartilhado;
+  }
+
+  try {
+    const datasetGlobal = await exportarDatasetCompartilhadoFirestore(400);
+    const datasetNormalizado = {
+      exportedAt: datasetGlobal.exportDate || new Date().toISOString(),
+      app: 'vetorizador-edificacoes',
+      version: 'fase5-continuous-learning-global',
+      source: 'firestore-global-shared',
+      runs: Array.isArray(datasetGlobal.runs) ? datasetGlobal.runs : [],
+      feedback: Array.isArray(datasetGlobal.feedback) ? datasetGlobal.feedback : []
+    };
+
+    datasetNormalizado.exemplosTotal = datasetNormalizado.feedback.length;
+    ultimoDatasetCompartilhado = datasetNormalizado;
+    ultimoDatasetCompartilhadoAt = agora;
+    return datasetNormalizado;
+  } catch (error) {
+    console.warn('⚠️ Falha ao obter dataset compartilhado, usando dataset local:', error?.message || error);
+    const datasetLocal = await obterDatasetLocalTreino();
+    ultimoDatasetCompartilhado = datasetLocal;
+    ultimoDatasetCompartilhadoAt = agora;
+    return datasetLocal;
+  }
+}
+
 // ==================== PARTE 1: MONITORAMENTO CONTÍNUO ====================
 
 // Atualizar contador de exemplos coletados
 async function atualizarContagemExemplos() {
   try {
-    const idbGetAll = window.idbGetAll || (() => []);
-    const feedback = await idbGetAll('feedback');
+    const dataset = await obterDatasetTreinoCompartilhado();
+    const feedback = Array.isArray(dataset.feedback) ? dataset.feedback : [];
     const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
     exemploColetados = feedbackElegivel.length;
     
     console.log(`📊 Exemplos coletados: ${exemploColetados}`);
-    console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}`);
+    console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}, origem=${dataset.source || 'desconhecida'}`);
 
     // ✨ Atualizar UI da barra de progresso
     atualizarUIAprendizadoContinuo(exemploColetados);
@@ -121,20 +178,7 @@ async function executarRetreninamentoAutomatico() {
   if (loaderText) loaderText.textContent = '🔄 Retreinando modelo com novos dados...\n\nIsso pode levar 30-60 segundos...';
 
   try {
-    // Exportar dataset local
-    const idbGetAll = window.idbGetAll || (() => []);
-    const runs = await idbGetAll('runs');
-    const feedback = await idbGetAll('feedback');
-    
-    const dataset = {
-      exportedAt: new Date().toISOString(),
-      app: 'vetorizador-edificacoes',
-      version: 'fase5-continuous-learning',
-      source: 'indexeddb-local',
-      runs,
-      feedback,
-      exemplosTotal: feedback.length
-    };
+    const dataset = await obterDatasetTreinoCompartilhado({ forcarAtualizacao: true });
 
     // Retreinar modelo
     const sucesso = await window.treinarModeloML(dataset);
@@ -155,7 +199,7 @@ async function executarRetreninamentoAutomatico() {
       if (loader) loader.style.display = 'none';
       if (window.mostrarNotificacao) {
         window.mostrarNotificacao(
-          `✅ Modelo retreinado com ${exemploColetados} exemplos!`,
+          `✅ Modelo retreinado com ${exemploColetados} exemplos (${dataset.source || 'dataset compartilhado'})!`,
           'success'
         );
       }
