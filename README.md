@@ -91,7 +91,7 @@ https://jolly-pebble-0487d1a1e.6.azurestaticapps.net/
 ## Suporte e contato comercial
 
 - Email: [marcos.nunes.lph@outlook.com](mailto:marcos.nunes.lph@outlook.com)
-- Telefone/WhatsApp: +55 41 99853-07378
+- Telefone/WhatsApp: +55 41 9 98530-7378
 - LinkedIn: [Marcos Nunes](https://www.linkedin.com/in/marcos-nunes-lph)
 
 ---

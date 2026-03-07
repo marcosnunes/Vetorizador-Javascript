@@ -1386,6 +1386,45 @@ function resetarParametros() {
   alert('✅ Parâmetros restaurados!\n\nTodos os valores foram redefinidos para os padrões recomendados.');
 }
 
+async function aplicarAutoajustePreVetorizacao() {
+  if (!window.autoInferirParametros) {
+    return false;
+  }
+
+  try {
+    const prediction = await window.autoInferirParametros(CONFIG);
+    if (!prediction || prediction.qualidadePredita <= 0.5) {
+      return false;
+    }
+
+    CONFIG.edgeThreshold = prediction.edgeThresholdRecomendado;
+    CONFIG.morphologySize = prediction.morphologySizeRecomendado;
+    CONFIG.contrastBoost = prediction.contrastBoostRecomendado;
+    CONFIG.minArea = prediction.minAreaRecomendada;
+    CONFIG.simplification = prediction.simplificationRecomendada;
+
+    // Mantém os controles alinhados com os parâmetros inferidos antes do processamento.
+    document.getElementById('edgeThreshold').value = CONFIG.edgeThreshold;
+    document.getElementById('edgeThresholdInput').value = CONFIG.edgeThreshold;
+    document.getElementById('morphologySize').value = CONFIG.morphologySize;
+    document.getElementById('morphologySizeInput').value = CONFIG.morphologySize;
+    document.getElementById('minArea').value = CONFIG.minArea;
+    document.getElementById('minAreaInput').value = Number(CONFIG.minArea).toFixed(0);
+    document.getElementById('contrastBoost').value = CONFIG.contrastBoost;
+    document.getElementById('contrastBoostInput').value = Number(CONFIG.contrastBoost).toFixed(1);
+    document.getElementById('simplification').value = CONFIG.simplification;
+    document.getElementById('simplificationInput').value = Number(CONFIG.simplification).toFixed(6);
+
+    console.log(
+      `🤖 Autoajuste pré-vetorização aplicado (confiança ${(prediction.qualidadePredita * 100).toFixed(0)}%)`
+    );
+    return true;
+  } catch (error) {
+    console.warn('⚠️ Não foi possível aplicar autoajuste pré-vetorização:', error);
+    return false;
+  }
+}
+
 // Função para limpar resultados
 function limparResultados() {
   geojsonFeatures.length = 0;
@@ -2837,6 +2876,18 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
   const selectionMaskGeoJSON = selectionLayer?.toGeoJSON?.() || null;
   currentSelectionMaskFeature = selectionMaskGeoJSON;
 
+  try {
+    loaderText.textContent = '🤖 Aplicando aprendizado para ajustar parâmetros...';
+    const autoajusteAplicado = await aplicarAutoajustePreVetorizacao();
+    if (autoajusteAplicado) {
+      loaderText.textContent = '📸 Capturando imagem com parâmetros aprendidos...';
+    } else {
+      loaderText.textContent = '📸 Capturando imagem da área selecionada...';
+    }
+  } catch {
+    loaderText.textContent = '📸 Capturando imagem da área selecionada...';
+  }
+
   // Usamos os bounds do polígono desenhado para a captura
   leafletImage(map, async (err, mainCanvas) => {
     if (err) {
@@ -3188,14 +3239,14 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
             try {
               const featuresDados = geojsonConvertido.features.map(f => ({
                 area: f.properties.area_m2,
-                qualityScore: f.properties.score || 50,
+                qualityScore: f.properties.confidence_score || 50,
                 featureId: f.properties.id
               }));
               
               const processados = await window.aplicarAutoInferenciaAoProcesamento(featuresDados);
               
-              // Filtrar features pela lista de processados
-              if (processados && processados.length > 0) {
+              // Filtrar features pela lista de processados (inclui caso vazio = rejeitar todos)
+              if (Array.isArray(processados)) {
                 const processadosIds = new Set(processados.map(p => p.featureId));
                 featuresProcessados = geojsonConvertido.features.filter(f => 
                   processadosIds.has(f.properties.id)

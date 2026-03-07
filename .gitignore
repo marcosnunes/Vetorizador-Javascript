@@ -12,5 +12,4 @@ pdfspliter/.venv/
 pdfspliter/PDFtoArcgis/testes/
 
 # Documentação interna (manter apenas README.md público)
-docs/*.md
 .github/copilot-instructions.md
