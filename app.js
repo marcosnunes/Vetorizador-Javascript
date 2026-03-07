@@ -750,7 +750,7 @@ function atualizarUiCapturaCoordenada() {
     status.textContent = 'Modo ativo: clique em um ponto no mapa para capturar latitude e longitude.';
     status.style.color = '#b91c1c';
   } else {
-    btn.textContent = '📍 Capturar Coordenada (1 ponto)';
+    btn.textContent = '📍 Capturar Coordenada';
     btn.style.background = '';
     btn.style.color = '';
     status.textContent = 'Modo desativado. Clique no botao para capturar um ponto no mapa.';
