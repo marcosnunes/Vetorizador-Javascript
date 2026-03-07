@@ -3,9 +3,18 @@
 import { spawnSync } from 'node:child_process';
 
 function run(command, args) {
+  const env = { ...process.env };
+  // npm run may inject npm_config_env/npm_config_token when users pass --env/--token.
+  // These are not valid npm configs and cause noisy warnings in nested npm/npx calls.
+  delete env.npm_config_env;
+  delete env.npm_config_token;
+  delete env.NPM_CONFIG_ENV;
+  delete env.NPM_CONFIG_TOKEN;
+
   const result = spawnSync(command, args, {
     stdio: 'inherit',
-    shell: process.platform === 'win32'
+    shell: process.platform === 'win32',
+    env
   });
 
   if (result.error) {
