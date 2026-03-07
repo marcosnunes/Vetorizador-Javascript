@@ -70,6 +70,7 @@ const loader = document.getElementById('loader-overlay');
 const loaderText = document.getElementById('loader-text');
 let debugMaskLayer = null;
 let searchResultMarker = null;
+let modoCapturaCoordenada = false;
 const geojsonFeatures = [];
 let activeRunId = null;
 let activeRunStartedAt = null;
@@ -238,8 +239,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const mapSearchInput = document.getElementById('mapSearchInput');
   const mapSearchBtn = document.getElementById('mapSearchBtn');
+  const btnCapturePoint = document.getElementById('btnCapturePoint');
   if (mapSearchBtn) {
     mapSearchBtn.addEventListener('click', buscarLocalNoMapa);
+  }
+  if (btnCapturePoint) {
+    btnCapturePoint.addEventListener('click', () => {
+      definirModoCapturaCoordenada(!modoCapturaCoordenada);
+    });
   }
   if (mapSearchInput) {
     mapSearchInput.addEventListener('keydown', (event) => {
@@ -292,6 +299,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   restaurarAppPersistida();
+  atualizarUiCapturaCoordenada();
 
   // ==================== INICIALIZAÇÃO FIREBASE + FILA OFFLINE ====================
   inicializarSistemaAprendizado().catch((err) => {
@@ -721,8 +729,82 @@ function parseCoordBusca(rawValue) {
   return { lat, lng };
 }
 
-function marcarResultadoBusca(lat, lng, label = 'Local encontrado') {
+function criarPopupCoordenada(lat, lng, titulo = 'Coordenada capturada') {
+  const texto = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  return `
+    <strong>${titulo}</strong><br>
+    <code>${texto}</code><br>
+    <button type="button" onclick="copiarCoordenadaCapturada('${texto}')" style="margin-top: 6px;">Copiar</button>
+  `;
+}
+
+function atualizarUiCapturaCoordenada() {
+  const btn = document.getElementById('btnCapturePoint');
+  const status = document.getElementById('capturePointStatus');
+  if (!btn || !status) return;
+
+  if (modoCapturaCoordenada) {
+    btn.textContent = '❌ Cancelar Captura de Coordenada';
+    btn.style.background = '#dc2626';
+    btn.style.color = '#ffffff';
+    status.textContent = 'Modo ativo: clique em um ponto no mapa para capturar latitude e longitude.';
+    status.style.color = '#b91c1c';
+  } else {
+    btn.textContent = '📍 Capturar Coordenada (1 ponto)';
+    btn.style.background = '';
+    btn.style.color = '';
+    status.textContent = 'Modo desativado. Clique no botao para capturar um ponto no mapa.';
+    status.style.color = '#6b7280';
+  }
+}
+
+function definirModoCapturaCoordenada(ativo) {
+  modoCapturaCoordenada = Boolean(ativo);
+  if (window.map?.getContainer) {
+    window.map.getContainer().style.cursor = modoCapturaCoordenada ? 'crosshair' : '';
+  }
+
+  atualizarUiCapturaCoordenada();
+  if (modoCapturaCoordenada) {
+    mostrarNotificacao('📍 Modo captura ativo. Clique no mapa para obter a coordenada.', 'info');
+  }
+}
+
+async function copiarCoordenadaCapturada(texto) {
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(texto);
+    } else {
+      const area = document.createElement('textarea');
+      area.value = texto;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      document.body.removeChild(area);
+    }
+    mostrarNotificacao(`📋 Coordenada copiada: ${texto}`, 'success');
+  } catch (error) {
+    console.error('Erro ao copiar coordenada:', error);
+    alert(`Não foi possível copiar automaticamente.\n\nCoordenada: ${texto}`);
+  }
+}
+
+function capturarCoordenadaNoMapa(evento) {
+  if (!modoCapturaCoordenada || !evento?.latlng) return;
+
+  const lat = Number(evento.latlng.lat);
+  const lng = Number(evento.latlng.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  const popupHtml = criarPopupCoordenada(lat, lng, 'Ponto capturado');
+  marcarResultadoBusca(lat, lng, popupHtml, { zoom: map.getZoom() });
+  definirModoCapturaCoordenada(false);
+}
+
+function marcarResultadoBusca(lat, lng, label = 'Local encontrado', opcoes = {}) {
   if (!window.map) return;
+
+  const zoomDestino = Number.isFinite(opcoes.zoom) ? opcoes.zoom : 19;
 
   if (searchResultMarker) {
     map.removeLayer(searchResultMarker);
@@ -730,7 +812,7 @@ function marcarResultadoBusca(lat, lng, label = 'Local encontrado') {
 
   searchResultMarker = L.marker([lat, lng]).addTo(map);
   searchResultMarker.bindPopup(label).openPopup();
-  map.setView([lat, lng], 19);
+  map.setView([lat, lng], zoomDestino);
 }
 
 async function buscarLocalNoMapa() {
@@ -2829,6 +2911,14 @@ map.on(L.Draw.Event.CREATED, (e) => {
   }
 });
 
+map.on(L.Draw.Event.DRAWSTART, () => {
+  if (modoCapturaCoordenada) {
+    definirModoCapturaCoordenada(false);
+  }
+});
+
+map.on('click', capturarCoordenadaNoMapa);
+
 // --- LÓGICA PRINCIPAL ---
 /**
  * CORAÇÃO DO PIPELINE: Processa polígono desenhado → detecção de edificações
@@ -3861,6 +3951,7 @@ window.limparResultados = limparResultados;
 window.marcarFeedbackPoligono = marcarFeedbackPoligono;
 window.definirTipoBenfeitoria = definirTipoBenfeitoria;
 window.buscarLocalNoMapa = buscarLocalNoMapa;
+window.copiarCoordenadaCapturada = copiarCoordenadaCapturada;
 window.idbPut = idbPut;
 window.idbGetAll = idbGetAll;  // ✨ Para continuous-learning.js
 window.exportarRelatorioAppPdf = exportarRelatorioAppPdf;
