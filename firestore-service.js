@@ -17,6 +17,7 @@ import {
   query, 
   where, 
   orderBy, 
+  startAfter,
   limit,
   serverTimestamp,
   writeBatch
@@ -452,36 +453,77 @@ export async function exportarDatasetCompleto() {
  * Exporta dataset de aprendizado compartilhado entre usuários anônimos.
  * Uso principal: retreinamento e contagem global de exemplos.
  *
- * @param {number} maxRuns - Limite de runs para evitar payload excessivo
+ * @param {number|null} maxRuns - Limite opcional de runs; null/undefined = sem teto
  * @returns {Object} Dataset normalizado para pipeline de ML
  */
-export async function exportarDatasetCompartilhadoFirestore(maxRuns = 300) {
+export async function exportarDatasetCompartilhadoFirestore(maxRuns = null) {
   const db = obterFirestore();
 
   try {
-    console.log(`🌐 Coletando dataset global compartilhado (até ${maxRuns} runs)...`);
+    const limiteNormalizado = Number.isFinite(maxRuns) && maxRuns > 0
+      ? Math.floor(maxRuns)
+      : null;
+    const pageSizeBase = 500;
+
+    console.log(
+      `🌐 Coletando dataset global compartilhado (${limiteNormalizado ? `até ${limiteNormalizado}` : 'sem limite'} runs)...`
+    );
 
     const runsRef = collection(db, 'runs');
+    const runDocs = [];
 
-    let runsSnap;
     try {
-      const qOrdenada = query(runsRef, orderBy('timestamp', 'desc'), limit(maxRuns));
-      runsSnap = await getDocs(qOrdenada);
+      let lastDoc = null;
+
+      while (true) {
+        const restante = limiteNormalizado == null
+          ? pageSizeBase
+          : (limiteNormalizado - runDocs.length);
+
+        if (limiteNormalizado != null && restante <= 0) {
+          break;
+        }
+
+        const pageSize = limiteNormalizado == null
+          ? pageSizeBase
+          : Math.min(pageSizeBase, restante);
+
+        const qOrdenada = lastDoc
+          ? query(runsRef, orderBy('timestamp', 'desc'), startAfter(lastDoc), limit(pageSize))
+          : query(runsRef, orderBy('timestamp', 'desc'), limit(pageSize));
+
+        const runsSnap = await getDocs(qOrdenada);
+        if (runsSnap.empty) {
+          break;
+        }
+
+        runDocs.push(...runsSnap.docs);
+        lastDoc = runsSnap.docs[runsSnap.docs.length - 1];
+
+        if (runsSnap.size < pageSize) {
+          break;
+        }
+      }
     } catch (orderError) {
       console.warn('⚠️ Fallback consulta runs sem orderBy(timestamp):', orderError?.message || orderError);
-      const qFallback = query(runsRef, limit(maxRuns));
-      runsSnap = await getDocs(qFallback);
+
+      // Fallback sem ordenação: quando possível, mantém limite opcional.
+      const qFallback = limiteNormalizado == null
+        ? query(runsRef)
+        : query(runsRef, limit(limiteNormalizado));
+      const runsSnapFallback = await getDocs(qFallback);
+      runDocs.push(...runsSnapFallback.docs);
     }
 
     const dataset = {
       exportDate: new Date().toISOString(),
       scope: 'global-shared',
-      totalRuns: runsSnap.size,
+      totalRuns: runDocs.length,
       runs: [],
       feedback: []
     };
 
-    for (const runDoc of runsSnap.docs) {
+    for (const runDoc of runDocs) {
       const runData = runDoc.data() || {};
       const runId = runData.runId || runDoc.id;
 

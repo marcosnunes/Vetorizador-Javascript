@@ -1,5 +1,5 @@
 // ==================== CONTINUOUS LEARNING MODULE ====================
-// Auto-retrains model every 100 examples, tracks metrics, and provides REST API
+// Auto-retrains model every 50 examples, tracks metrics, and provides REST API
 
 import { exportarDatasetCompartilhadoFirestore } from './firestore-service.js';
 
@@ -15,6 +15,7 @@ let dashboardMetricas = {
 };
 
 const DATASET_COMPARTILHADO_CACHE_MS = 60000;
+const TRAINING_BATCH_SIZE = 50;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 
@@ -54,7 +55,7 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
   }
 
   try {
-    const datasetGlobal = await exportarDatasetCompartilhadoFirestore(400);
+    const datasetGlobal = await exportarDatasetCompartilhadoFirestore();
     const datasetNormalizado = {
       exportedAt: datasetGlobal.exportDate || new Date().toISOString(),
       app: 'vetorizador-edificacoes',
@@ -93,8 +94,8 @@ async function atualizarContagemExemplos() {
     // ✨ Atualizar UI da barra de progresso
     atualizarUIAprendizadoContinuo(exemploColetados);
 
-    // Se atingiu 100 exemplos, sugerir retreinamento
-    if (exemploColetados % 100 === 0 && exemploColetados > 0) {
+    // Se atingiu o lote de treino, sugerir retreinamento
+    if (exemploColetados % TRAINING_BATCH_SIZE === 0 && exemploColetados > 0) {
       console.log(`🎉 MARCO: ${exemploColetados} exemplos coletados!`);
       sugerirRetreinar();
     }
@@ -117,22 +118,22 @@ function atualizarUIAprendizadoContinuo(exemplos) {
   // Atualizar texto de contagem
   elementoContagem.textContent = exemplos;
   
-  // Calcular progresso (0-100)
-  const progresso = Math.min(100, (exemplos % 100));
-  const percentual = (progresso / 100) * 100;
+  // Calcular progresso (0-100%) para o lote de treino atual
+  const progresso = Math.min(TRAINING_BATCH_SIZE, (exemplos % TRAINING_BATCH_SIZE));
+  const percentual = (progresso / TRAINING_BATCH_SIZE) * 100;
   
   // Atualizar barra visual
   elementoBarra.style.width = percentual + '%';
   
   // Se tiver conteúdo, mostrar o número
   if (percentual > 15) {
-    elementoBarra.textContent = Math.round(progresso) + '/100';
+    elementoBarra.textContent = Math.round(progresso) + `/${TRAINING_BATCH_SIZE}`;
   } else {
     elementoBarra.textContent = '';
   }
 
-  // Mostrar botão "Treinar Agora" quando atingir 100
-  if (exemplos > 0 && exemplos % 100 === 0) {
+  // Mostrar botão "Treinar Agora" quando atingir o lote de treino.
+  if (exemplos > 0 && exemplos % TRAINING_BATCH_SIZE === 0) {
     if (btnTreinarAgora) {
       btnTreinarAgora.style.display = 'block';
       btnTreinarAgora.textContent = `⚡ Treinar Modelo Agora (${exemplos} exemplos atingidos!)`;
@@ -153,7 +154,7 @@ function sugerirRetreinar() {
 Quer treinar uma nova versão do modelo?
 - Melhor precisão com mais dados
 - Auto-ajuste de parâmetros mais confiável
-- Próxima sugestão: ${exemploColetados + 100} exemplos
+- Próxima sugestão: ${exemploColetados + TRAINING_BATCH_SIZE} exemplos
 
 OK = Treinar agora
 Cancelar = Treinar depois
@@ -319,7 +320,7 @@ async function obterDashboardCompleto() {
     fase: 'Phase 5 - Continuous Learning',
     exemplos: {
       coletados: exemploColetados,
-      proximoMarcao: Math.ceil((exemploColetados + 1) / 100) * 100
+      proximoMarcao: Math.ceil((exemploColetados + 1) / TRAINING_BATCH_SIZE) * TRAINING_BATCH_SIZE
     },
     ultimoTreinamento,
     metricas: dashboardMetricas,
@@ -456,7 +457,7 @@ const APIEndpoints = {
 
     let recomendacoes = [];
 
-    if (exemploColetados >= 100 && exemploColetados % 100 === 0) {
+    if (exemploColetados >= TRAINING_BATCH_SIZE && exemploColetados % TRAINING_BATCH_SIZE === 0) {
       recomendacoes.push({
         tipo: 'retreinar',
         prioridade: 'alta',
@@ -476,7 +477,7 @@ const APIEndpoints = {
       recomendacoes.push({
         tipo: 'coletar-mais',
         prioridade: 'média',
-        mensagem: `Apenas ${exemploColetados} exemplos. Recomenda-se 100+ para melhor performance.`
+        mensagem: `Apenas ${exemploColetados} exemplos. Recomenda-se ${TRAINING_BATCH_SIZE}+ para melhor performance.`
       });
     }
 
