@@ -18,15 +18,16 @@ function run(command, args) {
 }
 
 const cliArgs = process.argv.slice(2);
+const positionalArgs = cliArgs.filter((arg) => !arg.startsWith('-'));
 const envArgIndex = cliArgs.findIndex((arg) => arg === '--env');
 const envName = envArgIndex >= 0 && cliArgs[envArgIndex + 1]
   ? cliArgs[envArgIndex + 1]
-  : 'production';
+  : (positionalArgs[0] || 'production');
 
 const tokenArgIndex = cliArgs.findIndex((arg) => arg === '--token');
 const tokenFromArg = tokenArgIndex >= 0 && cliArgs[tokenArgIndex + 1]
   ? cliArgs[tokenArgIndex + 1]
-  : '';
+  : (positionalArgs[1] || '');
 
 const token = tokenFromArg
   || process.env.AZURE_STATIC_WEB_APPS_DEPLOYMENT_TOKEN
