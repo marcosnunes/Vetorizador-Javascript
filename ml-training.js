@@ -93,7 +93,7 @@ function detectarOutliersPorMAD(vetores, zThreshold = DATASET_HYGIENE_CONFIG.mad
         return new Set();
     }
 
-    const dimensoes = vetores[0] ? .length || 0;
+    const dimensoes = vetores[0] ?.length || 0;
     if (!dimensoes) return new Set();
 
     const medianas = [];
@@ -263,7 +263,7 @@ function higienizarExemplosTreinamento(exemplosBrutos) {
 
     const vetoresAnalise = exemplosBrutos.map((ex) => [
         ...(ex.entradaRaw || []),
-        ex.saidaRaw ? .[0] || 0
+        ex.saidaRaw ?.[0] || 0
     ]);
 
     const outliersMAD = detectarOutliersPorMAD(vetoresAnalise);
@@ -273,7 +273,7 @@ function higienizarExemplosTreinamento(exemplosBrutos) {
     const outliersDetectados = exemplosBrutos
         .filter((_, idx) => suspeitosTotais.has(idx))
         .map((ex) => ex.meta)
-        .filter((meta) => meta ? .runId && meta ? .featureId);
+        .filter((meta) => meta ?.runId && meta ?.featureId);
     const exemplosFiltrados = exemplosBrutos.filter((_, idx) => !suspeitosTotais.has(idx));
 
     if (exemplosFiltrados.length < 5) {
@@ -312,8 +312,8 @@ function higienizarExemplosTreinamento(exemplosBrutos) {
 function obterConfigTreinamento(feature, run) {
     const merged = {
         ...DEFAULT_TRAINING_CONFIG,
-        ...(run ? .config || {}),
-        ...(feature ? .config || {})
+        ...(run ?.config || {}),
+        ...(feature ?.config || {})
     };
 
     return {
@@ -327,7 +327,7 @@ function obterConfigTreinamento(feature, run) {
 }
 
 function obterRotuloFeedback(feedback) {
-    return feedback ? .label || feedback ? .status || feedback ? .feedbackStatus || 'neutro';
+    return feedback ?.label || feedback ?.status || feedback ?.feedbackStatus || 'neutro';
 }
 
 
@@ -522,7 +522,7 @@ async function autoSanitizarOutliersPersistidos(outliers = []) {
 
     const dedup = new Map();
     outliers.forEach((item) => {
-        if (!item ? .runId || !item ? .featureId) return;
+        if (!item ?.runId || !item ?.featureId) return;
         dedup.set(`${item.runId}::${item.featureId}`, item);
     });
 
@@ -563,7 +563,7 @@ async function autoSanitizarOutliersPersistidos(outliers = []) {
             }
         }
     } catch (error) {
-        console.warn('⚠️ Falha ao auto-sanitizar outliers no IndexedDB:', error ? .message || error);
+        console.warn('⚠️ Falha ao auto-sanitizar outliers no IndexedDB:', error ?.message || error);
     }
 
     if (navigator.onLine) {
@@ -581,7 +581,7 @@ async function autoSanitizarOutliersPersistidos(outliers = []) {
                 });
                 remotosAtualizados += 1;
             } catch (error) {
-                console.warn(`⚠️ Não foi possível sanitizar feedback remoto ${item.featureId}:`, error ? .message || error);
+                console.warn(`⚠️ Não foi possível sanitizar feedback remoto ${item.featureId}:`, error ?.message || error);
             }
         }
     }
@@ -647,7 +647,7 @@ async function extrairArtefatosModelo(modelo) {
                 modelTopologyType: 'JSON',
                 modelTopologyBytes: JSON.stringify(modelArtifacts.modelTopology || {}).length,
                 weightSpecsBytes: JSON.stringify(modelArtifacts.weightSpecs || []).length,
-                weightDataBytes: modelArtifacts.weightData ? .byteLength || 0
+                weightDataBytes: modelArtifacts.weightData ?.byteLength || 0
             }
         };
     }));
@@ -657,7 +657,7 @@ async function extrairArtefatosModelo(modelo) {
 
 async function publicarModeloGlobalFirestore(modelo, metadata = {}) {
     const artifacts = await extrairArtefatosModelo(modelo);
-    if (!artifacts ? .modelTopology || !artifacts ? .weightSpecs || !artifacts ? .weightData) {
+    if (!artifacts ?.modelTopology || !artifacts ?.weightSpecs || !artifacts ?.weightData) {
         throw new Error('Artefatos do modelo inválidos para publicação global.');
     }
 
@@ -672,7 +672,7 @@ async function publicarModeloGlobalFirestore(modelo, metadata = {}) {
     };
 
     const publishResult = await salvarModeloGlobalFirestore(payload);
-    versaoModeloGlobalAtiva = publishResult ? .version || null;
+    versaoModeloGlobalAtiva = publishResult ?.version || null;
     return publishResult;
 }
 
@@ -683,7 +683,7 @@ async function treinarModeloML(dataset) {
     // Validar e preparar dataset
     const exemplos = prepararDatasetTreinamento(dataset);
     if (!exemplos || exemplos.length < 5) {
-        alert('❌ Dataset insuficiente para treinamento!\n\nMínimo: 5 exemplos de feedback\nVocê tem: ' + (exemplos ? .length || 0));
+        alert('❌ Dataset insuficiente para treinamento!\n\nMínimo: 5 exemplos de feedback\nVocê tem: ' + (exemplos ?.length || 0));
         return false;
     }
 
@@ -744,14 +744,14 @@ async function treinarModeloML(dataset) {
 
         try {
             const publishResult = await publicarModeloGlobalFirestore(modelo, {
-                source: dataset ? .source || 'desconhecida',
+                source: dataset ?.source || 'desconhecida',
                 exemplosTotal: exemplos.length,
                 lossFinal: Number(lossFinal),
                 generatedAt: new Date().toISOString()
             });
             console.log(`🌐 Modelo global atualizado com sucesso (v${publishResult?.version || 'n/a'})`);
         } catch (publishError) {
-            console.warn('⚠️ Não foi possível publicar modelo global no Firestore:', publishError ? .message || publishError);
+            console.warn('⚠️ Não foi possível publicar modelo global no Firestore:', publishError ?.message || publishError);
         }
 
         console.log('✅ Modelo treinado com sucesso!');
@@ -889,7 +889,7 @@ async function carregarModeloGlobalFirestore() {
         console.log(`✅ Modelo global carregado do Firestore (v${data.version || 'n/a'})`);
         return modelo;
     } catch (error) {
-        console.warn('⚠️ Falha ao carregar modelo global do Firestore:', error ? .message || error);
+        console.warn('⚠️ Falha ao carregar modelo global do Firestore:', error ?.message || error);
         return null;
     }
 }

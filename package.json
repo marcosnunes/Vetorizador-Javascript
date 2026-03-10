@@ -1,24 +1,27 @@
 {
-  "name": "mapeador-imoveis-ai",
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "lint": "eslint . --ext .js",
-    "deploy:azure": "node ./scripts/deploy-azure.mjs"
-  },
-  "dependencies": {
-    "@tensorflow/tfjs": "^4.22.0",
-    "canvg": "^3.0.11",
-    "firebase": "^12.9.0",
-    "shpjs": "^6.2.0"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "eslint": "^10.0.2",
-    "globals": "^16.5.0",
-    "pdfjs-dist": "^5.4.624",
-    "vite": "^7.3.0"
-  }
+    "name": "mapeador-imoveis-ai",
+    "version": "1.0.0",
+    "engines": {
+        "node": "20.x"
+    },
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "lint": "eslint . --ext .js",
+        "deploy:azure": "node ./scripts/deploy-azure.mjs"
+    },
+    "dependencies": {
+        "@tensorflow/tfjs": "^4.22.0",
+        "canvg": "^3.0.11",
+        "firebase": "^12.9.0",
+        "shpjs": "^6.2.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.1",
+        "eslint": "^10.0.2",
+        "globals": "^16.5.0",
+        "pdfjs-dist": "^5.4.624",
+        "vite": "^7.3.0"
+    }
 }

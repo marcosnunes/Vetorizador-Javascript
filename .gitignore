@@ -13,3 +13,6 @@ pdfspliter/PDFtoArcgis/testes/
 
 # Documentação interna (manter apenas README.md público)
 .github/copilot-instructions.md
+
+.vercel
+.env*.local
