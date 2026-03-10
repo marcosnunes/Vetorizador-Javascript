@@ -266,7 +266,7 @@
 
                         <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                                <span style="font-weight: bold;">Exemplos Coletados:</span>
+                                <span id="rotuloExemplosColetados" style="font-weight: bold;">Exemplos Coletados:</span>
                                 <span id="exemplosColetados" style="font-weight: bold; color: #0ea5e9;">0</span>
                             </div>
                             <div style="display: flex; justify-content: space-between; font-size: 11px; color: #4b5563; margin-bottom: 4px;">
@@ -282,7 +282,7 @@
                                 <div id="progressoAprendizado" style="background: linear-gradient(90deg, #0ea5e9, #06b6d4); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">
                                 </div>
                             </div>
-                            <p style="margin: 6px 0 0 0; font-size: 11px; color: #666;">Objetivo: 50 exemplos para próximo retreinamento
+                            <p id="descricaoObjetivoAprendizado" style="margin: 6px 0 0 0; font-size: 11px; color: #666;">Objetivo: 50 exemplos para próximo retreinamento
                             </p>
                         </div>
 
@@ -363,7 +363,7 @@
             document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
 
             // Se for Vetorizador, força redimensionamento do mapa
-            if (tabName === 'vetorizador' && typeof window.map ? .invalidateSize === 'function') {
+            if (tabName === 'vetorizador' && typeof window.map ?.invalidateSize === 'function') {
                 setTimeout(() => {
                     window.map.invalidateSize();
                 }, 100);

@@ -271,6 +271,9 @@ async function atualizarContagemExemplos() {
         const quotaAtiva = quotaExcedidaAtiva || dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte;
         const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
 
+        const mostrarSomenteLocal = quotaAtiva || !Number.isFinite(ultimoTotalNuvemTotal);
+        const exemplosExibicao = mostrarSomenteLocal ? totalLocalElegivel : exemploColetados;
+
         atualizarResumoOrigemUI({
             localElegiveis: totalLocalElegivel,
             nuvemTotal: ultimoTotalNuvemTotal,
@@ -284,7 +287,9 @@ async function atualizarContagemExemplos() {
         console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}, origem=${dataset.source || 'desconhecida'}`);
 
         // ✨ Atualizar UI da barra de progresso
-        atualizarUIAprendizadoContinuo(exemploColetados);
+        atualizarUIAprendizadoContinuo(exemplosExibicao, {
+            modoLocal: mostrarSomenteLocal
+        });
 
         // Se atingiu o lote de treino, sugerir retreinamento
         if (exemploColetados % TRAINING_BATCH_SIZE === 0 && exemploColetados > 0) {
@@ -300,8 +305,10 @@ async function atualizarContagemExemplos() {
 }
 
 // ✨ NOVA FUNÇÃO: Atualizar UI com progresso de aprendizado contínuo
-function atualizarUIAprendizadoContinuo(exemplos) {
+function atualizarUIAprendizadoContinuo(exemplos, { modoLocal = false } = {}) {
     const elementoContagem = document.getElementById('exemplosColetados');
+    const elementoRotulo = document.getElementById('rotuloExemplosColetados');
+    const elementoDescricaoObjetivo = document.getElementById('descricaoObjetivoAprendizado');
     const elementoBarra = document.getElementById('progressoAprendizado');
     const btnTreinarAgora = document.getElementById('btnTreinarAgora');
 
@@ -309,6 +316,16 @@ function atualizarUIAprendizadoContinuo(exemplos) {
 
     // Atualizar texto de contagem
     elementoContagem.textContent = exemplos;
+
+    if (elementoRotulo) {
+        elementoRotulo.textContent = modoLocal ? 'Exemplos Locais (fallback):' : 'Exemplos Coletados:';
+    }
+
+    if (elementoDescricaoObjetivo) {
+        elementoDescricaoObjetivo.textContent = modoLocal ?
+            'Objetivo local: 50 exemplos para próximo retreinamento (nuvem indisponível).' :
+            'Objetivo: 50 exemplos para próximo retreinamento';
+    }
 
     // Calcular progresso (0-100%) para o lote de treino atual
     const progresso = Math.min(TRAINING_BATCH_SIZE, (exemplos % TRAINING_BATCH_SIZE));
