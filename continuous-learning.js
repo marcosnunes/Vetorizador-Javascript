@@ -22,7 +22,7 @@ const CLOUD_COUNT_CACHE_MS = 5 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
-let ultimoTotalNuvemElegivel = null;
+let ultimoTotalNuvemTotal = null;
 let ultimoResumoNuvem = null;
 let ultimoResumoNuvemAt = 0;
 let quotaExcedidaAtiva = false;
@@ -71,7 +71,7 @@ async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
     }
 }
 
-function atualizarResumoOrigemUI({ localElegiveis = 0, nuvemElegiveis = null, quotaAtiva = false, minutosRestantes = 0 } = {}) {
+function atualizarResumoOrigemUI({ localElegiveis = 0, nuvemTotal = null, quotaAtiva = false, minutosRestantes = 0 } = {}) {
     const elementoLocal = document.getElementById('exemplosLocais');
     const elementoNuvem = document.getElementById('exemplosNuvem');
     const avisoQuota = document.getElementById('quotaAvisoFirestore');
@@ -81,8 +81,8 @@ function atualizarResumoOrigemUI({ localElegiveis = 0, nuvemElegiveis = null, qu
     }
 
     if (elementoNuvem) {
-        const nuvemDisponivel = Number.isFinite(nuvemElegiveis);
-        elementoNuvem.textContent = nuvemDisponivel ? String(nuvemElegiveis) : 'indisponível';
+        const nuvemDisponivel = Number.isFinite(nuvemTotal);
+        elementoNuvem.textContent = nuvemDisponivel ? String(nuvemTotal) : 'indisponível';
         elementoNuvem.style.color = quotaAtiva ? '#b91c1c' : (nuvemDisponivel ? '#0f766e' : '#b45309');
         elementoNuvem.style.fontStyle = nuvemDisponivel ? 'normal' : 'italic';
     }
@@ -183,15 +183,8 @@ async function atualizarContagemExemplos() {
         const totalLocalElegivel = filtrarFeedbackElegivelTreino(feedbackLocal).length;
 
         const resumoNuvem = await obterResumoNuvem();
-        if (Number.isFinite(resumoNuvem?.elegiveis)) {
-            ultimoTotalNuvemElegivel = resumoNuvem.elegiveis;
-        }
-
-        if (dataset.source === 'firestore-global-shared') {
-            // fallback caso a contagem agregada não esteja disponível.
-            if (!Number.isFinite(ultimoTotalNuvemElegivel)) {
-                ultimoTotalNuvemElegivel = feedbackElegivel.length;
-            }
+        if (Number.isFinite(resumoNuvem?.total)) {
+            ultimoTotalNuvemTotal = resumoNuvem.total;
         }
 
         const agora = Date.now();
@@ -200,7 +193,7 @@ async function atualizarContagemExemplos() {
 
         atualizarResumoOrigemUI({
             localElegiveis: totalLocalElegivel,
-            nuvemElegiveis: ultimoTotalNuvemElegivel,
+            nuvemTotal: ultimoTotalNuvemTotal,
             quotaAtiva,
             minutosRestantes
         });
