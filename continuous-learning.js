@@ -1,7 +1,7 @@
 // ==================== CONTINUOUS LEARNING MODULE ====================
 // Auto-retrains model every 50 examples, tracks metrics, and provides REST API
 
-import { exportarDatasetCompartilhadoFirestore } from './firestore-service.js';
+import { exportarDatasetCompartilhadoFirestore, contarFeedbackGlobalElegivelFirestore } from './firestore-service.js';
 
 let exemploColetados = 0;
 let ultimoTreinamento = null;
@@ -18,10 +18,14 @@ const DATASET_COMPARTILHADO_CACHE_MS = 60000;
 const TRAINING_BATCH_SIZE = 50;
 const DATASET_GLOBAL_MAX_RUNS = 120;
 const FIRESTORE_QUOTA_BACKOFF_MS = 30 * 60 * 1000;
+const CLOUD_COUNT_CACHE_MS = 5 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
 let ultimoTotalNuvemElegivel = null;
+let ultimoResumoNuvem = null;
+let ultimoResumoNuvemAt = 0;
+let quotaExcedidaAtiva = false;
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -40,6 +44,31 @@ function obterRotuloFeedback(fb = {}) {
 
 function filtrarFeedbackElegivelTreino(feedback = []) {
     return feedback.filter((fb) => fb.trainingEligible !== false);
+}
+
+async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
+    const agora = Date.now();
+    const cacheValido = !forcarAtualizacao &&
+        ultimoResumoNuvem &&
+        (agora - ultimoResumoNuvemAt) < CLOUD_COUNT_CACHE_MS;
+
+    if (cacheValido) {
+        return ultimoResumoNuvem;
+    }
+
+    try {
+        const resumo = await contarFeedbackGlobalElegivelFirestore();
+        ultimoResumoNuvem = resumo;
+        ultimoResumoNuvemAt = agora;
+        quotaExcedidaAtiva = false;
+        return resumo;
+    } catch (error) {
+        if (isQuotaExceededError(error)) {
+            quotaExcedidaAtiva = true;
+            firestoreQuotaBackoffAte = Math.max(firestoreQuotaBackoffAte, agora + FIRESTORE_QUOTA_BACKOFF_MS);
+        }
+        return ultimoResumoNuvem;
+    }
 }
 
 function atualizarResumoOrigemUI({ localElegiveis = 0, nuvemElegiveis = null, quotaAtiva = false, minutosRestantes = 0 } = {}) {
@@ -98,6 +127,7 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
     if (agora < firestoreQuotaBackoffAte) {
         const minutosRestantes = Math.ceil((firestoreQuotaBackoffAte - agora) / 60000);
         console.warn(`⚠️ Firestore em cooldown por cota (${minutosRestantes} min restantes). Usando dataset local.`);
+        quotaExcedidaAtiva = true;
         const datasetLocal = await obterDatasetLocalTreino();
         datasetLocal.source = 'indexeddb-local-quota-backoff';
         ultimoDatasetCompartilhado = datasetLocal;
@@ -117,12 +147,14 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
         };
 
         datasetNormalizado.exemplosTotal = datasetNormalizado.feedback.length;
+        quotaExcedidaAtiva = false;
         ultimoDatasetCompartilhado = datasetNormalizado;
         ultimoDatasetCompartilhadoAt = agora;
         return datasetNormalizado;
     } catch (error) {
         if (isQuotaExceededError(error)) {
             firestoreQuotaBackoffAte = agora + FIRESTORE_QUOTA_BACKOFF_MS;
+            quotaExcedidaAtiva = true;
             console.warn('⏱️ Quota do Firestore excedida. Ativando fallback local temporário para evitar novas leituras caras.');
         }
         console.warn('⚠️ Falha ao obter dataset compartilhado, usando dataset local:', error ?.message || error);
@@ -150,12 +182,20 @@ async function atualizarContagemExemplos() {
         const feedbackLocal = Array.isArray(datasetLocal.feedback) ? datasetLocal.feedback : [];
         const totalLocalElegivel = filtrarFeedbackElegivelTreino(feedbackLocal).length;
 
+        const resumoNuvem = await obterResumoNuvem();
+        if (Number.isFinite(resumoNuvem?.elegiveis)) {
+            ultimoTotalNuvemElegivel = resumoNuvem.elegiveis;
+        }
+
         if (dataset.source === 'firestore-global-shared') {
-            ultimoTotalNuvemElegivel = feedbackElegivel.length;
+            // fallback caso a contagem agregada não esteja disponível.
+            if (!Number.isFinite(ultimoTotalNuvemElegivel)) {
+                ultimoTotalNuvemElegivel = feedbackElegivel.length;
+            }
         }
 
         const agora = Date.now();
-        const quotaAtiva = dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte;
+        const quotaAtiva = quotaExcedidaAtiva || dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte;
         const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
 
         atualizarResumoOrigemUI({

@@ -9,11 +9,13 @@
 
 import {
     collection,
+    collectionGroup,
     doc,
     setDoc,
     getDoc,
     deleteDoc,
     getDocs,
+    getCountFromServer,
     query,
     where,
     orderBy,
@@ -668,4 +670,37 @@ export async function lerModeloGlobalFirestore() {
     metadata: data.metadata || {},
     updatedAtIso: data.updatedAtIso || null
   };
+}
+
+// ==================== RESUMO GLOBAL DE FEEDBACK ====================
+/**
+ * Conta feedbacks globais no Firestore com consulta de agregação.
+ * Retorna total e elegíveis para treino (total - trainingEligible=false).
+ */
+export async function contarFeedbackGlobalElegivelFirestore() {
+    const db = obterFirestore();
+
+    try {
+        const feedbackRef = collectionGroup(db, 'feedback');
+        const totalSnap = await getCountFromServer(query(feedbackRef));
+        const inelegiveisSnap = await getCountFromServer(
+            query(feedbackRef, where('trainingEligible', '==', false))
+        );
+
+        const total = Number(totalSnap.data()?.count || 0);
+        const inelegiveis = Number(inelegiveisSnap.data()?.count || 0);
+        const elegiveis = Math.max(0, total - inelegiveis);
+
+        return {
+            source: 'firestore-aggregate-count',
+            total,
+            inelegiveis,
+            elegiveis
+        };
+    } catch (error) {
+        if (isQuotaExceededError(error)) {
+            error.isQuotaExceeded = true;
+        }
+        throw error;
+    }
 }
