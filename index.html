@@ -2,303 +2,295 @@
 <html lang="pt-BR">
 
 <head>
-  <meta charset="UTF-8">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Suite de Ferramentas Geoespaciais</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
-  <link rel="icon" href="favicon.ico" type="image/x-icon" />
+    <meta charset="UTF-8">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suite de Ferramentas Geoespaciais</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon" />
 
-  <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css" />
 
-  <!-- TensorFlow.js para ML Training -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+    <!-- TensorFlow.js para ML Training -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
 
 </head>
 
 <body>
-  <div class="header-hover-zone" aria-hidden="true"></div>
-  <!-- HEADER COM GUIAS -->
-  <div class="unified-header">
-    <div class="unified-tabs" role="tablist" aria-label="Navegação principal">
-      <button class="tab-btn active" data-tab="vetorizador" onclick="switchTab('vetorizador')">
+    <div class="header-hover-zone" aria-hidden="true"></div>
+    <!-- HEADER COM GUIAS -->
+    <div class="unified-header">
+        <div class="unified-tabs" role="tablist" aria-label="Navegação principal">
+            <button class="tab-btn active" data-tab="vetorizador" onclick="switchTab('vetorizador')">
         🗺️ Vetorizador de Edificações
       </button>
-      <button class="tab-btn" data-tab="pdfsplitter" onclick="switchTab('pdfsplitter')">
+            <button class="tab-btn" data-tab="pdfsplitter" onclick="switchTab('pdfsplitter')">
         📄 Processador de PDF
       </button>
-    </div>
-    <div id="connection-status" class="status-local">💾 Modo Local</div>
-  </div>
-
-  <!-- CONTEÚDO DAS ABAS -->
-  <div class="app-container">
-    <!-- ABA 1: VETORIZADOR -->
-    <div id="vetorizador-content" class="tab-content active">
-      <div id="loader-overlay">
-        <p id="loader-text">Vetorizando imagem, por favor aguarde...</p>
-      </div>
-
-      <div class="main-container">
-        <div class="map-container">
-          <div id="map"></div>
         </div>
+        <div id="connection-status" class="status-local">💾 Modo Local</div>
+    </div>
 
-        <div class="controls-panel">
-          <div class="control-group">
-            <h3>🔎 Buscar no Mapa</h3>
-            <div class="map-search-row">
-              <input
-                type="text"
-                id="mapSearchInput"
-                class="map-search-input"
-                placeholder="Endereço ou coordenada (lat,lng)"
-                autocomplete="off"
-              >
-              <button type="button" id="mapSearchBtn" class="map-search-btn">Buscar</button>
+    <!-- CONTEÚDO DAS ABAS -->
+    <div class="app-container">
+        <!-- ABA 1: VETORIZADOR -->
+        <div id="vetorizador-content" class="tab-content active">
+            <div id="loader-overlay">
+                <p id="loader-text">Vetorizando imagem, por favor aguarde...</p>
             </div>
-            <small>Ex.: Avenida Paulista, São Paulo ou -25.706923, -52.385530</small>
-          </div>
 
-          <div class="control-group">
-            <h3>📍 Captura de Coordenada</h3>
-            <button type="button" id="btnCapturePoint" class="secondary-btn" style="width: 100%;">
+            <div class="main-container">
+                <div class="map-container">
+                    <div id="map"></div>
+                </div>
+
+                <div class="controls-panel">
+                    <div class="control-group">
+                        <h3>🔎 Buscar no Mapa</h3>
+                        <div class="map-search-row">
+                            <input type="text" id="mapSearchInput" class="map-search-input" placeholder="Endereço ou coordenada (lat,lng)" autocomplete="off">
+                            <button type="button" id="mapSearchBtn" class="map-search-btn">Buscar</button>
+                        </div>
+                        <small>Ex.: Avenida Paulista, São Paulo ou -25.706923, -52.385530</small>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>📍 Captura de Coordenada</h3>
+                        <button type="button" id="btnCapturePoint" class="secondary-btn" style="width: 100%;">
               📍 Capturar Coordenada
             </button>
-            <small id="capturePointStatus" style="display:block; margin-top: 8px; color: #6b7280;">
+                        <small id="capturePointStatus" style="display:block; margin-top: 8px; color: #6b7280;">
               Modo desativado. Clique no botao para capturar um ponto no mapa.
             </small>
-          </div>
+                    </div>
 
-          <div class="control-group">
-            <h3>🎯 Presets Profissionais</h3>
-            <div class="preset-buttons">
-              <button onclick="aplicarPreset('urbano')" class="preset-btn"
-                title="Área urbana densa com casas próximas">🏘️
+                    <div class="control-group">
+                        <h3>🎯 Presets Profissionais</h3>
+                        <div class="preset-buttons">
+                            <button onclick="aplicarPreset('urbano')" class="preset-btn" title="Área urbana densa com casas próximas">🏘️
                 Urbano</button>
-              <button onclick="aplicarPreset('rural')" class="preset-btn" title="Área rural com edificações esparsas">🌾
+                            <button onclick="aplicarPreset('rural')" class="preset-btn" title="Área rural com edificações esparsas">🌾
                 Rural</button>
-              <button onclick="aplicarPreset('industrial')" class="preset-btn" title="Galpões e grandes estruturas">🏭
+                            <button onclick="aplicarPreset('industrial')" class="preset-btn" title="Galpões e grandes estruturas">🏭
                 Industrial</button>
-              <button onclick="aplicarPreset('trapiche')" class="preset-btn" title="Trapiches, píeres e telhados pequenos">🛶
+                            <button onclick="aplicarPreset('trapiche')" class="preset-btn" title="Trapiches, píeres e telhados pequenos">🛶
                 Trapiche</button>
-            </div>
-          </div>
+                        </div>
+                    </div>
 
-          <div class="control-group">
-            <h3>⚙️ Parâmetros Avançados</h3>
+                    <div class="control-group">
+                        <h3>⚙️ Parâmetros Avançados</h3>
 
-            <div class="param-control">
-              <label for="edgeThreshold">
+                        <div class="param-control">
+                            <label for="edgeThreshold">
                 <span class="param-icon">🎯</span>
                 <span class="param-name">Sensibilidade de Bordas</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="edgeThreshold" min="30" max="200" value="90" step="5">
-                <input type="number" id="edgeThresholdInput" min="30" max="200" value="90" step="5"
-                  class="number-input">
-              </div>
-              <small>30-80: Alta sensibilidade | 90-120: Uso geral | 150-200: Apenas bordas fortes</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="edgeThreshold" min="30" max="200" value="90" step="5">
+                                <input type="number" id="edgeThresholdInput" min="30" max="200" value="90" step="5" class="number-input">
+                            </div>
+                            <small>30-80: Alta sensibilidade | 90-120: Uso geral | 150-200: Apenas bordas fortes</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="morphologySize">
+                        <div class="param-control">
+                            <label for="morphologySize">
                 <span class="param-icon">🔗</span>
                 <span class="param-name">Suavização de Bordas</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="morphologySize" min="1" max="9" value="5" step="2">
-                <input type="number" id="morphologySizeInput" min="1" max="9" value="5" step="2" class="number-input">
-                <span class="unit">px</span>
-              </div>
-              <small>1-3: Preserva detalhes | 5-7: Balanceado | 9: Fecha grandes gaps</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="morphologySize" min="1" max="9" value="5" step="2">
+                                <input type="number" id="morphologySizeInput" min="1" max="9" value="5" step="2" class="number-input">
+                                <span class="unit">px</span>
+                            </div>
+                            <small>1-3: Preserva detalhes | 5-7: Balanceado | 9: Fecha grandes gaps</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="clusteringEnabled">
+                        <div class="param-control">
+                            <label for="clusteringEnabled">
                 <span class="param-icon">🧠</span>
                 <span class="param-name">Clustering DBSCAN</span>
               </label>
-              <div class="input-group">
-                <input type="checkbox" id="clusteringEnabled" checked>
-                <span class="unit">Ativo</span>
-              </div>
-              <small>Remove ruídos isolados e mantém grupos de bordas consistentes</small>
-            </div>
+                            <div class="input-group">
+                                <input type="checkbox" id="clusteringEnabled" checked>
+                                <span class="unit">Ativo</span>
+                            </div>
+                            <small>Remove ruídos isolados e mantém grupos de bordas consistentes</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="clusterEps">
+                        <div class="param-control">
+                            <label for="clusterEps">
                 <span class="param-icon">📍</span>
                 <span class="param-name">Raio do Cluster (eps)</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="clusterEps" min="1.0" max="6.0" value="2.5" step="0.1">
-                <input type="number" id="clusterEpsInput" min="1.0" max="6.0" value="2.5" step="0.1"
-                  class="number-input">
-                <span class="unit">px</span>
-              </div>
-              <small>1-2: Conservador | 2.5-3.5: Recomendado | 4-6: Agressivo</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="clusterEps" min="1.0" max="6.0" value="2.5" step="0.1">
+                                <input type="number" id="clusterEpsInput" min="1.0" max="6.0" value="2.5" step="0.1" class="number-input">
+                                <span class="unit">px</span>
+                            </div>
+                            <small>1-2: Conservador | 2.5-3.5: Recomendado | 4-6: Agressivo</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="clusterMinPts">
+                        <div class="param-control">
+                            <label for="clusterMinPts">
                 <span class="param-icon">🔢</span>
                 <span class="param-name">Densidade Mínima (minPts)</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="clusterMinPts" min="2" max="20" value="6" step="1">
-                <input type="number" id="clusterMinPtsInput" min="2" max="20" value="6" step="1" class="number-input">
-                <span class="unit">pts</span>
-              </div>
-              <small>Menor: mais sensível | Maior: mais rígido contra ruído</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="clusterMinPts" min="2" max="20" value="6" step="1">
+                                <input type="number" id="clusterMinPtsInput" min="2" max="20" value="6" step="1" class="number-input">
+                                <span class="unit">pts</span>
+                            </div>
+                            <small>Menor: mais sensível | Maior: mais rígido contra ruído</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="minClusterSize">
+                        <div class="param-control">
+                            <label for="minClusterSize">
                 <span class="param-icon">🧱</span>
                 <span class="param-name">Tamanho Mínimo de Cluster</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="minClusterSize" min="10" max="500" value="40" step="5">
-                <input type="number" id="minClusterSizeInput" min="10" max="500" value="40" step="5"
-                  class="number-input">
-                <span class="unit">px</span>
-              </div>
-              <small>Filtra grupos pequenos de borda antes da vetorização</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="minClusterSize" min="10" max="500" value="40" step="5">
+                                <input type="number" id="minClusterSizeInput" min="10" max="500" value="40" step="5" class="number-input">
+                                <span class="unit">px</span>
+                            </div>
+                            <small>Filtra grupos pequenos de borda antes da vetorização</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="minArea">
+                        <div class="param-control">
+                            <label for="minArea">
                 <span class="param-icon">📐</span>
                 <span class="param-name">Área Mínima</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="minArea" min="5" max="200" value="15" step="5">
-                <input type="number" id="minAreaInput" min="5" max="200" value="15" step="5" class="number-input">
-                <span class="unit">m²</span>
-              </div>
-              <small>5-10: Garagens | 15-30: Residências | 50+: Galpões</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="minArea" min="5" max="200" value="15" step="5">
+                                <input type="number" id="minAreaInput" min="5" max="200" value="15" step="5" class="number-input">
+                                <span class="unit">m²</span>
+                            </div>
+                            <small>5-10: Garagens | 15-30: Residências | 50+: Galpões</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="minQualityScore">
+                        <div class="param-control">
+                            <label for="minQualityScore">
                 <span class="param-icon">⭐</span>
                 <span class="param-name">Qualidade Mínima</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="minQualityScore" min="0" max="100" value="35" step="5">
-                <input type="number" id="minQualityScoreInput" min="0" max="100" value="35" step="5"
-                  class="number-input">
-                <span class="unit">pts</span>
-              </div>
-              <small>0: Aceita todos | 35: Recomendado | 60+: Rigoroso</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="minQualityScore" min="0" max="100" value="35" step="5">
+                                <input type="number" id="minQualityScoreInput" min="0" max="100" value="35" step="5" class="number-input">
+                                <span class="unit">pts</span>
+                            </div>
+                            <small>0: Aceita todos | 35: Recomendado | 60+: Rigoroso</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="simplification">
+                        <div class="param-control">
+                            <label for="simplification">
                 <span class="param-icon">📉</span>
                 <span class="param-name">Simplificação</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="simplification" min="0.000005" max="0.00010" value="0.000015" step="0.000005">
-                <input type="number" id="simplificationInput" min="0.000005" max="0.00010" value="0.000015"
-                  step="0.000005" class="number-input scientific">
-              </div>
-              <small>Menor = mais vértices | Maior = formas mais simples</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="simplification" min="0.000005" max="0.00010" value="0.000015" step="0.000005">
+                                <input type="number" id="simplificationInput" min="0.000005" max="0.00010" value="0.000015" step="0.000005" class="number-input scientific">
+                            </div>
+                            <small>Menor = mais vértices | Maior = formas mais simples</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="contrastBoost">
+                        <div class="param-control">
+                            <label for="contrastBoost">
                 <span class="param-icon">🔆</span>
                 <span class="param-name">Realce de Contraste</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="contrastBoost" min="1.0" max="2.0" value="1.3" step="0.1">
-                <input type="number" id="contrastBoostInput" min="1.0" max="2.0" value="1.3" step="0.1"
-                  class="number-input">
-                <span class="unit">x</span>
-              </div>
-              <small>1.0: Original | 1.3-1.5: Recomendado | 2.0: Máximo</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="contrastBoost" min="1.0" max="2.0" value="1.3" step="0.1">
+                                <input type="number" id="contrastBoostInput" min="1.0" max="2.0" value="1.3" step="0.1" class="number-input">
+                                <span class="unit">x</span>
+                            </div>
+                            <small>1.0: Original | 1.3-1.5: Recomendado | 2.0: Máximo</small>
+                        </div>
 
-            <div class="param-control">
-              <label for="mergeDistance">
+                        <div class="param-control">
+                            <label for="mergeDistance">
                 <span class="param-icon">🔗</span>
                 <span class="param-name">Fusão de Fragmentos</span>
               </label>
-              <div class="input-group">
-                <input type="range" id="mergeDistance" min="0" max="10" value="3" step="0.5">
-                <input type="number" id="mergeDistanceInput" min="0" max="10" value="3" step="0.5" class="number-input">
-                <span class="unit">m</span>
-              </div>
-              <small>0: Desativado | 2-4: Recomendado | 8-10: Agressivo</small>
-            </div>
+                            <div class="input-group">
+                                <input type="range" id="mergeDistance" min="0" max="10" value="3" step="0.5">
+                                <input type="number" id="mergeDistanceInput" min="0" max="10" value="3" step="0.5" class="number-input">
+                                <span class="unit">m</span>
+                            </div>
+                            <small>0: Desativado | 2-4: Recomendado | 8-10: Agressivo</small>
+                        </div>
 
-            <div class="button-row">
-              <button onclick="resetarParametros()" class="secondary-btn">🔄 Restaurar</button>
-            </div>
-          </div>
+                        <div class="button-row">
+                            <button onclick="resetarParametros()" class="secondary-btn">🔄 Restaurar</button>
+                        </div>
+                    </div>
 
-          <div class="control-group">
-            <h3>🎨 Visualização</h3>
-            <label>
+                    <div class="control-group">
+                        <h3>🎨 Visualização</h3>
+                        <label>
               <input type="checkbox" id="colorByQuality" onchange="atualizarVisualizacao()" checked>
               Colorir por Qualidade
             </label>
-            <small>
+                        <small>
               🟢 Verde = Alta confiança (≥70)<br>
               🟡 Amarelo = Média confiança (40-69)<br>
               🔴 Vermelho = Baixa confiança (&lt;40)
             </small>
-          </div>
+                    </div>
 
-          <div class="control-group">
-            <h3>📊 Estatísticas</h3>
-            <div id="stats">
-              <p><strong>Polígonos Detectados:</strong> <span id="totalPolygons">0</span></p>
-              <p><strong>Área Total:</strong> <span id="totalArea">0</span> m²</p>
-              <p><strong>Alta Qualidade:</strong> <span id="highQuality">0</span></p>
-              <p><strong>Média Qualidade:</strong> <span id="medQuality">0</span></p>
-              <p><strong>Baixa Qualidade:</strong> <span id="lowQuality">0</span></p>
-              <p><strong>Última Detecção:</strong> <span id="lastProcessTime">-</span></p>
-            </div>
-          </div>
+                    <div class="control-group">
+                        <h3>📊 Estatísticas</h3>
+                        <div id="stats">
+                            <p><strong>Polígonos Detectados:</strong> <span id="totalPolygons">0</span></p>
+                            <p><strong>Área Total:</strong> <span id="totalArea">0</span> m²</p>
+                            <p><strong>Alta Qualidade:</strong> <span id="highQuality">0</span></p>
+                            <p><strong>Média Qualidade:</strong> <span id="medQuality">0</span></p>
+                            <p><strong>Baixa Qualidade:</strong> <span id="lowQuality">0</span></p>
+                            <p><strong>Última Detecção:</strong> <span id="lastProcessTime">-</span></p>
+                        </div>
+                    </div>
 
-          <div class="control-group">
-            <h3>🛡️ APP (Shapefile ZIP)</h3>
-            <input type="file" id="appShpZipInput" accept=".zip" style="margin-bottom: 8px; width: 100%;">
-            <button id="btnCarregarAppZip" type="button">📥 Carregar APP (.zip)</button>
-            <button id="btnLimparAppZip" type="button" class="secondary-btn" style="margin-top: 6px;">🧹 Limpar APP</button>
-            <small id="appStatus" style="display:block; margin-top: 8px;">Nenhum arquivo APP carregado.</small>
-          </div>
+                    <div class="control-group">
+                        <h3>🛡️ APP (Shapefile ZIP)</h3>
+                        <input type="file" id="appShpZipInput" accept=".zip" style="margin-bottom: 8px; width: 100%;">
+                        <button id="btnCarregarAppZip" type="button">📥 Carregar APP (.zip)</button>
+                        <button id="btnLimparAppZip" type="button" class="secondary-btn" style="margin-top: 6px;">🧹 Limpar APP</button>
+                        <small id="appStatus" style="display:block; margin-top: 8px;">Nenhum arquivo APP carregado.</small>
+                    </div>
 
-          <div class="control-group" style="background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px;">
-            <h3>🧠 Aprendizado Contínuo Automático</h3>
-            <p style="font-size: 12px; color: #666; margin: 10px 0;">O modelo treina automaticamente conforme você edita
-              vértices e marca feedback.</p>
+                    <div class="control-group" style="background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px;">
+                        <h3>🧠 Aprendizado Contínuo Automático</h3>
+                        <p style="font-size: 12px; color: #666; margin: 10px 0;">O modelo treina automaticamente conforme você edita vértices e marca feedback.</p>
 
-            <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 8px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                <span style="font-weight: bold;">Exemplos Coletados:</span>
-                <span id="exemplosColetados" style="font-weight: bold; color: #0ea5e9;">0</span>
-              </div>
-              <div style="background: #e0e0e0; border-radius: 8px; height: 20px; overflow: hidden;">
-                <div id="progressoAprendizado"
-                  style="background: linear-gradient(90deg, #0ea5e9, #06b6d4); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">
-                </div>
-              </div>
-              <p style="margin: 6px 0 0 0; font-size: 11px; color: #666;">Objetivo: 50 exemplos para próximo
-                retreinamento</p>
-            </div>
+                        <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-weight: bold;">Exemplos Coletados:</span>
+                                <span id="exemplosColetados" style="font-weight: bold; color: #0ea5e9;">0</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #4b5563; margin-bottom: 4px;">
+                                <span>📱 Local:</span>
+                                <span id="exemplosLocais" style="font-weight: 600;">0</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #4b5563; margin-bottom: 8px;">
+                                <span>☁️ Nuvem:</span>
+                                <span id="exemplosNuvem" style="font-weight: 600;">0</span>
+                            </div>
+                            <div id="quotaAvisoFirestore" style="display: none; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; border-radius: 6px; padding: 6px; margin-bottom: 8px; font-size: 11px;"></div>
+                            <div style="background: #e0e0e0; border-radius: 8px; height: 20px; overflow: hidden;">
+                                <div id="progressoAprendizado" style="background: linear-gradient(90deg, #0ea5e9, #06b6d4); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">
+                                </div>
+                            </div>
+                            <p style="margin: 6px 0 0 0; font-size: 11px; color: #666;">Objetivo: 50 exemplos para próximo retreinamento
+                            </p>
+                        </div>
 
-            <button onclick="window.executarRetreninamentoAutomatico && window.executarRetreninamentoAutomatico()"
-              id="btnTreinarAgora"
-              style="background: #0ea5e9; width: 100%; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
+                        <button onclick="window.executarRetreninamentoAutomatico && window.executarRetreninamentoAutomatico()" id="btnTreinarAgora" style="background: #0ea5e9; width: 100%; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
               ⚡ Treinar Modelo Agora (50 exemplos atingidos!)
             </button>
 
-            <small style="color: #666; display: block; margin-top: 10px;">
+                        <small style="color: #666; display: block; margin-top: 10px;">
               <strong>Como Funciona:</strong><br>
               1️⃣ Edite polígonos no mapa<br>
               2️⃣ Marque com: ✅ / ❌ / ✏️<br>
@@ -306,92 +298,91 @@
               4️⃣ Na marca 100, será oferecido treinar<br>
               5️⃣ Modelo melhora automaticamente!
             </small>
-          </div>
+                    </div>
 
-          <div class="control-group">
-            <h3>💾 Exportar Dados</h3>
-            <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
-            <button id="export-app-report-btn" onclick="exportarRelatorioAppPdf()" style="margin-top: 5px;">📄 Exportar Relatório APP (PDF)</button>
-            <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar
+                    <div class="control-group">
+                        <h3>💾 Exportar Dados</h3>
+                        <button id="export-btn" onclick="exportarShapefile()">Exportar para Shapefile</button>
+                        <button id="export-app-report-btn" onclick="exportarRelatorioAppPdf()" style="margin-top: 5px;">📄 Exportar Relatório APP (PDF)</button>
+                        <button onclick="limparResultados()" style="background: #d9534f; margin-top: 5px;">🗑️ Limpar
               Resultados</button>
-          </div>
-        </div>
+                    </div>
+                </div>
 
-        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Ocultar menu lateral"
-          aria-expanded="true" title="Ocultar/exibir menu lateral">
+                <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Ocultar menu lateral" aria-expanded="true" title="Ocultar/exibir menu lateral">
           ◀
         </button>
-      </div>
+            </div>
+        </div>
+
+        <!-- ABA 2: PDF SPLITTER -->
+        <div id="pdfsplitter-content" class="tab-content">
+            <iframe id="pdfsplitter-frame" src="pdfspliter/index.html"></iframe>
+        </div>
     </div>
 
-    <!-- ABA 2: PDF SPLITTER -->
-    <div id="pdfsplitter-content" class="tab-content">
-      <iframe id="pdfsplitter-frame" src="pdfspliter/index.html"></iframe>
-    </div>
-  </div>
+    <footer class="app-footer">
+        <div class="app-footer-main">
+            <a class="portfolio-link" href="portfolio.html">Portifolio</a>
+            <span>Desenvolvido por Marcos Roberto Nunes Lindolpho © 2026</span>
+        </div>
+        <div class="app-footer-contact">
+            <a href="mailto:marcos.nunes.lph@outlook.com">marcos.nunes.lph@outlook.com</a>
+            <a href="tel:+55419985307378">41 9 98530 7378</a>
+            <a href="https://www.linkedin.com/in/marcos-nunes-lph" target="_blank" rel="noopener noreferrer">www.linkedin.com/in/marcos-nunes-lph</a>
+        </div>
+    </footer>
 
-  <footer class="app-footer">
-    <div class="app-footer-main">
-      <a class="portfolio-link" href="portfolio.html">Portifolio</a>
-      <span>Desenvolvido por Marcos Roberto Nunes Lindolpho © 2026</span>
-    </div>
-    <div class="app-footer-contact">
-      <a href="mailto:marcos.nunes.lph@outlook.com">marcos.nunes.lph@outlook.com</a>
-      <a href="tel:+55419985307378">41 9 98530 7378</a>
-      <a href="https://www.linkedin.com/in/marcos-nunes-lph" target="_blank" rel="noopener noreferrer">www.linkedin.com/in/marcos-nunes-lph</a>
-    </div>
-  </footer>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
+    <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/@mapbox/shp-write@latest/shpwrite.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
-  <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
-  <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="https://unpkg.com/@mapbox/shp-write@latest/shpwrite.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="vetoriza/pkg/vetoriza.js" type="module"></script>
+    <script src="ml-training.js" type="module"></script>
+    <script src="auto-inference.js" type="module"></script>
+    <script src="continuous-learning.js" type="module"></script>
+    <script type="module" src="app.js"></script>
 
-  <script src="vetoriza/pkg/vetoriza.js" type="module"></script>
-  <script src="ml-training.js" type="module"></script>
-  <script src="auto-inference.js" type="module"></script>
-  <script src="continuous-learning.js" type="module"></script>
-  <script type="module" src="app.js"></script>
+    <!-- SCRIPT DE NAVEGAÇÃO ENTRE ABAS -->
+    <script>
+        function switchTab(tabName) {
+            // Desativa todas as abas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
 
-  <!-- SCRIPT DE NAVEGAÇÃO ENTRE ABAS -->
-  <script>
-    function switchTab(tabName) {
-      // Desativa todas as abas
-      document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-      });
-      document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-      });
+            // Ativa a aba selecionada
+            document.getElementById(tabName + '-content').classList.add('active');
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
 
-      // Ativa a aba selecionada
-      document.getElementById(tabName + '-content').classList.add('active');
-      document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            // Se for Vetorizador, força redimensionamento do mapa
+            if (tabName === 'vetorizador' && typeof window.map ? .invalidateSize === 'function') {
+                setTimeout(() => {
+                    window.map.invalidateSize();
+                }, 100);
+            }
 
-      // Se for Vetorizador, força redimensionamento do mapa
-      if (tabName === 'vetorizador' && typeof window.map?.invalidateSize === 'function') {
-        setTimeout(() => {
-          window.map.invalidateSize();
-        }, 100);
-      }
+            const status = document.getElementById('connection-status');
+            if (status) {
+                status.style.display = tabName === 'vetorizador' ? 'inline-flex' : 'none';
+            }
+        }
 
-      const status = document.getElementById('connection-status');
-      if (status) {
-        status.style.display = tabName === 'vetorizador' ? 'inline-flex' : 'none';
-      }
-    }
+        // Atalhos de teclado
+        document.addEventListener('keydown', (e) => {
+            if (e.altKey && e.key === '1') switchTab('vetorizador');
+            else if (e.altKey && e.key === '2') switchTab('pdfsplitter');
+        });
 
-    // Atalhos de teclado
-    document.addEventListener('keydown', (e) => {
-      if (e.altKey && e.key === '1') switchTab('vetorizador');
-      else if (e.altKey && e.key === '2') switchTab('pdfsplitter');
-    });
-
-    switchTab('vetorizador');
-  </script>
+        switchTab('vetorizador');
+    </script>
 
 </body>
 

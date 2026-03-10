@@ -21,6 +21,7 @@ const FIRESTORE_QUOTA_BACKOFF_MS = 30 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
+let ultimoTotalNuvemElegivel = null;
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -39,6 +40,33 @@ function obterRotuloFeedback(fb = {}) {
 
 function filtrarFeedbackElegivelTreino(feedback = []) {
     return feedback.filter((fb) => fb.trainingEligible !== false);
+}
+
+function atualizarResumoOrigemUI({ localElegiveis = 0, nuvemElegiveis = null, quotaAtiva = false, minutosRestantes = 0 } = {}) {
+    const elementoLocal = document.getElementById('exemplosLocais');
+    const elementoNuvem = document.getElementById('exemplosNuvem');
+    const avisoQuota = document.getElementById('quotaAvisoFirestore');
+
+    if (elementoLocal) {
+        elementoLocal.textContent = Number.isFinite(localElegiveis) ? String(localElegiveis) : '-';
+    }
+
+    if (elementoNuvem) {
+        const nuvemDisponivel = Number.isFinite(nuvemElegiveis);
+        elementoNuvem.textContent = nuvemDisponivel ? String(nuvemElegiveis) : 'indisponível';
+        elementoNuvem.style.color = quotaAtiva ? '#b91c1c' : (nuvemDisponivel ? '#0f766e' : '#b45309');
+        elementoNuvem.style.fontStyle = nuvemDisponivel ? 'normal' : 'italic';
+    }
+
+    if (!avisoQuota) return;
+
+    if (quotaAtiva) {
+        avisoQuota.style.display = 'block';
+        avisoQuota.textContent = `⚠️ Cota do Firestore excedida. Exibindo dados locais temporariamente${minutosRestantes > 0 ? ` (${minutosRestantes} min)` : ''}.`;
+    } else {
+        avisoQuota.style.display = 'none';
+        avisoQuota.textContent = '';
+    }
 }
 
 async function obterDatasetLocalTreino() {
@@ -99,6 +127,9 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
         }
         console.warn('⚠️ Falha ao obter dataset compartilhado, usando dataset local:', error ?.message || error);
         const datasetLocal = await obterDatasetLocalTreino();
+        if (isQuotaExceededError(error)) {
+            datasetLocal.source = 'indexeddb-local-quota-backoff';
+        }
         ultimoDatasetCompartilhado = datasetLocal;
         ultimoDatasetCompartilhadoAt = agora;
         return datasetLocal;
@@ -114,6 +145,25 @@ async function atualizarContagemExemplos() {
         const feedback = Array.isArray(dataset.feedback) ? dataset.feedback : [];
         const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
         exemploColetados = feedbackElegivel.length;
+
+        const datasetLocal = await obterDatasetLocalTreino();
+        const feedbackLocal = Array.isArray(datasetLocal.feedback) ? datasetLocal.feedback : [];
+        const totalLocalElegivel = filtrarFeedbackElegivelTreino(feedbackLocal).length;
+
+        if (dataset.source === 'firestore-global-shared') {
+            ultimoTotalNuvemElegivel = feedbackElegivel.length;
+        }
+
+        const agora = Date.now();
+        const quotaAtiva = dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte;
+        const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
+
+        atualizarResumoOrigemUI({
+            localElegiveis: totalLocalElegivel,
+            nuvemElegiveis: ultimoTotalNuvemElegivel,
+            quotaAtiva,
+            minutosRestantes
+        });
 
         console.log(`📊 Exemplos coletados: ${exemploColetados}`);
         console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}, origem=${dataset.source || 'desconhecida'}`);
