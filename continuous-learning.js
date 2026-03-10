@@ -19,6 +19,8 @@ const TRAINING_BATCH_SIZE = 50;
 const DATASET_GLOBAL_MAX_RUNS = 120;
 const FIRESTORE_QUOTA_BACKOFF_MS = 30 * 60 * 1000;
 const CLOUD_COUNT_CACHE_MS = 5 * 60 * 1000;
+const RETREINO_PENDENTE_QUOTA_KEY = 'vetorizador_retreino_pendente_quota_v1';
+const RETREINO_PROMPT_COOLDOWN_MS = 10 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
@@ -26,6 +28,7 @@ let ultimoTotalNuvemTotal = null;
 let ultimoResumoNuvem = null;
 let ultimoResumoNuvemAt = 0;
 let quotaExcedidaAtiva = false;
+let retreinoPendentePorQuota = null;
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -44,6 +47,79 @@ function obterRotuloFeedback(fb = {}) {
 
 function filtrarFeedbackElegivelTreino(feedback = []) {
     return feedback.filter((fb) => fb.trainingEligible !== false);
+}
+
+function carregarRetreinoPendentePorQuota() {
+    try {
+        const raw = localStorage.getItem(RETREINO_PENDENTE_QUOTA_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function salvarRetreinoPendentePorQuota(payload = null) {
+    try {
+        if (!payload) {
+            localStorage.removeItem(RETREINO_PENDENTE_QUOTA_KEY);
+            retreinoPendentePorQuota = null;
+            return;
+        }
+
+        retreinoPendentePorQuota = payload;
+        localStorage.setItem(RETREINO_PENDENTE_QUOTA_KEY, JSON.stringify(payload));
+    } catch {
+        retreinoPendentePorQuota = payload;
+    }
+}
+
+function marcarRetreinoPendentePorQuota(exemplosUsados = 0) {
+    const payload = {
+        createdAt: Date.now(),
+        lastPromptAt: 0,
+        exemplosUsados,
+        motivo: 'treino-parcial-por-cota'
+    };
+    salvarRetreinoPendentePorQuota(payload);
+}
+
+function tentarNotificarRetreinoPosQuota({ quotaAtiva = false } = {}) {
+    if (quotaAtiva || !retreinoPendentePorQuota) return;
+
+    const agora = Date.now();
+    const ultimoPrompt = Number(retreinoPendentePorQuota.lastPromptAt || 0);
+    if ((agora - ultimoPrompt) < RETREINO_PROMPT_COOLDOWN_MS) {
+        return;
+    }
+
+    const exemplosBase = Number(retreinoPendentePorQuota.exemplosUsados || exemploColetados || 0);
+    if (window.mostrarNotificacao) {
+        window.mostrarNotificacao(
+            '🌐 Cota da nuvem normalizada. Recomenda-se retreinar para incorporar o dataset global.',
+            'info'
+        );
+    }
+
+    const confirmar = confirm(
+        `🌐 A cota do Firestore normalizou.\n\n` +
+        `O último treino foi parcial (dados locais).\n` +
+        `Deseja retreinar agora usando dados da nuvem?\n\n` +
+        `Base parcial anterior: ${exemplosBase} exemplos.`
+    );
+
+    if (confirmar) {
+        salvarRetreinoPendentePorQuota(null);
+        executarRetreninamentoAutomatico();
+        return;
+    }
+
+    salvarRetreinoPendentePorQuota({
+        ...retreinoPendentePorQuota,
+        lastPromptAt: agora
+    });
 }
 
 async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
@@ -173,6 +249,10 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
 // Atualizar contador de exemplos coletados
 async function atualizarContagemExemplos() {
     try {
+        if (!retreinoPendentePorQuota) {
+            retreinoPendentePorQuota = carregarRetreinoPendentePorQuota();
+        }
+
         const dataset = await obterDatasetTreinoCompartilhado();
         const feedback = Array.isArray(dataset.feedback) ? dataset.feedback : [];
         const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
@@ -197,6 +277,8 @@ async function atualizarContagemExemplos() {
             quotaAtiva,
             minutosRestantes
         });
+
+        tentarNotificarRetreinoPosQuota({ quotaAtiva });
 
         console.log(`📊 Exemplos coletados: ${exemploColetados}`);
         console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}, origem=${dataset.source || 'desconhecida'}`);
@@ -290,6 +372,7 @@ async function executarRetreninamentoAutomatico() {
 
     try {
         const dataset = await obterDatasetTreinoCompartilhado({ forcarAtualizacao: true });
+        const treinoParcialPorQuota = dataset.source === 'indexeddb-local-quota-backoff' || quotaExcedidaAtiva;
 
         // Retreinar modelo
         const sucesso = await window.treinarModeloML(dataset);
@@ -313,6 +396,18 @@ async function executarRetreninamentoAutomatico() {
                     `✅ Modelo retreinado com ${exemploColetados} exemplos (${dataset.source || 'dataset compartilhado'})!`,
                     'success'
                 );
+            }
+
+            if (treinoParcialPorQuota) {
+                marcarRetreinoPendentePorQuota(exemploColetados);
+                if (window.mostrarNotificacao) {
+                    window.mostrarNotificacao(
+                        '⚠️ Treino parcial por cota. Quando a nuvem normalizar, vamos recomendar um novo retreino.',
+                        'warning'
+                    );
+                }
+            } else {
+                salvarRetreinoPendentePorQuota(null);
             }
         }
     } catch (error) {
