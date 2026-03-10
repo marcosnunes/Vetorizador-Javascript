@@ -33,8 +33,8 @@ function obterRefModeloGlobal(db) {
 }
 
 function isQuotaExceededError(error) {
-    const code = String(error ? .code || '').toLowerCase();
-    const message = String(error ? .message || '').toLowerCase();
+    const code = String(error ?.code || '').toLowerCase();
+    const message = String(error ?.message || '').toLowerCase();
     return (
         code.includes('resource-exhausted') ||
         message.includes('quota exceeded') ||
@@ -100,16 +100,16 @@ export async function salvarFeaturesFirestore(runId, features) {
 
             // Saneamento: extrair apenas dados não-aninhados e metadados importantes
             const featureSaneada = {
-                id: feature.properties ? .id,
-                area_m2: feature.properties ? .area_m2,
-                score: feature.properties ? .score,
-                quality: feature.properties ? .quality,
-                compactness: feature.properties ? .compactness,
-                vertices: feature.properties ? .vertices,
-                feedback_status: feature.properties ? .feedback_status || 'pendente',
-                feedback_reason: feature.properties ? .feedback_reason || '',
-                geometryType: feature.geometry ? .type,
-                coordinateCount: feature.geometry ? .coordinates ? .[0] ? .length || 0
+                id: feature.properties ?.id,
+                area_m2: feature.properties ?.area_m2,
+                score: feature.properties ?.score,
+                quality: feature.properties ?.quality,
+                compactness: feature.properties ?.compactness,
+                vertices: feature.properties ?.vertices,
+                feedback_status: feature.properties ?.feedback_status || 'pendente',
+                feedback_reason: feature.properties ?.feedback_reason || '',
+                geometryType: feature.geometry ?.type,
+                coordinateCount: feature.geometry ?.coordinates ?.[0] ?.length || 0
             };
 
             // Remover campos undefined
@@ -147,9 +147,9 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
     try {
         const runRef = doc(db, 'runs', runId);
         const feedbackRef = doc(collection(runRef, 'feedback'), featureId);
-        const statusSeguro = feedback ? .status || feedback ? .feedbackStatus || feedback ? .label || 'pendente';
-        const reasonSeguro = feedback ? .reason || feedback ? .feedbackReason || '';
-        const timestampSeguro = feedback ? .timestamp || feedback ? .createdAt || new Date().toISOString();
+        const statusSeguro = feedback ?.status || feedback ?.feedbackStatus || feedback ?.label || 'pendente';
+        const reasonSeguro = feedback ?.reason || feedback ?.feedbackReason || '';
+        const timestampSeguro = feedback ?.timestamp || feedback ?.createdAt || new Date().toISOString();
 
         const dadosFeedback = {
             status: statusSeguro,
@@ -160,39 +160,39 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
             createdAt: timestampSeguro // Fallback para offline
         };
 
-        if (feedback ? .label) {
+        if (feedback ?.label) {
             dadosFeedback.label = feedback.label;
         }
-        if (typeof feedback ? .trainingEligible === 'boolean') {
+        if (typeof feedback ?.trainingEligible === 'boolean') {
             dadosFeedback.trainingEligible = feedback.trainingEligible;
         }
-        if (Number.isFinite(feedback ? .dataQualityScore)) {
+        if (Number.isFinite(feedback ?.dataQualityScore)) {
             dadosFeedback.dataQualityScore = feedback.dataQualityScore;
         }
-        if (Array.isArray(feedback ? .dataQualityFlags)) {
+        if (Array.isArray(feedback ?.dataQualityFlags)) {
             dadosFeedback.dataQualityFlags = feedback.dataQualityFlags;
         }
-        if (feedback ? .hardNegativeCategory) {
+        if (feedback ?.hardNegativeCategory) {
             dadosFeedback.hardNegativeCategory = feedback.hardNegativeCategory;
         }
-        if (feedback ? .tipoBenfeitoria) {
+        if (feedback ?.tipoBenfeitoria) {
             dadosFeedback.tipoBenfeitoria = feedback.tipoBenfeitoria;
         }
-        if (feedback ? .outlierAutoSanitized === true) {
+        if (feedback ?.outlierAutoSanitized === true) {
             dadosFeedback.outlierAutoSanitized = true;
             dadosFeedback.outlierDetectedAt = feedback.outlierDetectedAt || timestampSeguro;
         }
 
         // Adiciona geometrias apenas se existirem (evita undefined)
-        if (feedback ? .editedGeometry || feedback ? .geometriaCorrigida) {
+        if (feedback ?.editedGeometry || feedback ?.geometriaCorrigida) {
             const geom = feedback.editedGeometry || feedback.geometriaCorrigida;
             dadosFeedback.editedGeometryType = geom.type;
-            dadosFeedback.editedGeometryCoordinateCount = geom.coordinates ? .[0] ? .length || 0;
+            dadosFeedback.editedGeometryCoordinateCount = geom.coordinates ?.[0] ?.length || 0;
         }
-        if (feedback ? .originalGeometry || feedback ? .geometriaOriginal) {
+        if (feedback ?.originalGeometry || feedback ?.geometriaOriginal) {
             const geom = feedback.originalGeometry || feedback.geometriaOriginal;
             dadosFeedback.originalGeometryType = geom.type;
-            dadosFeedback.originalGeometryCoordinateCount = geom.coordinates ? .[0] ? .length || 0;
+            dadosFeedback.originalGeometryCoordinateCount = geom.coordinates ?.[0] ?.length || 0;
         }
 
         await setDoc(feedbackRef, dadosFeedback);
@@ -217,8 +217,8 @@ export async function salvarAppBoundaryFirestore(payload = {}) {
         throw new Error('Sessão anônima não autenticada para salvar APP global.');
     }
 
-    const geojson = payload ? .geojson;
-    const metadata = payload ? .metadata || {};
+    const geojson = payload ?.geojson;
+    const metadata = payload ?.metadata || {};
 
     if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) {
         throw new Error('GeoJSON APP inválido para persistência.');

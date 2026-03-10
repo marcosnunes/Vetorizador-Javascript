@@ -23,10 +23,10 @@ let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
 
 function isQuotaExceededError(error) {
-    const code = String(error ? .code || '').toLowerCase();
-    const message = String(error ? .message || '').toLowerCase();
+    const code = String(error ?.code || '').toLowerCase();
+    const message = String(error ?.message || '').toLowerCase();
     return (
-        error ? .isQuotaExceeded === true ||
+        error ?.isQuotaExceeded === true ||
         code.includes('resource-exhausted') ||
         message.includes('quota exceeded') ||
         message.includes('resource_exhausted')
@@ -97,7 +97,7 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
             firestoreQuotaBackoffAte = agora + FIRESTORE_QUOTA_BACKOFF_MS;
             console.warn('⏱️ Quota do Firestore excedida. Ativando fallback local temporário para evitar novas leituras caras.');
         }
-        console.warn('⚠️ Falha ao obter dataset compartilhado, usando dataset local:', error ? .message || error);
+        console.warn('⚠️ Falha ao obter dataset compartilhado, usando dataset local:', error ?.message || error);
         const datasetLocal = await obterDatasetLocalTreino();
         ultimoDatasetCompartilhado = datasetLocal;
         ultimoDatasetCompartilhadoAt = agora;
@@ -342,8 +342,8 @@ async function obterDashboardCompleto() {
     await atualizarContagemExemplos();
     await atualizarDashboardMetricas();
 
-    const autoInferenciasMetricas = window.obterMetricasAutoInferencia ? .();
-    const relatorioLimpezaML = window.obterRelatorioLimpezaML ? .() || null;
+    const autoInferenciasMetricas = window.obterMetricasAutoInferencia ?.();
+    const relatorioLimpezaML = window.obterRelatorioLimpezaML ?.() || null;
 
     return {
         timestamp: new Date().toISOString(),
@@ -372,7 +372,7 @@ const APIEndpoints = {
     obterStatusModelo: async function() {
         return {
             status: 'ativo',
-            versao: ultimoTreinamento ? .versao || 'não-treinado',
+            versao: ultimoTreinamento ?.versao || 'não-treinado',
             exemplosUsados: exemploColetados,
             autoInferencia: window.autoInferenceAtivo || false,
             ultimoTreinamento,
@@ -483,7 +483,7 @@ const APIEndpoints = {
         const feedback = await idbGetAll('feedback');
         const pendentes = feedback.filter(fb => fb.label === 'editado').length;
         const rejeitadas = feedback.filter(fb => fb.label === 'rejeitado').length;
-        const relatorioLimpezaML = window.obterRelatorioLimpezaML ? .() || null;
+        const relatorioLimpezaML = window.obterRelatorioLimpezaML ?.() || null;
 
         let recomendacoes = [];
 
@@ -511,7 +511,7 @@ const APIEndpoints = {
             });
         }
 
-        if (relatorioLimpezaML ? .totalRemovidos > 0) {
+        if (relatorioLimpezaML ?.totalRemovidos > 0) {
             recomendacoes.push({
                 tipo: 'higiene-dataset',
                 prioridade: relatorioLimpezaML.totalRemovidos > 20 ? 'alta' : 'média',
