@@ -912,6 +912,18 @@ async function restaurarAppPersistidaDoFirestoreSeNecessario() {
     } catch (error) {
         if (String(error ?.message || '').includes('inválido')) {
             console.warn('⚠️ APP remota ignorada por formato inválido:', error ?.message || error);
+
+            try {
+                await limparAppBoundaryFirestore();
+                console.warn('🧹 APP remota inválida removida do Firestore para evitar novos avisos.');
+            } catch (cleanupError) {
+                console.warn('⚠️ Falha ao remover APP remota inválida do Firestore:', cleanupError ?.message || cleanupError);
+            }
+
+            localStorage.removeItem(APP_STORAGE_KEY);
+            appBoundaryGeoJSON = null;
+            appBoundaryMetadata = null;
+            atualizarStatusAppUi('Nenhum arquivo APP carregado.');
             return;
         }
         console.warn('⚠️ Falha ao restaurar APP do Firestore:', error);
