@@ -124,7 +124,10 @@ function tentarNotificarRetreinoPosQuota({ quotaAtiva = false } = {}) {
 
 async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
     const agora = Date.now();
+    // Quando o backoff de cota expirou, forçar nova tentativa ignorando cache
+    const backoffExpirou = (firestoreQuotaBackoffAte > 0) && (agora >= firestoreQuotaBackoffAte);
     const cacheValido = !forcarAtualizacao &&
+        !backoffExpirou &&
         ultimoResumoNuvem &&
         (agora - ultimoResumoNuvemAt) < CLOUD_COUNT_CACHE_MS;
 
@@ -137,12 +140,14 @@ async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
         ultimoResumoNuvem = resumo;
         ultimoResumoNuvemAt = agora;
         quotaExcedidaAtiva = false;
+        firestoreQuotaBackoffAte = 0; // Reseta backoff quando sucesso
         return resumo;
     } catch (error) {
         if (isQuotaExceededError(error)) {
             quotaExcedidaAtiva = true;
             firestoreQuotaBackoffAte = Math.max(firestoreQuotaBackoffAte, agora + FIRESTORE_QUOTA_BACKOFF_MS);
         }
+        // Erros não-cota (ex.: Firebase não inicializado) não marcam quota como excedida
         return ultimoResumoNuvem;
     }
 }
@@ -746,6 +751,18 @@ async function inicializarPhase5() {
         } catch {
             console.log('⚠️ Sem histórico de treinamentos');
         }
+
+        // 4. Timer periódico para atualizar contagem da nuvem
+        // Força nova tentativa a cada 8 minutos; ganha se backoff de 30min expirou
+        setInterval(async () => {
+            const agora = Date.now();
+            // Força bypass de cache para verificar se a cota normalizou
+            const cacheExpirado = (agora - ultimoResumoNuvemAt) >= CLOUD_COUNT_CACHE_MS;
+            const backoffExpirou = agora >= firestoreQuotaBackoffAte;
+            if (cacheExpirado || backoffExpirou) {
+                await atualizarContagemExemplos();
+            }
+        }, 8 * 60 * 1000);
 
         console.log('✅ Phase 5 inicializado com sucesso');
         console.log(`📊 Exemplos coletados: ${exemploColetados}`);

@@ -33,7 +33,9 @@ const loaderText = document.getElementById('loader-text');
 let debugMaskLayer = null;
 let searchResultMarker = null;
 let modoCapturaCoordenada = false;
+let modoVetorizacao = 'auto'; // 'auto' | 'manual'
 const geojsonFeatures = [];
+const manualPolygonFeatures = []; // Polígonos desenhados manualmente para aprendizado
 let activeRunId = null;
 let activeRunStartedAt = null;
 let appBoundaryGeoJSON = null;
@@ -1455,6 +1457,7 @@ async function aplicarAutoajustePreVetorizacao() {
 // Função para limpar resultados
 function limparResultados() {
     geojsonFeatures.length = 0;
+    manualPolygonFeatures.length = 0;
     drawnItems.clearLayers();
     if (debugMaskLayer) {
         map.removeLayer(debugMaskLayer);
@@ -1470,17 +1473,19 @@ function limparResultados() {
 
 // Função para atualizar estatísticas
 function atualizarEstatisticas() {
-    const totalPolygons = geojsonFeatures.length;
-    const totalArea = geojsonFeatures.reduce((sum, f) => sum + parseFloat(f.properties.area_m2 || 0), 0);
+    const allFeatures = [...geojsonFeatures, ...manualPolygonFeatures];
+    const totalPolygons = allFeatures.length;
+    const totalArea = allFeatures.reduce((sum, f) => sum + parseFloat(f.properties.area_m2 || 0), 0);
     const highQ = geojsonFeatures.filter(f => f.properties.quality === 'alta').length;
     const medQ = geojsonFeatures.filter(f => f.properties.quality === 'media').length;
     const lowQ = geojsonFeatures.filter(f => f.properties.quality === 'baixa').length;
+    const manualQ = manualPolygonFeatures.length;
 
     document.getElementById('totalPolygons').textContent = totalPolygons;
     document.getElementById('totalArea').textContent = totalArea.toFixed(2);
     document.getElementById('highQuality').textContent = highQ;
     document.getElementById('medQuality').textContent = medQ;
-    document.getElementById('lowQuality').textContent = lowQ;
+    document.getElementById('lowQuality').textContent = lowQ + (manualQ > 0 ? ` (+${manualQ} manuais)` : '');
     document.getElementById('lastProcessTime').textContent = new Date().toLocaleTimeString('pt-BR');
 }
 
@@ -1562,23 +1567,9 @@ function gerarRunId() {
     return `run_${Date.now()}_${random}`;
 }
 
-function obterTextoFeedback(status) {
-    switch (status) {
-        case 'aprovado':
-            return '✅ Aprovado';
-        case 'rejeitado':
-            return '❌ Rejeitado';
-        case 'editado':
-            return '✏️ Editado';
-        default:
-            return '⏳ Pendente';
-    }
-}
 
 function criarPopupFeedback(feature) {
     const props = feature.properties || {};
-    const feedbackStatus = props.feedback_status || 'pendente';
-    const feedbackReason = props.feedback_reason || '-';
     const featureId = props.id || '';
     const tipoAtual = normalizarTipoBenfeitoria(props.tipo_benfeitoria);
 
@@ -1589,9 +1580,6 @@ function criarPopupFeedback(feature) {
     <strong>Qualidade:</strong> ${props.quality}<br>
     <strong>Compacidade:</strong> ${props.compactness}<br>
     <strong>Vértices:</strong> ${props.vertices}<br>
-    <strong>Tipo:</strong> ${obterRotuloTipoBenfeitoria(tipoAtual)}<br>
-    <strong>Feedback:</strong> ${obterTextoFeedback(feedbackStatus)}<br>
-    <strong>Motivo:</strong> ${feedbackReason}<br>
     <div style="margin-top: 8px;">
       <label for="tipo_${featureId}"><strong>Classificação:</strong></label><br>
       <select id="tipo_${featureId}" onchange="definirTipoBenfeitoria('${featureId}', this.value)">
@@ -1601,11 +1589,7 @@ function criarPopupFeedback(feature) {
         <option value="outra" ${tipoAtual === 'outra' ? 'selected' : ''}>Outra benfeitoria</option>
       </select>
     </div>
-    <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
-      <button onclick="marcarFeedbackPoligono('${featureId}', 'aprovado')">✅ Aprovar</button>
-      <button onclick="marcarFeedbackPoligono('${featureId}', 'rejeitado')">❌ Rejeitar</button>
-      <button onclick="marcarFeedbackPoligono('${featureId}', 'editado')">✏️ Editado</button>
-    </div>
+    <small style="color:#6b7280; font-size:10px; display:block; margin-top:6px;">ℹ️ Vetorizado automaticamente. Para contribuir com o aprendizado, use o Modo Manual.</small>
   `;
 }
 
@@ -2732,6 +2716,15 @@ map.addControl(drawControl);
 // --- EVENTOS DO MAPA ---
 map.on(L.Draw.Event.CREATED, (e) => {
     if (e.layerType === 'polygon') {
+        const layer = e.layer;
+
+        // Modo manual: polígono desenhado é diretamente uma benfeitoria para aprendizado
+        if (modoVetorizacao === 'manual') {
+            adicionarPoligonoManual(layer);
+            return;
+        }
+
+        // Modo automático: vetoriza a área desenhada com WASM
         geojsonFeatures.length = 0; // Limpa features anteriores
 
         // Limpeza de debug anterior
@@ -2740,7 +2733,6 @@ map.on(L.Draw.Event.CREATED, (e) => {
             debugMaskLayer = null;
         }
 
-        const layer = e.layer;
         const bounds = layer.getBounds();
         // Apenas adicionamos o layer aqui. NÃO REMOVEMOS (layer.remove()) antes da captura!
         drawnItems.addLayer(layer);
@@ -3581,15 +3573,16 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeat
  * Compatível com retorno Base64 do shpwrite (decodifica antes de criar Blob).
  */
 async function exportarShapefile() {
-    if (geojsonFeatures.length === 0) {
-        alert("⚠️ Não há polígonos para exportar.\n\nDesenhe uma área no mapa e aguarde o processamento.");
+    const todasFeatures = [...geojsonFeatures, ...manualPolygonFeatures];
+    if (todasFeatures.length === 0) {
+        alert("⚠️ Não há polígonos para exportar.\n\nDesenhe uma área no mapa e aguarde o processamento, ou use o Modo Manual.");
         return;
     }
 
-    console.log(`Iniciando exportação de ${geojsonFeatures.length} features`);
-    console.log('Primeira feature:', geojsonFeatures[0]);
+    console.log(`Iniciando exportação de ${todasFeatures.length} features (${geojsonFeatures.length} auto + ${manualPolygonFeatures.length} manuais)`);
+    console.log('Primeira feature:', todasFeatures[0]);
 
-    const geojson = { type: "FeatureCollection", features: geojsonFeatures };
+    const geojson = { type: "FeatureCollection", features: todasFeatures };
     console.log('GeoJSON completo:', geojson);
 
     const options = { folder: 'mapeamento_ia', types: { polygon: 'edificacoes' } };
@@ -3661,7 +3654,7 @@ async function exportarShapefile() {
         document.body.removeChild(link);
 
         console.log('Download iniciado com sucesso');
-        alert(`✅ Exportação concluída!\n\n📦 ${geojsonFeatures.length} polígonos exportados no formato Shapefile.\n\nO arquivo foi salvo como 'mapeamento_edificacoes.zip'`);
+        alert(`✅ Exportação concluída!\n\n📦 ${todasFeatures.length} polígonos exportados no formato Shapefile (${geojsonFeatures.length} automáticos + ${manualPolygonFeatures.length} manuais).\n\nO arquivo foi salvo como 'mapeamento_edificacoes.zip'`);
     } catch (e) {
         console.error("Erro ao exportar:", e);
         console.error("Stack trace:", e.stack);
@@ -3669,6 +3662,311 @@ async function exportarShapefile() {
     } finally {
         loader.style.display = 'none';
     }
+}
+
+// ==================== MODO DE VETORIZAÇÃO MANUAL ====================
+
+/**
+ * Alterna entre vetorização automática (WASM) e manual (desenho direto para aprendizado).
+ */
+function definirModoVetorizacao(modo) {
+    modoVetorizacao = modo;
+    const btnAuto = document.getElementById('btnModoAuto');
+    const btnManual = document.getElementById('btnModoManual');
+    const desc = document.getElementById('modoVetorizacaoDesc');
+
+    if (btnAuto) btnAuto.classList.toggle('mode-btn-active', modo === 'auto');
+    if (btnManual) btnManual.classList.toggle('mode-btn-active', modo === 'manual');
+
+    if (modo === 'manual') {
+        L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar benfeitoria';
+        L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar o contorno da benfeitoria';
+        L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Continue clicando para adicionar vértices';
+        L.drawLocal.draw.handlers.polygon.tooltip.end = 'Clique no primeiro ponto para fechar o polígono';
+        if (desc) desc.textContent = 'Desenhe o contorno de uma edificação ou trapiche para salvar como exemplo de aprendizado';
+    } else {
+        L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar área';
+        L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar a área';
+        L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Clique para continuar desenhando';
+        L.drawLocal.draw.handlers.polygon.tooltip.end = 'Clique no primeiro ponto para fechar';
+        if (desc) desc.textContent = 'Desenhe uma área no mapa para detectar edificações automaticamente via IA';
+    }
+
+    mostrarNotificacao(
+        modo === 'manual'
+            ? '✏️ Modo Manual: desenhe polígonos de benfeitorias para contribuir com o aprendizado.'
+            : '🤖 Modo Automático: desenhe uma área para vetorizar com IA.',
+        'info'
+    );
+}
+
+/**
+ * Registra um polígono desenhado manualmente como exemplo de aprendizado.
+ * Chamado pelo evento draw:created quando modoVetorizacao === 'manual'.
+ */
+function adicionarPoligonoManual(layer) {
+    const featureId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const geojsonBruto = layer.toGeoJSON();
+    let areaM2 = 0;
+    try { areaM2 = turf.area(geojsonBruto); } catch { areaM2 = 0; }
+    const coords = geojsonBruto.geometry.coordinates;
+    const nVertices = Array.isArray(coords[0]) ? coords[0].length : 0;
+    const manualRunId = `manual_run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+    const feature = {
+        type: 'Feature',
+        geometry: geojsonBruto.geometry,
+        properties: {
+            id: featureId,
+            area_m2: Number(areaM2).toFixed(2),
+            confidence_score: 100,
+            quality: 'manual',
+            compactness: '-',
+            vertices: nVertices,
+            tipo_benfeitoria: 'nao_classificada',
+            source: 'manual_draw',
+            feedback_status: 'pendente',
+            feedback_reason: '',
+            run_id: manualRunId
+        }
+    };
+
+    layer.setStyle({ color: '#7c3aed', fillColor: '#7c3aed', weight: 3, fillOpacity: 0.25 });
+    layer.feature = feature;
+    manualPolygonFeatures.push(feature);
+    drawnItems.addLayer(layer);
+    atualizarEstatisticas();
+    layer.bindPopup(criarPopupPoligonoManual(featureId), { maxWidth: 320, minWidth: 240 }).openPopup();
+}
+
+/**
+ * Cria o HTML do popup para um polígono manual (classificação + salvar + editar).
+ */
+function criarPopupPoligonoManual(featureId) {
+    const feature = manualPolygonFeatures.find(f => f.properties?.id === featureId);
+    if (!feature) return '<p>Polígono não encontrado.</p>';
+    const props = feature.properties;
+    const tipoAtual = normalizarTipoBenfeitoria(props.tipo_benfeitoria);
+    const jaSalvo = props.feedback_status === 'aprovado';
+
+    return `
+    <div style="min-width:230px;">
+      <strong style="color:#7c3aed;font-size:13px;">✏️ Polígono Manual</strong><br>
+      <span style="font-size:11px;color:#6b7280;">Área: ${props.area_m2} m² &nbsp;|&nbsp; Vértices: ${props.vertices}</span>
+      <div style="margin-top:8px;">
+        <label style="font-size:12px;font-weight:600;">Classificação:</label><br>
+        <select id="tipo_manual_${featureId}" style="width:100%;margin-top:4px;padding:6px;border-radius:4px;border:1px solid #d1d5db;font-size:12px;" onchange="atualizarTipoManual('${featureId}', this.value)">
+          <option value="nao_classificada" ${tipoAtual === 'nao_classificada' ? 'selected' : ''}>— Selecione o tipo —</option>
+          <option value="edificacao" ${tipoAtual === 'edificacao' ? 'selected' : ''}>🏠 Edificação / Telhado</option>
+          <option value="trapiche" ${tipoAtual === 'trapiche' ? 'selected' : ''}>🛶 Trapiche / Píer</option>
+          <option value="outra" ${tipoAtual === 'outra' ? 'selected' : ''}>📦 Outra benfeitoria</option>
+        </select>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:6px;">
+        <button onclick="salvarPoligonoManual('${featureId}')" style="background:${jaSalvo ? '#15803d' : '#7c3aed'};flex:1;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">${jaSalvo ? '✅ Salvo' : '💾 Salvar para Aprendizado'}</button>
+        <button onclick="ativarEdicaoPoligonoManual('${featureId}')" style="background:#d97706;flex:0 0 auto;padding:8px 10px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">✏️ Editar</button>
+      </div>
+      ${jaSalvo ? '<small style="color:#15803d;margin-top:6px;display:block;">✅ Exemplo salvo no banco de aprendizado!</small>' : '<small style="color:#9ca3af;margin-top:6px;display:block;">Selecione o tipo e clique em Salvar para contribuir com o aprendizado.</small>'}
+    </div>
+  `;
+}
+
+/**
+ * Atualiza o tipo de benfeitoria de um polígono manual (chamado pelo select no popup).
+ */
+function atualizarTipoManual(featureId, tipo) {
+    const feature = manualPolygonFeatures.find(f => f.properties?.id === featureId);
+    if (!feature) return;
+    feature.properties.tipo_benfeitoria = normalizarTipoBenfeitoria(tipo);
+}
+
+/**
+ * Salva o polígono manual no banco de aprendizado (IndexedDB + Firestore).
+ */
+async function salvarPoligonoManual(featureId) {
+    const feature = manualPolygonFeatures.find(f => f.properties?.id === featureId);
+    if (!feature) {
+        alert('⚠️ Polígono não encontrado.');
+        return;
+    }
+    const tipoBenfeitoria = normalizarTipoBenfeitoria(feature.properties.tipo_benfeitoria);
+    if (tipoBenfeitoria === 'nao_classificada') {
+        alert('⚠️ Selecione uma classificação antes de salvar (Edificação, Trapiche ou Outra).');
+        return;
+    }
+
+    const manualRunId = feature.properties.run_id || `manual_run_${Date.now()}`;
+
+    try {
+        await salvarRunAprendizado({
+            runId: manualRunId,
+            createdAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            source: 'manual_draw',
+            config: { ...CONFIG },
+            bounds: null,
+            features: [{
+                featureId,
+                geometry: feature.geometry,
+                properties: feature.properties,
+                feedbackStatus: 'aprovado',
+                feedbackReason: 'manual_draw'
+            }]
+        });
+
+        const feedbackPayload = {
+            feedbackId: `fb_manual_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            runId: manualRunId,
+            featureId,
+            feedbackStatus: 'aprovado',
+            feedbackReason: 'manual_draw',
+            featureGeometry: JSON.parse(JSON.stringify(feature.geometry)),
+            tipoBenfeitoria,
+            source: 'manual_draw',
+            featureSnapshot: {
+                confidenceScore: 100,
+                areaM2: Number(feature.properties.area_m2 || 0),
+                tipoBenfeitoria,
+                quality: 'manual',
+                compactness: 0,
+                vertices: Number(feature.properties.vertices || 0)
+            },
+            timestamp: new Date().toISOString()
+        };
+        await salvarFeedbackAprendizado(feedbackPayload);
+
+        feature.properties.feedback_status = 'aprovado';
+        feature.properties.tipo_benfeitoria = tipoBenfeitoria;
+        mostrarNotificacao(`✅ Polígono manual salvo! Tipo: ${obterRotuloTipoBenfeitoria(tipoBenfeitoria)}`, 'success');
+
+        // Atualiza popup e cor do layer
+        drawnItems.eachLayer((l) => {
+            if (l.feature?.properties?.id === featureId) {
+                l.setStyle({ color: '#15803d', fillColor: '#15803d', weight: 3, fillOpacity: 0.3 });
+                l.setPopupContent(criarPopupPoligonoManual(featureId));
+            }
+        });
+    } catch (err) {
+        console.error('Erro ao salvar polígono manual:', err);
+        alert(`❌ Erro ao salvar: ${err.message}`);
+    }
+}
+
+/**
+ * Ativa edição visual de um polígono manual desenhado diretamente no mapa.
+ */
+function ativarEdicaoPoligonoManual(featureId) {
+    window.map.closePopup();
+
+    const feature = manualPolygonFeatures.find(f => f.properties?.id === featureId);
+    if (!feature) {
+        alert('⚠️ Polígono não encontrado.');
+        return;
+    }
+
+    let targetLayer = null;
+    drawnItems.eachLayer((l) => {
+        if (l.feature?.properties?.id === featureId) targetLayer = l;
+    });
+
+    if (!targetLayer) {
+        alert('⚠️ Layer não encontrado no mapa para edição.');
+        return;
+    }
+
+    const geometriaOriginal = JSON.parse(JSON.stringify(feature.geometry));
+    const latlngs = targetLayer.getLatLngs();
+    drawnItems.removeLayer(targetLayer);
+
+    const editablePolygon = L.polygon(latlngs, {
+        color: '#7c3aed', weight: 4, fillOpacity: 0.2, fillColor: '#7c3aed'
+    }).addTo(window.map);
+    editablePolygon.editing.enable();
+
+    setTimeout(() => {
+        const markers = editablePolygon.editing._markers;
+        if (markers) {
+            markers.forEach((marker) => {
+                marker.setIcon(L.divIcon({
+                    className: 'leaflet-div-icon-edit-tiny',
+                    html: '<div style="width:6px;height:6px;background:white;border:1.5px solid #7c3aed;border-radius:50%;cursor:move;"></div>',
+                    iconSize: [6, 6], iconAnchor: [3, 3]
+                }));
+                marker.on('click', (e) => {
+                    if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) {
+                        e.originalEvent.preventDefault();
+                        e.originalEvent.stopPropagation();
+                        if (editablePolygon.editing._markers.length > 3) {
+                            editablePolygon.editing._deleteMarker(marker);
+                        } else {
+                            alert('⚠️ Um polígono precisa de no mínimo 3 vértices!');
+                        }
+                    }
+                });
+            });
+        }
+    }, 50);
+
+    const instrucoes = L.control({ position: 'bottomright' });
+    instrucoes.onAdd = function () {
+        const div = L.DomUtil.create('div', 'edit-instructions');
+        div.style.cssText = 'background:rgba(0,0,0,0.75);padding:12px;border-radius:6px;max-width:260px;z-index:1000;color:white;backdrop-filter:blur(4px);';
+        div.innerHTML = `
+      <strong style="color:#a78bfa;font-size:13px;display:block;margin-bottom:8px;">✏️ Editando Polígono Manual</strong>
+      <p style="margin:0 0 10px;font-size:11px;line-height:1.5;color:#E0E0E0;">
+        <strong>Mover vértice:</strong> arraste os pontos<br>
+        <strong>Adicionar ponto:</strong> clique nas linhas<br>
+        <strong>Remover vértice:</strong> <kbd style="background:#333;padding:2px 4px;border-radius:2px;">Ctrl</kbd> + Clique
+      </p>
+      <button id="salvar-edicao-manual" style="background:#7c3aed;color:white;border:none;padding:10px 12px;border-radius:4px;cursor:pointer;width:100%;margin-bottom:6px;font-weight:bold;font-size:12px;">✅ Confirmar Edição</button>
+      <button id="cancelar-edicao-manual" style="background:#dc2626;color:white;border:none;padding:8px 12px;border-radius:4px;cursor:pointer;width:100%;font-size:11px;">❌ Cancelar</button>
+    `;
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        return div;
+    };
+    instrucoes.addTo(window.map);
+
+    setTimeout(() => {
+        const btnSalvar = document.getElementById('salvar-edicao-manual');
+        const btnCancelar = document.getElementById('cancelar-edicao-manual');
+
+        if (btnSalvar) {
+            btnSalvar.addEventListener('click', () => {
+                const geometriaEditada = editablePolygon.toGeoJSON().geometry;
+                feature.geometry = geometriaEditada;
+                feature.properties.vertices = Array.isArray(geometriaEditada.coordinates[0]) ? geometriaEditada.coordinates[0].length : 0;
+                feature.properties.geometria_original = geometriaOriginal;
+
+                window.map.removeLayer(editablePolygon);
+                instrucoes.remove();
+
+                // Readicionar layer atualizado
+                const novoLayer = L.polygon(
+                    L.GeoJSON.coordsToLatLngs(geometriaEditada.coordinates[0]),
+                    { color: '#7c3aed', fillColor: '#7c3aed', weight: 3, fillOpacity: 0.25 }
+                );
+                novoLayer.feature = feature;
+                drawnItems.addLayer(novoLayer);
+                novoLayer.bindPopup(criarPopupPoligonoManual(featureId), { maxWidth: 320, minWidth: 240 }).openPopup();
+                mostrarNotificacao('✅ Edição confirmada. Clique em Salvar para Aprendizado para registrar.', 'info');
+            });
+        }
+        if (btnCancelar) {
+            btnCancelar.addEventListener('click', () => {
+                window.map.removeLayer(editablePolygon);
+                instrucoes.remove();
+                // Rebind original layer
+                const novoLayer = L.polygon(
+                    L.GeoJSON.coordsToLatLngs(geometriaOriginal.coordinates[0]),
+                    { color: '#7c3aed', fillColor: '#7c3aed', weight: 3, fillOpacity: 0.25 }
+                );
+                novoLayer.feature = feature;
+                drawnItems.addLayer(novoLayer);
+                novoLayer.bindPopup(criarPopupPoligonoManual(featureId), { maxWidth: 320, minWidth: 240 });
+            });
+        }
+    }, 100);
 }
 
 // Expõe para o botão do HTML
@@ -3683,3 +3981,7 @@ window.copiarCoordenadaCapturada = copiarCoordenadaCapturada;
 window.idbPut = idbPut;
 window.idbGetAll = idbGetAll; // ✨ Para continuous-learning.js
 window.exportarRelatorioAppPdf = exportarRelatorioAppPdf;
+window.definirModoVetorizacao = definirModoVetorizacao;
+window.salvarPoligonoManual = salvarPoligonoManual;
+window.ativarEdicaoPoligonoManual = ativarEdicaoPoligonoManual;
+window.atualizarTipoManual = atualizarTipoManual;

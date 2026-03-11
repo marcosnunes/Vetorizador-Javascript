@@ -65,6 +65,19 @@
             </small>
                     </div>
 
+                    <div class="control-group" style="background:#f3f0ff;border:2px solid #7c3aed;border-radius:8px;">
+                        <h3 style="color:#5b21b6;">🖊️ Modo de Vetorização</h3>
+                        <div style="display:flex;gap:8px;margin-bottom:8px;">
+                            <button id="btnModoAuto" onclick="definirModoVetorizacao('auto')" class="mode-btn mode-btn-active">
+                                🤖 Automático
+                            </button>
+                            <button id="btnModoManual" onclick="definirModoVetorizacao('manual')" class="mode-btn">
+                                ✏️ Manual
+                            </button>
+                        </div>
+                        <small id="modoVetorizacaoDesc" style="color:#374151;">Desenhe uma área no mapa para detectar edificações automaticamente via IA</small>
+                    </div>
+
                     <div class="control-group">
                         <h3>🎯 Presets Profissionais</h3>
                         <div class="preset-buttons">
@@ -261,8 +274,8 @@
                     </div>
 
                     <div class="control-group" style="background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px;">
-                        <h3>🧠 Aprendizado Contínuo Automático</h3>
-                        <p style="font-size: 12px; color: #666; margin: 10px 0;">O modelo treina automaticamente conforme você edita vértices e marca feedback.</p>
+                        <h3>🧠 Aprendizado Contínuo</h3>
+                        <p style="font-size: 12px; color: #666; margin: 10px 0;">O modelo aprende com os polígonos que você desenha manualmente e classifica no <strong>Modo Manual</strong>.</p>
 
                         <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
@@ -279,23 +292,23 @@
                             </div>
                             <div id="quotaAvisoFirestore" style="display: none; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; border-radius: 6px; padding: 6px; margin-bottom: 8px; font-size: 11px;"></div>
                             <div style="background: #e0e0e0; border-radius: 8px; height: 20px; overflow: hidden;">
-                                <div id="progressoAprendizado" style="background: linear-gradient(90deg, #0ea5e9, #06b6d4); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">
+                                <div id="progressoAprendizado" style="background: linear-gradient(90deg, #7c3aed, #0ea5e9); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 10px;">
                                 </div>
                             </div>
                             <p id="descricaoObjetivoAprendizado" style="margin: 6px 0 0 0; font-size: 11px; color: #666;">Objetivo: 50 exemplos para próximo retreinamento
                             </p>
                         </div>
 
-                        <button onclick="window.executarRetreninamentoAutomatico && window.executarRetreninamentoAutomatico()" id="btnTreinarAgora" style="background: #0ea5e9; width: 100%; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
+                        <button onclick="window.executarRetreninamentoAutomatico && window.executarRetreninamentoAutomatico()" id="btnTreinarAgora" style="background: #7c3aed; width: 100%; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; display: none;">
               ⚡ Treinar Modelo Agora (50 exemplos atingidos!)
             </button>
 
                         <small style="color: #666; display: block; margin-top: 10px;">
               <strong>Como Funciona:</strong><br>
-              1️⃣ Edite polígonos no mapa<br>
-              2️⃣ Marque com: ✅ / ❌ / ✏️<br>
-              3️⃣ Cada marca = 1 exemplo coletado<br>
-              4️⃣ Na marca 100, será oferecido treinar<br>
+              1️⃣ Ative o <strong>Modo Manual</strong> (botão acima)<br>
+              2️⃣ Desenhe o contorno de uma edificação ou trapiche<br>
+              3️⃣ Classifique o polígono no popup<br>
+              4️⃣ Clique em 💾 <strong>Salvar para Aprendizado</strong><br>
               5️⃣ Modelo melhora automaticamente!
             </small>
                     </div>

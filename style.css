@@ -311,6 +311,39 @@ small {
   transform: translateY(-1px);
 }
 
+/* Mode toggle buttons (Auto / Manual) */
+.mode-btn {
+  flex: 1;
+  padding: 10px 8px;
+  background: #e5e7eb;
+  color: #374151;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  width: auto;
+  box-shadow: none;
+}
+
+.mode-btn:hover {
+  background: #d1d5db;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.mode-btn-active {
+  background: #7c3aed !important;
+  color: white !important;
+  border-color: #5b21b6 !important;
+  box-shadow: 0 2px 6px rgba(124,58,237,0.3) !important;
+}
+
+.mode-btn-active:hover {
+  background: #6d28d9 !important;
+}
+
 button {
   width: 100%;
   padding: 12px;
