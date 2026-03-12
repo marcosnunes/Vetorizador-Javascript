@@ -4110,6 +4110,46 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeat
 
 
 // --- Exportação ---
+function normalizarNumeroShp(valor, casas = 2) {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return null;
+    return Number(n.toFixed(casas));
+}
+
+function normalizarInteiroShp(valor) {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n);
+}
+
+function normalizarTextoShp(valor, fallback = '') {
+    if (valor === null || valor === undefined) return fallback;
+    return String(valor).trim();
+}
+
+function mapearFeatureParaShapefile(feature) {
+    if (!feature || !feature.geometry) return null;
+
+    const props = feature.properties || {};
+    return {
+        type: 'Feature',
+        geometry: feature.geometry,
+        properties: {
+            ID: normalizarTextoShp(props.id),
+            AREA_M2: normalizarNumeroShp(props.area_m2, 2),
+            SCORE: normalizarNumeroShp(props.confidence_score, 2),
+            QUALID: normalizarTextoShp(props.quality),
+            COMPACT: normalizarNumeroShp(props.compactness, 4),
+            VERTICES: normalizarInteiroShp(props.vertices),
+            TIPO: normalizarTipoBenfeitoria(props.tipo_benfeitoria),
+            SOURCE: normalizarTextoShp(props.source),
+            RUN_ID: normalizarTextoShp(props.run_id),
+            FB_STAT: normalizarTextoShp(props.feedback_status),
+            FB_REAS: normalizarTextoShp(props.feedback_reason)
+        }
+    };
+}
+
 /**
  * Exporta os polígonos atuais em Shapefile ZIP.
  * Compatível com retorno Base64 do shpwrite (decodifica antes de criar Blob).
@@ -4122,10 +4162,20 @@ async function exportarShapefile() {
     }
 
     console.log(`Iniciando exportação de ${todasFeatures.length} features (${geojsonFeatures.length} auto + ${manualPolygonFeatures.length} manuais)`);
-    console.log('Primeira feature:', todasFeatures[0]);
+    console.log('Primeira feature original:', todasFeatures[0]);
 
-    const geojson = { type: "FeatureCollection", features: todasFeatures };
-    console.log('GeoJSON completo:', geojson);
+    const featuresShp = todasFeatures
+        .map(mapearFeatureParaShapefile)
+        .filter((f) => !!f);
+
+    if (featuresShp.length === 0) {
+        alert('⚠️ Não há geometrias válidas para exportar.');
+        return;
+    }
+
+    const geojson = { type: "FeatureCollection", features: featuresShp };
+    console.log('Primeira feature mapeada para SHP:', featuresShp[0]);
+    console.log('GeoJSON exportável (SHP):', geojson);
 
     const options = { folder: 'mapeamento_ia', types: { polygon: 'edificacoes' } };
 
