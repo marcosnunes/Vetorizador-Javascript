@@ -19,6 +19,8 @@ const TRAINING_BATCH_SIZE = 50;
 const DATASET_GLOBAL_MAX_RUNS = 120;
 const FIRESTORE_QUOTA_BACKOFF_MS = 30 * 60 * 1000;
 const CLOUD_COUNT_CACHE_MS = 5 * 60 * 1000;
+const UX_COUNT_REFRESH_INTERVAL_MS = 60 * 1000;
+const UX_COUNT_MIN_GAP_MS = 5000;
 const RETREINO_PENDENTE_QUOTA_KEY = 'vetorizador_retreino_pendente_quota_v1';
 const RETREINO_PROMPT_COOLDOWN_MS = 10 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
@@ -29,6 +31,9 @@ let ultimoResumoNuvem = null;
 let ultimoResumoNuvemAt = 0;
 let quotaExcedidaAtiva = false;
 let retreinoPendentePorQuota = null;
+let atualizacaoContagemEmAndamento = false;
+let ultimoRefreshContagemAt = 0;
+let monitoramentoContagemIniciado = false;
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -213,6 +218,16 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
 
 // Atualizar contador de exemplos coletados
 async function atualizarContagemExemplos() {
+    const agoraInicio = Date.now();
+    if (atualizacaoContagemEmAndamento) {
+        return exemploColetados;
+    }
+    if ((agoraInicio - ultimoRefreshContagemAt) < UX_COUNT_MIN_GAP_MS) {
+        return exemploColetados;
+    }
+
+    atualizacaoContagemEmAndamento = true;
+
     try {
         if (!retreinoPendentePorQuota) {
             retreinoPendentePorQuota = carregarRetreinoPendentePorQuota();
@@ -258,6 +273,9 @@ async function atualizarContagemExemplos() {
     } catch (error) {
         console.error('❌ Erro ao atualizar contagem:', error);
         return 0;
+    } finally {
+        atualizacaoContagemEmAndamento = false;
+        ultimoRefreshContagemAt = Date.now();
     }
 }
 
@@ -693,10 +711,28 @@ async function inicializarPhase5() {
             console.log('⚠️ Sem histórico de treinamentos');
         }
 
-        // 4. Timer periódico para atualizar contagem da nuvem
-        setInterval(async () => {
-            await atualizarContagemExemplos();
-        }, 8 * 60 * 1000);
+        // 4. Monitoramento contínuo de contagem na UX (quase tempo real)
+        if (!monitoramentoContagemIniciado) {
+            monitoramentoContagemIniciado = true;
+
+            setInterval(() => {
+                void atualizarContagemExemplos();
+            }, UX_COUNT_REFRESH_INTERVAL_MS);
+
+            window.addEventListener('focus', () => {
+                void atualizarContagemExemplos();
+            });
+
+            window.addEventListener('online', () => {
+                void atualizarContagemExemplos();
+            });
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    void atualizarContagemExemplos();
+                }
+            });
+        }
 
         console.log('✅ Phase 5 inicializado com sucesso');
         console.log(`📊 Exemplos coletados: ${exemploColetados}`);
