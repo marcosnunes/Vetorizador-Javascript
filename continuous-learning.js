@@ -268,12 +268,15 @@ async function atualizarContagemExemplos() {
         const totalLocalElegivel = filtrarFeedbackElegivelTreino(feedbackLocal).length;
 
         const resumoNuvem = await obterResumoNuvem();
-        if (Number.isFinite(resumoNuvem?.total)) {
+        const nuvemOk = Number.isFinite(resumoNuvem?.total);
+        if (nuvemOk) {
             ultimoTotalNuvemTotal = resumoNuvem.total;
         }
 
         const agora = Date.now();
-        const quotaAtiva = quotaExcedidaAtiva || dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte;
+        // Se obterResumoNuvem retornou um total válido, a nuvem está disponível —
+        // ignora o dataset.source obsoleto (que pôde ter sido definido antes da reconexão).
+        const quotaAtiva = !nuvemOk && (quotaExcedidaAtiva || dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte);
         const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
 
         const mostrarSomenteLocal = quotaAtiva || !Number.isFinite(ultimoTotalNuvemTotal);
