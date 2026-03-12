@@ -698,6 +698,26 @@ export async function contarFeedbackGlobalElegivelFirestore() {
             elegiveis
         };
     } catch (error) {
+        // Fallback robusto: quando aggregate/collectionGroup falha por regra/índice,
+        // calcula a contagem usando o export compartilhado por runs.
+        try {
+            console.warn('⚠️ Falha na contagem agregada de feedback; usando fallback por dataset compartilhado.');
+            const dataset = await exportarDatasetCompartilhadoFirestore(120);
+            const feedback = Array.isArray(dataset?.feedback) ? dataset.feedback : [];
+            const inelegiveis = feedback.filter((fb) => fb?.trainingEligible === false).length;
+            const total = feedback.length;
+            const elegiveis = Math.max(0, total - inelegiveis);
+
+            return {
+                source: 'firestore-dataset-fallback-count',
+                total,
+                inelegiveis,
+                elegiveis
+            };
+        } catch {
+            // Segue para o fluxo padrão de erro abaixo.
+        }
+
         if (isQuotaExceededError(error)) {
             error.isQuotaExceeded = true;
         }

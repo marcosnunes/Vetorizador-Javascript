@@ -21,8 +21,6 @@ const FIRESTORE_QUOTA_BACKOFF_MS = 30 * 60 * 1000;
 const CLOUD_COUNT_CACHE_MS = 5 * 60 * 1000;
 const RETREINO_PENDENTE_QUOTA_KEY = 'vetorizador_retreino_pendente_quota_v1';
 const RETREINO_PROMPT_COOLDOWN_MS = 10 * 60 * 1000;
-const FIRESTORE_WRITE_HEARTBEAT_KEY = 'vetorizador_firestore_last_ok_at_v1';
-const FIRESTORE_WRITE_HEARTBEAT_MAX_AGE_MS = 15 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
@@ -31,25 +29,6 @@ let ultimoResumoNuvem = null;
 let ultimoResumoNuvemAt = 0;
 let quotaExcedidaAtiva = false;
 let retreinoPendentePorQuota = null;
-
-function obterUltimoHeartbeatFirestoreOkAt() {
-    const memoria = Number(window.__firestoreLastOkAt || 0);
-    if (Number.isFinite(memoria) && memoria > 0) {
-        return memoria;
-    }
-
-    try {
-        const local = Number(localStorage.getItem(FIRESTORE_WRITE_HEARTBEAT_KEY) || 0);
-        return Number.isFinite(local) && local > 0 ? local : 0;
-    } catch {
-        return 0;
-    }
-}
-
-function heartbeatFirestoreRecente(agora = Date.now()) {
-    const ultimoOkAt = obterUltimoHeartbeatFirestoreOkAt();
-    return ultimoOkAt > 0 && (agora - ultimoOkAt) <= FIRESTORE_WRITE_HEARTBEAT_MAX_AGE_MS;
-}
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -145,10 +124,7 @@ function tentarNotificarRetreinoPosQuota({ quotaAtiva = false } = {}) {
 
 async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
     const agora = Date.now();
-    // Quando o backoff de cota expirou, forçar nova tentativa ignorando cache
-    const backoffExpirou = (firestoreQuotaBackoffAte > 0) && (agora >= firestoreQuotaBackoffAte);
     const cacheValido = !forcarAtualizacao &&
-        !backoffExpirou &&
         ultimoResumoNuvem &&
         (agora - ultimoResumoNuvemAt) < CLOUD_COUNT_CACHE_MS;
 
@@ -160,15 +136,9 @@ async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
         const resumo = await contarFeedbackGlobalElegivelFirestore();
         ultimoResumoNuvem = resumo;
         ultimoResumoNuvemAt = agora;
-        quotaExcedidaAtiva = false;
-        firestoreQuotaBackoffAte = 0; // Reseta backoff quando sucesso
         return resumo;
-    } catch (error) {
-        if (isQuotaExceededError(error)) {
-            quotaExcedidaAtiva = true;
-            firestoreQuotaBackoffAte = Math.max(firestoreQuotaBackoffAte, agora + FIRESTORE_QUOTA_BACKOFF_MS);
-        }
-        // Erros não-cota (ex.: Firebase não inicializado) não marcam quota como excedida
+    } catch {
+        // Mantém último valor conhecido quando a leitura falhar pontualmente.
         return ultimoResumoNuvem;
     }
 }
@@ -258,11 +228,8 @@ async function atualizarContagemExemplos() {
             exemploColetados = ultimoTotalNuvemTotal;
         }
 
-        const agora = Date.now();
-        const escritaRecenteOk = heartbeatFirestoreRecente(agora);
-        const nuvemDisponivel = nuvemOk || escritaRecenteOk;
-        const quotaAtiva = !nuvemDisponivel && (quotaExcedidaAtiva || agora < firestoreQuotaBackoffAte);
-        const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
+        const quotaAtiva = !nuvemOk && !Number.isFinite(ultimoTotalNuvemTotal);
+        const minutosRestantes = 0;
 
         // Exibição: usa sempre o último total confirmado da nuvem.
         // Se a leitura falhar pontualmente, mantém valor anterior para evitar falso "indisponível".
@@ -276,7 +243,7 @@ async function atualizarContagemExemplos() {
 
         tentarNotificarRetreinoPosQuota({ quotaAtiva });
 
-        console.log(`📊 Exemplos na nuvem: ${ultimoTotalNuvemTotal ?? '?'} | leituraNuvemOK=${nuvemOk} | escritaRecenteOK=${escritaRecenteOk}`);
+        console.log(`📊 Exemplos na nuvem: ${ultimoTotalNuvemTotal ?? '?'} | leituraNuvemOK=${nuvemOk}`);
 
         // ✨ Atualizar UI da barra de progresso
         atualizarUIAprendizadoContinuo(exemplosExibicao);
@@ -727,15 +694,8 @@ async function inicializarPhase5() {
         }
 
         // 4. Timer periódico para atualizar contagem da nuvem
-        // Força nova tentativa a cada 8 minutos; ganha se backoff de 30min expirou
         setInterval(async () => {
-            const agora = Date.now();
-            // Força bypass de cache para verificar se a cota normalizou
-            const cacheExpirado = (agora - ultimoResumoNuvemAt) >= CLOUD_COUNT_CACHE_MS;
-            const backoffExpirou = agora >= firestoreQuotaBackoffAte;
-            if (cacheExpirado || backoffExpirou) {
-                await atualizarContagemExemplos();
-            }
+            await atualizarContagemExemplos();
         }, 8 * 60 * 1000);
 
         console.log('✅ Phase 5 inicializado com sucesso');
