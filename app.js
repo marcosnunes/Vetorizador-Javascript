@@ -90,6 +90,13 @@ const ASSIST_SCENARIO_GUARDRAILS = {
         contrastBoost: [1.1, 1.9],
         simplification: [0.000005, 0.00008]
     },
+    cobertura: {
+        edgeThreshold: [50, 125],
+        morphologySize: [1, 7],
+        minArea: [6, 80],
+        contrastBoost: [1.2, 2.1],
+        simplification: [0.000003, 0.00005]
+    },
     rural: {
         edgeThreshold: [45, 120],
         morphologySize: [5, 13],
@@ -1815,6 +1822,23 @@ async function aplicarPreset(tipo) {
                 clusterMinPts: 8,
                 minClusterSize: 90,
                 nome: 'Área Urbana (Precisão Alta)'
+            };
+            break;
+
+        case 'cobertura':
+            preset = {
+                edgeThreshold: 72, // Mais sensível para recuperar telhados com bordas fracas
+                morphologySize: 3, // Preserva separação entre casas próximas
+                minArea: 10.0, // Aceita anexos e telhados menores
+                simplification: 0.00001, // Mantém mais detalhes do contorno
+                contrastBoost: 1.6, // Realce extra para telhados com pouco contraste
+                minQualityScore: 22, // Relaxa o corte por heurística para maximizar recall
+                mergeDistance: 1.5, // Evita fundir telhados vizinhos em área densa
+                clusteringEnabled: true,
+                clusterEps: 2.0,
+                clusterMinPts: 4,
+                minClusterSize: 20,
+                nome: 'Cobertura Máxima (Mais Telhados)'
             };
             break;
 
@@ -4104,6 +4128,77 @@ function estimarProporcaoAguaNoPoligono(coordsPixel, sourceCanvas) {
     return amostrasAgua / totalAmostras;
 }
 
+function aplicarPosFiltroContextual(features = [], presetProfile = '') {
+    const preset = String(presetProfile || '').toLowerCase();
+    if (!Array.isArray(features) || features.length < 2) return features;
+    if (preset !== 'urbano' && preset !== 'cobertura') return features;
+
+    const distanciaVizinhoM = preset === 'cobertura' ? 26 : 20;
+    const areaMinContextual = preset === 'cobertura' ? 8 : 12;
+    const scoreMinContextual = preset === 'cobertura' ? 26 : 32;
+    const resumo = features.map((feature, idx) => {
+        let centroide = null;
+        try {
+            centroide = turf.centroid(feature);
+        } catch {
+            centroide = null;
+        }
+
+        return {
+            idx,
+            feature,
+            area: Number(feature?.properties?.area_m2 || 0),
+            compactness: Number(feature?.properties?.compactness || 0),
+            score: Number(feature?.properties?.confidence_score || 0),
+            centroide
+        };
+    });
+
+    const filtradas = resumo.filter((item) => {
+        if (!item.centroide) return false;
+        if (item.score >= 70) return true;
+
+        const vizinhosCompativeis = resumo.filter((other) => {
+            if (other.idx === item.idx || !other.centroide) return false;
+            const areaBase = Math.max(1, item.area);
+            const ratioArea = other.area / areaBase;
+            if (ratioArea < 0.4 || ratioArea > 2.6) return false;
+
+            try {
+                const distanciaKm = turf.distance(item.centroide, other.centroide, { units: 'kilometers' });
+                return (distanciaKm * 1000) <= distanciaVizinhoM;
+            } catch {
+                return false;
+            }
+        });
+
+        const clusterizado = vizinhosCompativeis.length >= 2;
+        const isolado = vizinhosCompativeis.length === 0;
+        const muitoLinear = item.compactness < 0.12;
+        const compactacaoFraca = item.compactness < 0.18;
+        const pequeno = item.area < areaMinContextual;
+        const scoreBaixo = item.score < scoreMinContextual;
+
+        if (muitoLinear && isolado) return false;
+        if (pequeno && isolado && compactacaoFraca) return false;
+        if (scoreBaixo && isolado && item.compactness < 0.22) return false;
+
+        if (preset === 'cobertura' && clusterizado && item.score < 40 && item.compactness >= 0.18 && item.area >= areaMinContextual) {
+            item.feature.properties.confidence_score = Math.max(item.score, 40);
+            item.feature.properties.quality = 'media';
+        }
+
+        return true;
+    }).map((item) => item.feature);
+
+    const removidas = features.length - filtradas.length;
+    if (removidas > 0) {
+        console.log(`🏘️ Pós-filtro contextual (${preset}): ${features.length} -> ${filtradas.length} (${removidas} removidas)`);
+    }
+
+    return filtradas;
+}
+
 /**
  * Converte coordenadas em pixel para Lat/Lng e aplica filtros geométricos finais.
  */
@@ -4326,8 +4421,13 @@ function converterPixelsParaLatLng(geojson, canvas, mapBounds, selectionMaskFeat
         return area >= CONFIG.minArea && score >= CONFIG.minQualityScore;
     });
 
+    const finaisContextualizados = aplicarPosFiltroContextual(
+        finaisComPropriedades,
+        CONFIG.presetProfile
+    );
+
     console.log(`✅ Total final após fusão: ${finaisComPropriedades.length} polígonos`);
-    return turf.featureCollection(finaisComPropriedades);
+    return turf.featureCollection(finaisContextualizados);
 }
 
 
