@@ -4,7 +4,7 @@
 
 let modeloAutocarregado = null;
 let metricsHistorico = [];
-let autoInferenceAtivo = false;
+window.autoInferenceAtivo = false;
 
 // Auto-load model on app startup
 async function autocarregarModeloML() {
@@ -18,7 +18,7 @@ async function autocarregarModeloML() {
       const modeloGlobal = await window.carregarModeloGlobalFirestore();
       if (modeloGlobal) {
         modeloAutocarregado = modeloGlobal;
-        autoInferenceAtivo = true;
+        window.autoInferenceAtivo = true;
         console.log('✅ Modelo global auto-carregado para inferência');
         return true;
       }
@@ -27,14 +27,16 @@ async function autocarregarModeloML() {
     const modelo = await window.carregarModeloLocalStorage();
     if (modelo) {
       modeloAutocarregado = modelo;
-      autoInferenceAtivo = true;
+      window.autoInferenceAtivo = true;
       console.log('✅ Modelo ML auto-carregado para inferência');
       return true;
     } else {
+      window.autoInferenceAtivo = false;
       console.log('⚠️ Nenhum modelo salvo encontrado');
       return false;
     }
   } catch (error) {
+    window.autoInferenceAtivo = false;
     console.error('❌ Erro ao auto-carregar modelo:', error);
     return false;
   }
@@ -42,7 +44,7 @@ async function autocarregarModeloML() {
 
 // Auto-infer optimal parameters for current settings
 async function autoInferirParametros(configAtual) {
-  if (!modeloAutocarregado || !autoInferenceAtivo) {
+  if (!modeloAutocarregado) {
     return null;
   }
 
@@ -138,7 +140,7 @@ function reduzirFalsosPositivos(features) {
 
 // Aplicar auto-inferência no processamento de imagem
 async function aplicarAutoInferenciaAoProcesamento(features) {
-  if (!autoInferenceAtivo || !features || features.length === 0) {
+  if (!features || features.length === 0) {
     return features;
   }
 
@@ -208,33 +210,6 @@ function obterMetricasAutoInferencia() {
   };
 }
 
-// Toggle auto-inferência
-function toggleAutoInferencia() {
-  if (!modeloAutocarregado) {
-    alert('⚠️ Nenhum modelo carregado!\n\nTreina um modelo primeiro.');
-    return;
-  }
-
-  autoInferenceAtivo = !autoInferenceAtivo;
-  
-  const estado = autoInferenceAtivo ? '🤖 ATIVO' : '⚪ INATIVO';
-  console.log(`Auto-Inferência: ${estado}`);
-  
-  if (window.mostrarNotificacao) {
-    window.mostrarNotificacao(
-      `Auto-Inferência ${autoInferenceAtivo ? 'ATIVADA ✅' : 'DESATIVADA ⚪'}`,
-      autoInferenceAtivo ? 'success' : 'info'
-    );
-  }
-
-  // Atualizar UI se existir
-  const toggle = document.getElementById('auto-inference-toggle');
-  if (toggle) {
-    toggle.textContent = `${autoInferenceAtivo ? '✅' : '⚪'} Auto-Inferência`;
-    toggle.style.background = autoInferenceAtivo ? '#10b981' : '#6c757d';
-  }
-}
-
 // Exportar funções
 window.autocarregarModeloML = autocarregarModeloML;
 window.autoInferirParametros = autoInferirParametros;
@@ -242,4 +217,3 @@ window.posProcessarComConfianca = posProcessarComConfianca;
 window.reduzirFalsosPositivos = reduzirFalsosPositivos;
 window.aplicarAutoInferenciaAoProcesamento = aplicarAutoInferenciaAoProcesamento;
 window.obterMetricasAutoInferencia = obterMetricasAutoInferencia;
-window.toggleAutoInferencia = toggleAutoInferencia;

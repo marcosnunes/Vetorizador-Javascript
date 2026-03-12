@@ -71,6 +71,55 @@ const CALIBRACAO_PRESET_LIMITES = {
     edgeThreshold: { min: 45, max: 170 }
 };
 
+const ASSIST_TELEMETRY_KEY = 'vetorizador_assist_telemetry_v1';
+const ASSIST_TELEMETRY_MAX = 400;
+const ASSIST_STATE_KEY = 'vetorizador_assist_state_v1';
+const ASSIST_DELTA_LIMITS = {
+    edgeThresholdAbs: 18,
+    morphologySizeAbs: 2,
+    minAreaRel: 0.45,
+    contrastBoostAbs: 0.3,
+    simplificationRel: 1.0
+};
+const ASSIST_SMOOTH_ALPHA = 0.4;
+const ASSIST_SCENARIO_GUARDRAILS = {
+    urbano: {
+        edgeThreshold: [70, 145],
+        morphologySize: [3, 9],
+        minArea: [20, 120],
+        contrastBoost: [1.1, 1.9],
+        simplification: [0.000005, 0.00008]
+    },
+    rural: {
+        edgeThreshold: [45, 120],
+        morphologySize: [5, 13],
+        minArea: [20, 220],
+        contrastBoost: [1.2, 2.0],
+        simplification: [0.00001, 0.00012]
+    },
+    industrial: {
+        edgeThreshold: [55, 130],
+        morphologySize: [5, 11],
+        minArea: [60, 350],
+        contrastBoost: [1.1, 1.8],
+        simplification: [0.00001, 0.00015]
+    },
+    trapiche: {
+        edgeThreshold: [35, 95],
+        morphologySize: [1, 5],
+        minArea: [3, 40],
+        contrastBoost: [1.3, 2.3],
+        simplification: [0.000002, 0.00002]
+    },
+    manual: {
+        edgeThreshold: [45, 140],
+        morphologySize: [3, 11],
+        minArea: [5, 160],
+        contrastBoost: [1.0, 2.0],
+        simplification: [0.000005, 0.0001]
+    }
+};
+
 const LEARNING_DB_NAME = 'vetorizador_learning_db';
 const LEARNING_DB_VERSION = 1;
 let learningDbPromise = null;
@@ -483,6 +532,293 @@ function median(values = []) {
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+}
+
+function snapshotConfigAssist(config = CONFIG) {
+    return {
+        edgeThreshold: Number(config.edgeThreshold),
+        morphologySize: Number(config.morphologySize),
+        minArea: Number(config.minArea),
+        simplification: Number(config.simplification),
+        contrastBoost: Number(config.contrastBoost),
+        minQualityScore: Number(config.minQualityScore),
+        mergeDistance: Number(config.mergeDistance),
+        clusteringEnabled: Boolean(config.clusteringEnabled),
+        clusterEps: Number(config.clusterEps),
+        clusterMinPts: Number(config.clusterMinPts),
+        minClusterSize: Number(config.minClusterSize),
+        presetProfile: String(config.presetProfile || 'manual')
+    };
+}
+
+function sincronizarControlesComConfig(config = CONFIG) {
+    document.getElementById('edgeThreshold').value = config.edgeThreshold;
+    document.getElementById('edgeThresholdInput').value = config.edgeThreshold;
+    document.getElementById('morphologySize').value = config.morphologySize;
+    document.getElementById('morphologySizeInput').value = config.morphologySize;
+    document.getElementById('minArea').value = config.minArea;
+    document.getElementById('minAreaInput').value = Number(config.minArea).toFixed(0);
+    document.getElementById('contrastBoost').value = config.contrastBoost;
+    document.getElementById('contrastBoostInput').value = Number(config.contrastBoost).toFixed(1);
+    document.getElementById('simplification').value = config.simplification;
+    document.getElementById('simplificationInput').value = Number(config.simplification).toFixed(6);
+}
+
+function aplicarGuardrailsAssist(candidato, preset) {
+    const presetKey = String(preset || 'manual').toLowerCase();
+    const ranges = ASSIST_SCENARIO_GUARDRAILS[presetKey] || ASSIST_SCENARIO_GUARDRAILS.manual;
+
+    return {
+        ...candidato,
+        edgeThreshold: Math.round(clamp(candidato.edgeThreshold, ranges.edgeThreshold[0], ranges.edgeThreshold[1])),
+        morphologySize: Math.max(1, Math.round(clamp(candidato.morphologySize, ranges.morphologySize[0], ranges.morphologySize[1]))),
+        minArea: Number(clamp(candidato.minArea, ranges.minArea[0], ranges.minArea[1]).toFixed(2)),
+        contrastBoost: Number(clamp(candidato.contrastBoost, ranges.contrastBoost[0], ranges.contrastBoost[1]).toFixed(2)),
+        simplification: Number(clamp(candidato.simplification, ranges.simplification[0], ranges.simplification[1]).toFixed(6))
+    };
+}
+
+function carregarTelemetriaAssist() {
+    try {
+        const raw = localStorage.getItem(ASSIST_TELEMETRY_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function salvarTelemetriaAssist(lista = []) {
+    try {
+        localStorage.setItem(ASSIST_TELEMETRY_KEY, JSON.stringify(lista.slice(-ASSIST_TELEMETRY_MAX)));
+    } catch {
+        // sem-op
+    }
+}
+
+function carregarEstadoAssist() {
+    try {
+        const raw = localStorage.getItem(ASSIST_STATE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function salvarEstadoAssist(state = {}) {
+    try {
+        localStorage.setItem(ASSIST_STATE_KEY, JSON.stringify(state));
+    } catch {
+        // sem-op
+    }
+}
+
+function limitarDeltaAssist(configBaseline, configCandidata) {
+    const base = configBaseline;
+    const cand = configCandidata;
+    const out = { ...cand };
+
+    out.edgeThreshold = Math.round(clamp(
+        Number(cand.edgeThreshold),
+        Number(base.edgeThreshold) - ASSIST_DELTA_LIMITS.edgeThresholdAbs,
+        Number(base.edgeThreshold) + ASSIST_DELTA_LIMITS.edgeThresholdAbs
+    ));
+
+    out.morphologySize = Math.max(1, Math.round(clamp(
+        Number(cand.morphologySize),
+        Number(base.morphologySize) - ASSIST_DELTA_LIMITS.morphologySizeAbs,
+        Number(base.morphologySize) + ASSIST_DELTA_LIMITS.morphologySizeAbs
+    )));
+
+    const areaMin = Number(base.minArea) * (1 - ASSIST_DELTA_LIMITS.minAreaRel);
+    const areaMax = Number(base.minArea) * (1 + ASSIST_DELTA_LIMITS.minAreaRel);
+    out.minArea = Number(clamp(Number(cand.minArea), areaMin, areaMax).toFixed(2));
+
+    out.contrastBoost = Number(clamp(
+        Number(cand.contrastBoost),
+        Number(base.contrastBoost) - ASSIST_DELTA_LIMITS.contrastBoostAbs,
+        Number(base.contrastBoost) + ASSIST_DELTA_LIMITS.contrastBoostAbs
+    ).toFixed(2));
+
+    const simpMin = Number(base.simplification) * (1 - ASSIST_DELTA_LIMITS.simplificationRel);
+    const simpMax = Number(base.simplification) * (1 + ASSIST_DELTA_LIMITS.simplificationRel);
+    out.simplification = Number(clamp(Number(cand.simplification), simpMin, simpMax).toFixed(6));
+
+    return out;
+}
+
+function suavizarConfigAssistPorHistorico(configCandidata, preset) {
+    const estado = carregarEstadoAssist();
+    const presetKey = String(preset || 'manual').toLowerCase();
+    const ultimo = estado[presetKey]?.lastApplied;
+    if (!ultimo || typeof ultimo !== 'object') {
+        return { ...configCandidata };
+    }
+
+    const blend = (anterior, atual) => {
+        if (!Number.isFinite(anterior) || !Number.isFinite(atual)) return atual;
+        return (anterior * (1 - ASSIST_SMOOTH_ALPHA)) + (atual * ASSIST_SMOOTH_ALPHA);
+    };
+
+    return {
+        ...configCandidata,
+        edgeThreshold: Math.round(blend(Number(ultimo.edgeThreshold), Number(configCandidata.edgeThreshold))),
+        morphologySize: Math.max(1, Math.round(blend(Number(ultimo.morphologySize), Number(configCandidata.morphologySize)))),
+        minArea: Number(blend(Number(ultimo.minArea), Number(configCandidata.minArea)).toFixed(2)),
+        contrastBoost: Number(blend(Number(ultimo.contrastBoost), Number(configCandidata.contrastBoost)).toFixed(2)),
+        simplification: Number(blend(Number(ultimo.simplification), Number(configCandidata.simplification)).toFixed(6))
+    };
+}
+
+function atualizarEstadoAssistPosExecucao(configAplicada, preset) {
+    const estado = carregarEstadoAssist();
+    const presetKey = String(preset || 'manual').toLowerCase();
+    estado[presetKey] = {
+        ...(estado[presetKey] || {}),
+        lastApplied: {
+            edgeThreshold: Number(configAplicada.edgeThreshold),
+            morphologySize: Number(configAplicada.morphologySize),
+            minArea: Number(configAplicada.minArea),
+            contrastBoost: Number(configAplicada.contrastBoost),
+            simplification: Number(configAplicada.simplification)
+        },
+        updatedAt: new Date().toISOString()
+    };
+    salvarEstadoAssist(estado);
+}
+
+function obterFatorPesoAssistPorTelemetria(preset) {
+    const dados = carregarTelemetriaAssist();
+    const presetKey = String(preset || 'manual').toLowerCase();
+    const recentes = dados
+        .filter((item) => String(item?.preset || '').toLowerCase() === presetKey)
+        .slice(-20);
+
+    if (recentes.length < 6) return 1;
+
+    const mediaQualidade = recentes.reduce((acc, item) => acc + Number(item?.qualityIndex || 0), 0) / recentes.length;
+    const benchValidos = recentes
+        .map((item) => Number(item?.benchmark?.f1 || NaN))
+        .filter((n) => Number.isFinite(n));
+    const mediaF1 = benchValidos.length > 0 ?
+        (benchValidos.reduce((a, b) => a + b, 0) / benchValidos.length) :
+        null;
+
+    let fator = 1;
+    if (mediaQualidade < 0.45) fator -= 0.12;
+    else if (mediaQualidade > 0.7) fator += 0.08;
+
+    if (mediaF1 !== null) {
+        if (mediaF1 < 0.35) fator -= 0.12;
+        else if (mediaF1 > 0.65) fator += 0.08;
+    }
+
+    return clamp(fator, 0.7, 1.2);
+}
+
+function construirBoundsFeature(bounds) {
+    if (!bounds) return null;
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+    return turf.polygon([[
+        [west, south],
+        [east, south],
+        [east, north],
+        [west, north],
+        [west, south]
+    ]]);
+}
+
+function obterReferenciasManuaisBenchmark(bounds) {
+    const bboxFeature = construirBoundsFeature(bounds);
+    if (!bboxFeature) return [];
+
+    return manualPolygonFeatures
+        .filter((f) => normalizarTipoBenfeitoria(f?.properties?.tipo_benfeitoria) !== 'nao_classificada')
+        .map((f) => ({ type: 'Feature', geometry: f.geometry, properties: f.properties || {} }))
+        .filter((f) => {
+            try {
+                return turf.booleanIntersects(f, bboxFeature);
+            } catch {
+                return false;
+            }
+        });
+}
+
+function calcularIoUFeatures(featureA, featureB) {
+    try {
+        if (!turf.booleanIntersects(featureA, featureB)) return 0;
+        const inter = intersectSafe(featureA, featureB);
+        if (!inter) return 0;
+        const areaInter = turf.area(inter);
+        const areaA = turf.area(featureA);
+        const areaB = turf.area(featureB);
+        const areaUniao = areaA + areaB - areaInter;
+        if (!Number.isFinite(areaUniao) || areaUniao <= 0) return 0;
+        return areaInter / areaUniao;
+    } catch {
+        return 0;
+    }
+}
+
+function calcularBenchmarkCenario(autoFeatures = [], referenciasManuais = []) {
+    if (!Array.isArray(autoFeatures) || !Array.isArray(referenciasManuais) || referenciasManuais.length === 0) {
+        return null;
+    }
+
+    const usadosRef = new Set();
+    let tp = 0;
+    let somaIou = 0;
+
+    autoFeatures.forEach((autoF) => {
+        let melhorIou = 0;
+        let melhorIdx = -1;
+
+        referenciasManuais.forEach((refF, idx) => {
+            if (usadosRef.has(idx)) return;
+            const iou = calcularIoUFeatures(autoF, refF);
+            if (iou > melhorIou) {
+                melhorIou = iou;
+                melhorIdx = idx;
+            }
+        });
+
+        if (melhorIou >= 0.5 && melhorIdx >= 0) {
+            tp += 1;
+            somaIou += melhorIou;
+            usadosRef.add(melhorIdx);
+        }
+    });
+
+    const fp = Math.max(0, autoFeatures.length - tp);
+    const fn = Math.max(0, referenciasManuais.length - tp);
+    const precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
+    const recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
+    const f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+    const iouMedio = tp > 0 ? somaIou / tp : 0;
+
+    return {
+        tp,
+        fp,
+        fn,
+        precision: Number(precision.toFixed(4)),
+        recall: Number(recall.toFixed(4)),
+        f1: Number(f1.toFixed(4)),
+        iouMedio: Number(iouMedio.toFixed(4)),
+        referencias: referenciasManuais.length,
+        autos: autoFeatures.length
+    };
+}
+
+function registrarTelemetriaAssist(payload = {}) {
+    const historico = carregarTelemetriaAssist();
+    historico.push(payload);
+    salvarTelemetriaAssist(historico);
 }
 
 async function calibrarPresetComHistorico(tipoPreset, presetBase) {
@@ -1431,40 +1767,101 @@ function resetarParametros() {
 
 async function aplicarAutoajustePreVetorizacao() {
     if (!window.autoInferirParametros) {
-        return false;
+        return { aplicado: false, estrategia: 'sem_modulo' };
     }
 
     try {
-        const prediction = await window.autoInferirParametros(CONFIG);
-        if (!prediction || prediction.qualidadePredita <= 0.5) {
-            return false;
+        const configBaseline = snapshotConfigAssist(CONFIG);
+        const prediction = await window.autoInferirParametros(configBaseline);
+        if (!prediction) {
+            return { aplicado: false, estrategia: 'sem_predicao' };
         }
 
-        CONFIG.edgeThreshold = prediction.edgeThresholdRecomendado;
-        CONFIG.morphologySize = prediction.morphologySizeRecomendado;
-        CONFIG.contrastBoost = prediction.contrastBoostRecomendado;
-        CONFIG.minArea = prediction.minAreaRecomendada;
-        CONFIG.simplification = prediction.simplificationRecomendada;
+        const confianca = Number(prediction.qualidadePredita || 0.5);
+        const fatorTelemetria = obterFatorPesoAssistPorTelemetria(configBaseline.presetProfile);
+        // Sempre auxilia o WASM: baixa confiança => ajuste leve, alta confiança => ajuste mais forte.
+        const peso = clamp(clamp(confianca, 0.15, 0.85) * fatorTelemetria, 0.1, 0.9);
+        const blend = (base, recomendado) => {
+            if (!Number.isFinite(base) || !Number.isFinite(recomendado)) return base;
+            return base + (recomendado - base) * peso;
+        };
 
-        // Mantém os controles alinhados com os parâmetros inferidos antes do processamento.
-        document.getElementById('edgeThreshold').value = CONFIG.edgeThreshold;
-        document.getElementById('edgeThresholdInput').value = CONFIG.edgeThreshold;
-        document.getElementById('morphologySize').value = CONFIG.morphologySize;
-        document.getElementById('morphologySizeInput').value = CONFIG.morphologySize;
-        document.getElementById('minArea').value = CONFIG.minArea;
-        document.getElementById('minAreaInput').value = Number(CONFIG.minArea).toFixed(0);
-        document.getElementById('contrastBoost').value = CONFIG.contrastBoost;
-        document.getElementById('contrastBoostInput').value = Number(CONFIG.contrastBoost).toFixed(1);
-        document.getElementById('simplification').value = CONFIG.simplification;
-        document.getElementById('simplificationInput').value = Number(CONFIG.simplification).toFixed(6);
+        const configAssistidaCandidata = {
+            ...configBaseline,
+            edgeThreshold: Math.round(blend(configBaseline.edgeThreshold, Number(prediction.edgeThresholdRecomendado))),
+            morphologySize: Math.max(1, Math.round(blend(configBaseline.morphologySize, Number(prediction.morphologySizeRecomendado)))),
+            contrastBoost: Number(blend(configBaseline.contrastBoost, Number(prediction.contrastBoostRecomendado)).toFixed(2)),
+            minArea: Number(blend(configBaseline.minArea, Number(prediction.minAreaRecomendada)).toFixed(2)),
+            simplification: Number(blend(configBaseline.simplification, Number(prediction.simplificationRecomendada)).toFixed(6))
+        };
+
+        const configAssistidaComGuardrails = aplicarGuardrailsAssist(
+            configAssistidaCandidata,
+            configBaseline.presetProfile
+        );
+
+        const configAssistidaComDelta = limitarDeltaAssist(
+            configBaseline,
+            configAssistidaComGuardrails
+        );
+
+        const configAssistida = suavizarConfigAssistPorHistorico(
+            configAssistidaComDelta,
+            configBaseline.presetProfile
+        );
+
+        let scoreBaseline = null;
+        let scoreAssistido = null;
+        if (window.fazerPredictionML) {
+            try {
+                const [pBaseline, pAssist] = await Promise.all([
+                    window.fazerPredictionML(configBaseline),
+                    window.fazerPredictionML(configAssistida)
+                ]);
+                scoreBaseline = Number(pBaseline?.qualidadePredita ?? NaN);
+                scoreAssistido = Number(pAssist?.qualidadePredita ?? NaN);
+            } catch {
+                // sem-op
+            }
+        }
+
+        const usarAssistido = Number.isFinite(scoreBaseline) && Number.isFinite(scoreAssistido) ?
+            scoreAssistido >= (scoreBaseline + 0.005) :
+            true;
+
+        const configEscolhida = usarAssistido ? configAssistida : configBaseline;
+
+        CONFIG.edgeThreshold = configEscolhida.edgeThreshold;
+        CONFIG.morphologySize = configEscolhida.morphologySize;
+        CONFIG.contrastBoost = configEscolhida.contrastBoost;
+        CONFIG.minArea = configEscolhida.minArea;
+        CONFIG.simplification = configEscolhida.simplification;
+
+        atualizarEstadoAssistPosExecucao(configEscolhida, configBaseline.presetProfile);
+
+        sincronizarControlesComConfig(CONFIG);
 
         console.log(
-            `🤖 Autoajuste pré-vetorização aplicado (confiança ${(prediction.qualidadePredita * 100).toFixed(0)}%)`
+            `🤖 Assistência WASM (confiança ${(prediction.qualidadePredita * 100).toFixed(0)}%, peso ${peso.toFixed(2)}, estratégia ${usarAssistido ? 'assistida' : 'baseline'})`
         );
-        return true;
+
+        return {
+            aplicado: true,
+            estrategia: usarAssistido ? 'assistida' : 'baseline',
+            confianca: Number(confianca.toFixed(4)),
+            peso: Number(peso.toFixed(4)),
+            fatorTelemetria: Number(fatorTelemetria.toFixed(4)),
+            scoreBaseline: Number.isFinite(scoreBaseline) ? Number(scoreBaseline.toFixed(4)) : null,
+            scoreAssistido: Number.isFinite(scoreAssistido) ? Number(scoreAssistido.toFixed(4)) : null,
+            configBaseline,
+            configAssistidaComGuardrails,
+            configAssistidaComDelta,
+            configAssistida,
+            configAplicada: snapshotConfigAssist(CONFIG)
+        };
     } catch (error) {
         console.warn('⚠️ Não foi possível aplicar autoajuste pré-vetorização:', error);
-        return false;
+        return { aplicado: false, estrategia: 'erro', erro: error?.message || String(error) };
     }
 }
 
@@ -1603,7 +2000,8 @@ function criarPopupFeedback(feature) {
         <option value="outra" ${tipoAtual === 'outra' ? 'selected' : ''}>Outra benfeitoria</option>
       </select>
     </div>
-    <small style="color:#6b7280; font-size:10px; display:block; margin-top:6px;">ℹ️ Vetorizado automaticamente. Para contribuir com o aprendizado, use o Modo Manual.</small>
+        <button onclick="ativarEdicaoPoligonoExportacao('${featureId}')" style="margin-top:8px;background:#d97706;color:white;border:none;border-radius:4px;padding:7px 10px;font-size:11px;font-weight:600;cursor:pointer;">✏️ Ajustar Polígono (Exportação)</button>
+        <small style="color:#6b7280; font-size:10px; display:block; margin-top:6px;">ℹ️ Ajustes neste polígono afetam apenas a exportação (não entram em feedback/aprendizado).</small>
   `;
 }
 
@@ -1617,6 +2015,139 @@ function definirTipoBenfeitoria(featureId, tipo) {
 
     atualizarVisualizacao();
     mostrarNotificacao(`🏷️ Tipo atualizado para: ${obterRotuloTipoBenfeitoria(tipoNormalizado)}`, 'info');
+}
+
+function ativarEdicaoPoligonoExportacao(featureId) {
+    window.map.closePopup();
+
+    const feature = geojsonFeatures.find((f) => f.properties?.id === featureId);
+    if (!feature) {
+        alert('⚠️ Polígono não encontrado para ajuste.');
+        return;
+    }
+
+    let targetLayer = null;
+    if (window.lastGeoJSONLayer) {
+        window.lastGeoJSONLayer.eachLayer((layer) => {
+            if (layer.feature?.properties?.id === featureId) {
+                targetLayer = layer;
+            }
+        });
+    }
+
+    if (!targetLayer) {
+        alert('⚠️ Layer não encontrado no mapa para ajuste.');
+        return;
+    }
+
+    const geometriaOriginal = JSON.parse(JSON.stringify(feature.geometry));
+    const latlngs = targetLayer.getLatLngs();
+    window.lastGeoJSONLayer.removeLayer(targetLayer);
+
+    const editablePolygon = L.polygon(latlngs, {
+        color: '#d97706',
+        weight: 4,
+        fillOpacity: 0.2,
+        fillColor: '#d97706'
+    }).addTo(window.map);
+
+    editablePolygon.editing.enable();
+
+    setTimeout(() => {
+        const markers = editablePolygon.editing._markers;
+        if (markers) {
+            markers.forEach((marker) => {
+                marker.setIcon(L.divIcon({
+                    className: 'leaflet-div-icon-edit-tiny',
+                    html: '<div style="width:6px;height:6px;background:white;border:1.5px solid #d97706;border-radius:50%;cursor:move;"></div>',
+                    iconSize: [6, 6],
+                    iconAnchor: [3, 3]
+                }));
+
+                marker.on('click', (e) => {
+                    if (e.originalEvent.ctrlKey || e.originalEvent.metaKey) {
+                        e.originalEvent.preventDefault();
+                        e.originalEvent.stopPropagation();
+                        if (editablePolygon.editing._markers.length > 3) {
+                            editablePolygon.editing._deleteMarker(marker);
+                        } else {
+                            alert('⚠️ Um polígono precisa de no mínimo 3 vértices!');
+                        }
+                    }
+                });
+            });
+        }
+    }, 50);
+
+    const instrucoes = L.control({ position: 'bottomright' });
+    instrucoes.onAdd = function () {
+        const div = L.DomUtil.create('div', 'edit-instructions');
+        div.style.cssText = 'background:rgba(0,0,0,0.75);padding:12px;border-radius:6px;max-width:280px;z-index:1000;color:white;backdrop-filter:blur(4px);';
+        div.innerHTML = `
+      <strong style="color:#f59e0b;font-size:13px;display:block;margin-bottom:8px;">✏️ Ajuste para Exportação</strong>
+      <p style="margin:0 0 10px;font-size:11px;line-height:1.5;color:#E0E0E0;">
+        <strong>Mover vértice:</strong> arraste os pontos<br>
+        <strong>Adicionar ponto:</strong> clique nas linhas<br>
+        <strong>Remover vértice:</strong> <kbd style="background:#333;padding:2px 4px;border-radius:2px;">Ctrl</kbd> + Clique<br>
+        <strong>Obs:</strong> não registra feedback/aprendizado
+      </p>
+      <button id="salvar-edicao-export" style="background:#16a34a;color:white;border:none;padding:10px 12px;border-radius:4px;cursor:pointer;width:100%;margin-bottom:6px;font-weight:bold;font-size:12px;">✅ Aplicar Ajuste</button>
+      <button id="cancelar-edicao-export" style="background:#dc2626;color:white;border:none;padding:8px 12px;border-radius:4px;cursor:pointer;width:100%;font-size:11px;">❌ Cancelar</button>
+    `;
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        return div;
+    };
+    instrucoes.addTo(window.map);
+
+    setTimeout(() => {
+        const btnSalvar = document.getElementById('salvar-edicao-export');
+        const btnCancelar = document.getElementById('cancelar-edicao-export');
+
+        if (btnSalvar) {
+            btnSalvar.addEventListener('click', () => {
+                const geometriaEditada = editablePolygon.toGeoJSON().geometry;
+                feature.geometry = geometriaEditada;
+                feature.properties.vertices = Array.isArray(geometriaEditada.coordinates?.[0]) ? geometriaEditada.coordinates[0].length : feature.properties.vertices;
+
+                try {
+                    const areaEditada = turf.area({
+                        type: 'Feature',
+                        geometry: geometriaEditada,
+                        properties: {}
+                    });
+                    feature.properties.area_m2 = Number(areaEditada).toFixed(2);
+                } catch {
+                    // sem-op
+                }
+
+                feature.properties.export_adjusted_at = new Date().toISOString();
+                feature.properties.geometria_original_export = geometriaOriginal;
+
+                window.map.removeLayer(editablePolygon);
+                instrucoes.remove();
+                atualizarVisualizacao();
+
+                if (window.lastGeoJSONLayer) {
+                    window.lastGeoJSONLayer.eachLayer((layer) => {
+                        if (layer.feature?.properties?.id === featureId) {
+                            layer.openPopup();
+                        }
+                    });
+                }
+
+                mostrarNotificacao('✅ Ajuste aplicado para exportação (sem feedback/aprendizado).', 'info');
+            });
+        }
+
+        if (btnCancelar) {
+            btnCancelar.addEventListener('click', () => {
+                window.map.removeLayer(editablePolygon);
+                instrucoes.remove();
+                atualizarVisualizacao();
+            });
+        }
+    }, 100);
 }
 
 function inicializarBancoAprendizado() {
@@ -1674,6 +2205,12 @@ async function idbGetAll(storeName) {
         req.onsuccess = () => resolve(req.result || []);
         req.onerror = () => reject(req.error);
     });
+}
+
+async function salvarRunLocalExecucao(runPayload) {
+    // Execuções automáticas devem persistir apenas localmente
+    // (base para exportação SHP e relatório), sem envio para Firestore.
+    await idbPut('runs', runPayload);
 }
 
 async function salvarRunAprendizado(runPayload) {
@@ -2732,20 +3269,17 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
     loader.style.display = 'flex';
     activeRunId = gerarRunId();
     activeRunStartedAt = new Date().toISOString();
+    const configBaselineExecucao = snapshotConfigAssist(CONFIG);
+    let assistenciaWasmMeta = { aplicado: false, estrategia: 'nao_iniciado' };
     const selectionMaskGeoJSON = selectionLayer ?.toGeoJSON ?.() || null;
     currentSelectionMaskFeature = selectionMaskGeoJSON;
 
     try {
-        loaderText.textContent = '🤖 Aplicando aprendizado para ajustar parâmetros...';
-        const autoajusteAplicado = await aplicarAutoajustePreVetorizacao();
-        if (autoajusteAplicado) {
-            loaderText.textContent = '📸 Capturando imagem com parâmetros aprendidos...';
-        } else {
-            loaderText.textContent = '📸 Capturando imagem da área selecionada...';
-        }
+        assistenciaWasmMeta = await aplicarAutoajustePreVetorizacao();
     } catch {
-        loaderText.textContent = '📸 Capturando imagem da área selecionada...';
+        // sem-op
     }
+    loaderText.textContent = '📸 Capturando imagem da área selecionada...';
 
     // Usamos os bounds do polígono desenhado para a captura
     leafletImage(map, async(err, mainCanvas) => {
@@ -3054,8 +3588,9 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
                     featuresWasm: geojsonResult.features ?.length || 0,
                     featuresAposFiltro: geojsonConvertido.features.length
                 };
+                relatorio.assistenciaWasm = assistenciaWasmMeta;
                 try {
-                    await salvarRunAprendizado({
+                    await salvarRunLocalExecucao({
                         runId: activeRunId,
                         createdAt: activeRunStartedAt,
                         finishedAt: new Date().toISOString(),
@@ -3076,7 +3611,7 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
                         }))
                     });
                 } catch (err) {
-                    console.error('Erro ao salvar execução no banco local:', err);
+                    console.error('Erro ao salvar execução automática no banco local:', err);
                 }
                 registrarRelatorioProcessamento(relatorio);
 
@@ -3141,6 +3676,29 @@ async function processarAreaDesenhada(bounds, selectionLayer) {
                     const highQ = featuresProcessados.filter(f => f.properties.quality === 'alta').length;
                     const medQ = featuresProcessados.filter(f => f.properties.quality === 'media').length;
                     const lowQ = featuresProcessados.filter(f => f.properties.quality === 'baixa').length;
+
+                    const referenciasManuais = obterReferenciasManuaisBenchmark(bounds);
+                    const benchmark = calcularBenchmarkCenario(featuresProcessados, referenciasManuais);
+                    const qualityIndex = featuresProcessados.length > 0 ?
+                        ((highQ + (medQ * 0.6) + (lowQ * 0.2)) / featuresProcessados.length) :
+                        0;
+
+                    registrarTelemetriaAssist({
+                        runId: activeRunId,
+                        timestamp: new Date().toISOString(),
+                        preset: String(CONFIG.presetProfile || 'manual').toLowerCase(),
+                        configBaseline: configBaselineExecucao,
+                        configAplicada: snapshotConfigAssist(CONFIG),
+                        assistencia: assistenciaWasmMeta,
+                        totalFeaturesWasm: geojsonConvertido.features.length,
+                        totalFeaturesFinal: featuresProcessados.length,
+                        quality: { highQ, medQ, lowQ, qualityIndex: Number(qualityIndex.toFixed(4)) },
+                        benchmark
+                    });
+
+                    if (benchmark) {
+                        console.log(`📐 Benchmark cenário (${CONFIG.presetProfile || 'manual'}): IoU médio=${benchmark.iouMedio}, F1=${benchmark.f1}, P=${benchmark.precision}, R=${benchmark.recall}`);
+                    }
 
                     alert(`✅ Processamento concluído!\n\n📊 ${featuresProcessados.length} polígonos detectados\n📐 Área total: ${totalArea.toFixed(2)} m²\n\n🎯 Qualidade:\n  🟢 Alta: ${highQ}\n  🟡 Média: ${medQ}\n  🔴 Baixa: ${lowQ}`);
                 }
@@ -4017,4 +4575,5 @@ window.definirModoVetorizacao = definirModoVetorizacao;
 window.iniciarDesenhoManual = iniciarDesenhoManual;
 window.salvarPoligonoManual = salvarPoligonoManual;
 window.ativarEdicaoPoligonoManual = ativarEdicaoPoligonoManual;
+window.ativarEdicaoPoligonoExportacao = ativarEdicaoPoligonoExportacao;
 window.atualizarTipoManual = atualizarTipoManual;

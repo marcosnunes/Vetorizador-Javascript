@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Portfólio | Ferramenta Vetorizadora + PDFSpliter</title>
+  <title>Portfólio | Plataforma GeoDoc AI</title>
   <style>
     :root {
       --bg: #0b1020;
@@ -135,6 +135,25 @@
       font-size: 14px;
     }
 
+    .kpi {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      color: #d9e7ff;
+    }
+
+    .kpi-label {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 6px;
+    }
+
     .section {
       margin-top: 28px;
       background: var(--panel-2);
@@ -200,73 +219,90 @@
     <section class="hero">
       <div class="badge-row">
         <span class="badge">Portfólio Institucional</span>
-        <span class="badge">Ferramenta Vetorizadora</span>
+        <span class="badge">GeoDoc AI</span>
         <span class="badge">PDFSpliter</span>
         <span class="badge">PDFtoArcGIS</span>
+        <span class="badge">Pitch para Investidores</span>
       </div>
 
-      <h1>Ferramenta Vetorizadora + PDFSpliter com PDFtoArcGIS</h1>
+      <h1>GeoDoc AI: Plataforma para Operação Territorial e Documental</h1>
       <p class="subtitle">
-        Plataforma corporativa para transformar documentação e análise territorial em decisões rápidas, padronizadas e
-        auditáveis. Unifica vetorização geoespacial e automação documental em uma única jornada operacional.
+        Uma vertical SaaS que transforma mapas e documentos técnicos em dados acionáveis para governos e empresas de
+        infraestrutura. Unimos vetorização geoespacial, automação de PDF e extração geográfica em um único fluxo de
+        alto valor operacional.
       </p>
 
       <div class="cta-row">
-        <a class="btn" href="index.html">Abrir Aplicativo Integrado</a>
-        <a class="btn secondary" href="https://github.com/marcosnunes/Vetorizador-Javascript">Github</a>
+        <a class="btn" href="index.html">Abrir Produto</a>
+        <a class="btn secondary" href="https://jolly-pebble-0487d1a1e.6.azurestaticapps.net/" target="_blank" rel="noopener noreferrer">Ver Ambiente em Produção</a>
+        <a class="btn ghost" href="https://github.com/marcosnunes/Vetorizador-Javascript" target="_blank" rel="noopener noreferrer">Repositório</a>
       </div>
     </section>
 
     <section class="grid">
       <article class="card">
-        <h2>Eficiência Operacional</h2>
-        <p>Reduz tempo de ciclo e retrabalho nas frentes de vetorização e tratamento documental.</p>
+        <span class="kpi-label">Proposta de Valor</span>
+        <span class="kpi">Mapa + Documento + IA</span>
+        <p>Concentramos tarefas críticas de geotecnologia e documentos técnicos em uma única plataforma operacional.</p>
       </article>
       <article class="card">
-        <h2>Padronização e Qualidade</h2>
-        <p>Aplica critérios consistentes de qualidade, com entregáveis confiáveis para uso institucional.</p>
+        <span class="kpi-label">Segmento-alvo</span>
+        <span class="kpi">Gov + Infra</span>
+        <p>Foco em órgãos públicos, cadastro territorial, planejamento urbano, engenharia e utilities.</p>
       </article>
       <article class="card">
-        <h2>Integração com SIG</h2>
-        <p>Gera saídas compatíveis com ecossistema GIS, conectando documento técnico à inteligência territorial.</p>
+        <span class="kpi-label">Modelo de Receita</span>
+        <span class="kpi">SaaS B2B</span>
+        <p>Assinatura recorrente por organização, com camadas por volume, módulos e nível de suporte.</p>
       </article>
       <article class="card">
-        <h2>Governança e Evolução</h2>
-        <p>Permite rastreabilidade, histórico de operação e base estruturada para melhoria contínua.</p>
+        <span class="kpi-label">Vantagem Competitiva</span>
+        <span class="kpi">Workflow Integrado</span>
+        <p>Poucos players unem vetorização, parsing documental e exportação geoespacial com foco operacional.</p>
       </article>
     </section>
 
     <section class="section">
-      <h3>Resumo Executivo</h3>
+      <h3>Tese de Investimento</h3>
       <p>
-        Esta solução integra duas frentes essenciais: vetorização de edificações e automação documental. Com o
-        PDFtoArcGIS, informações de documentos passam a gerar dados geoespaciais acionáveis para planejamento,
-        fiscalização e gestão. O resultado direto é produtividade, previsibilidade e suporte à decisão em nível
-        organizacional.
+        O mercado de operações territoriais ainda depende de processos manuais, softwares fragmentados e alto custo de
+        integração. O GeoDoc AI ataca esse gargalo com uma plataforma vertical, simples de adoção e orientada à
+        produtividade. A oportunidade está na recorrência de uso e no potencial de expansão por módulos.
       </p>
     </section>
 
     <section class="section">
-      <h3>Estratégia de IA Corporativa (Azure)</h3>
+      <h3>Produto e Tecnologia</h3>
       <p>
-        Para o módulo PDFtoArcGIS, a leitura de documentos e extração de coordenadas será centralizada em backend Azure,
-        com IA responsável por compreender os padrões dos PDFs e devolver diretamente o GeoJSON limpo utilizado no fluxo.
+        A arquitetura combina processamento geoespacial no cliente e serviços de IA em nuvem para leitura documental.
+        A plataforma prioriza integração com ecossistema Microsoft para atender exigências corporativas de segurança,
+        conformidade e governança.
       </p>
       <ul>
-        <li>Sem parsing por regex no cliente e sem fallback alternativo de extração.</li>
-        <li>Em caso de falha, o retorno previsto é mensagem de erro estruturada do serviço.</li>
-        <li>A arquitetura prioriza serviços Microsoft devido a políticas corporativas de firewall.</li>
-        <li>O uso de Azure atende exigências de proteção de dados e governança institucional.</li>
+        <li>Vetorização de áreas com revisão visual antes da exportação.</li>
+        <li>Módulo documental para dividir, unir e converter PDFs em escala.</li>
+        <li>Extração geográfica de documentos técnicos para consumo em SIG.</li>
+        <li>Evolução contínua com aprendizado assistivo para maior precisão operacional.</li>
       </ul>
     </section>
 
     <section class="section">
-      <h3>Principais Casos de Uso</h3>
+      <h3>Plano de Expansão (12 meses)</h3>
       <ul>
-        <li>Cadastro e atualização de base imobiliária.</li>
-        <li>Auditoria territorial e análise patrimonial.</li>
-        <li>Conversão e organização documental em escala.</li>
-        <li>Extração geográfica de documentos técnicos para operação SIG.</li>
+        <li>Fortalecer distribuição no setor público e parceiros de geotecnologia.</li>
+        <li>Escalar módulos premium para clientes com alto volume documental.</li>
+        <li>Expandir integrações com fluxos SIG e ERPs institucionais.</li>
+        <li>Implementar trilha comercial com provas de valor e onboarding acelerado.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h3>Indicadores para Investidor</h3>
+      <ul>
+        <li>Eficiência operacional por fluxo: tempo médio por tarefa e ganho sobre processo manual.</li>
+        <li>Adoção: organizações ativas, usuários recorrentes e profundidade de uso por módulo.</li>
+        <li>Receita: crescimento de MRR, expansão por conta e retenção de contratos institucionais.</li>
+        <li>Qualidade: taxa de retrabalho e nível de confiança dos outputs geoespaciais.</li>
       </ul>
     </section>
 

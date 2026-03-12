@@ -110,7 +110,7 @@ function tentarNotificarRetreinoPosQuota({ quotaAtiva = false } = {}) {
 
     const confirmar = confirm(
         `🌐 A cota do Firestore normalizou.\n\n` +
-        `O último treino foi parcial (dados locais).\n` +
+        `O último treino foi limitado por indisponibilidade temporária da nuvem.\n` +
         `Deseja retreinar agora usando dados da nuvem?\n\n` +
         `Base parcial anterior: ${exemplosBase} exemplos.`
     );

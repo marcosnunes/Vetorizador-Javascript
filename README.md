@@ -21,6 +21,17 @@ Em vez de usar várias ferramentas separadas, o usuário acessa uma plataforma �
 
 ---
 
+## Como funciona na prática
+
+1. A equipe seleciona a área no mapa.
+2. A plataforma identifica benfeitorias automaticamente.
+3. O usuário pode ajustar os polígonos antes da exportação.
+4. O resultado é exportado para continuidade do trabalho técnico.
+
+Para melhoria contínua, existe um modo manual para registrar exemplos de aprendizado de forma controlada.
+
+---
+
 ## Principais benefícios
 
 - Mais produtividade no dia a dia de análise territorial e documental.
@@ -47,7 +58,7 @@ Em vez de usar várias ferramentas separadas, o usuário acessa uma plataforma �
 
 ### 3) PDFtoArcGIS
 
-- Interpreta documentos técnicos e gera saída geoespacial (GeoJSON).
+- Interpreta documentos técnicos e gera saída geoespacial.
 - Apoio de IA em nuvem para leitura e extração estruturada.
 - Facilita o aproveitamento de informações documentais em contexto cartográfico.
 
@@ -77,6 +88,15 @@ Em vez de usar várias ferramentas separadas, o usuário acessa uma plataforma �
 - Foco em uso real de negócio, não apenas em demonstração técnica.
 - Arquitetura preparada para operação contínua e evolução.
 - Experiência pensada para produtividade de equipes.
+
+---
+
+## Resultado para o cliente
+
+- Redução de tempo em tarefas repetitivas.
+- Maior padronização na geração de insumos técnicos.
+- Menor risco de retrabalho em processos com mapas e documentos.
+- Melhor previsibilidade operacional para equipes e gestores.
 
 ---
 
