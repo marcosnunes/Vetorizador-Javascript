@@ -4128,6 +4128,28 @@ function estimarProporcaoAguaNoPoligono(coordsPixel, sourceCanvas) {
     return amostrasAgua / totalAmostras;
 }
 
+function estimarElongacaoFeature(feature) {
+    if (!feature) return 1;
+
+    try {
+        const bbox = turf.bbox(feature);
+        const minX = bbox[0];
+        const minY = bbox[1];
+        const maxX = bbox[2];
+        const maxY = bbox[3];
+
+        const largura = turf.distance([minX, minY], [maxX, minY], { units: 'kilometers' }) * 1000;
+        const altura = turf.distance([minX, minY], [minX, maxY], { units: 'kilometers' }) * 1000;
+        const menor = Math.max(0.001, Math.min(largura, altura));
+        const maior = Math.max(largura, altura);
+
+        if (!Number.isFinite(maior) || !Number.isFinite(menor)) return 1;
+        return maior / menor;
+    } catch {
+        return 1;
+    }
+}
+
 function aplicarPosFiltroContextual(features = [], presetProfile = '') {
     const preset = String(presetProfile || '').toLowerCase();
     if (!Array.isArray(features) || features.length < 2) return features;
@@ -4150,6 +4172,7 @@ function aplicarPosFiltroContextual(features = [], presetProfile = '') {
             area: Number(feature?.properties?.area_m2 || 0),
             compactness: Number(feature?.properties?.compactness || 0),
             score: Number(feature?.properties?.confidence_score || 0),
+            elongacao: estimarElongacaoFeature(feature),
             centroide
         };
     });
@@ -4178,10 +4201,18 @@ function aplicarPosFiltroContextual(features = [], presetProfile = '') {
         const compactacaoFraca = item.compactness < 0.18;
         const pequeno = item.area < areaMinContextual;
         const scoreBaixo = item.score < scoreMinContextual;
+        const elongado = item.elongacao > 4.8;
+        const muitoElongado = item.elongacao > 7.5;
 
         if (muitoLinear && isolado) return false;
         if (pequeno && isolado && compactacaoFraca) return false;
         if (scoreBaixo && isolado && item.compactness < 0.22) return false;
+
+        if (preset === 'cobertura') {
+            if (muitoElongado && item.compactness < 0.3) return false;
+            if (elongado && isolado && item.compactness < 0.26) return false;
+            if (elongado && item.area > 120 && item.compactness < 0.34) return false;
+        }
 
         if (preset === 'cobertura' && clusterizado && item.score < 40 && item.compactness >= 0.18 && item.area >= areaMinContextual) {
             item.feature.properties.confidence_score = Math.max(item.score, 40);
