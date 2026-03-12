@@ -2000,7 +2000,10 @@ function criarPopupFeedback(feature) {
         <option value="outra" ${tipoAtual === 'outra' ? 'selected' : ''}>Outra benfeitoria</option>
       </select>
     </div>
-        <button onclick="ativarEdicaoPoligonoExportacao('${featureId}')" style="margin-top:8px;background:#d97706;color:white;border:none;border-radius:4px;padding:7px 10px;font-size:11px;font-weight:600;cursor:pointer;">✏️ Ajustar Polígono (Exportação)</button>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+                <button onclick="ativarEdicaoPoligonoExportacao('${featureId}')" style="flex:1;background:#d97706;color:white;border:none;border-radius:4px;padding:7px 10px;font-size:11px;font-weight:600;cursor:pointer;">✏️ Ajustar Polígono</button>
+                <button onclick="deletarPoligonoExportacao('${featureId}')" style="flex:1;background:#dc2626;color:white;border:none;border-radius:4px;padding:7px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑️ Deletar</button>
+        </div>
         <small style="color:#6b7280; font-size:10px; display:block; margin-top:6px;">ℹ️ Ajustes neste polígono afetam apenas a exportação (não entram em feedback/aprendizado).</small>
   `;
 }
@@ -2148,6 +2151,23 @@ function ativarEdicaoPoligonoExportacao(featureId) {
             });
         }
     }, 100);
+}
+
+function deletarPoligonoExportacao(featureId) {
+    if (!featureId) return;
+
+    const feature = geojsonFeatures.find((f) => f.properties?.id === featureId);
+    if (!feature) {
+        alert('⚠️ Polígono não encontrado para exclusão.');
+        return;
+    }
+
+    const confirmado = window.confirm('Deseja realmente deletar este polígono? Esta ação afeta apenas o resultado atual para exportação.');
+    if (!confirmado) return;
+
+    window.map.closePopup();
+    removerPoligonoRejeitado(featureId);
+    mostrarNotificacao('🗑️ Polígono removido da exportação atual (sem feedback/aprendizado).', 'info');
 }
 
 function inicializarBancoAprendizado() {
@@ -4328,10 +4348,17 @@ function criarPopupPoligonoManual(featureId) {
     const props = feature.properties;
     const tipoAtual = normalizarTipoBenfeitoria(props.tipo_benfeitoria);
     const jaSalvo = props.feedback_status === 'aprovado';
+        const statusTexto = jaSalvo ? 'Salvo na Nuvem' : 'Somente Local';
+        const statusStyle = jaSalvo
+                ? 'background:#dcfce7;color:#166534;border:1px solid #86efac;'
+                : 'background:#f3f4f6;color:#374151;border:1px solid #d1d5db;';
 
     return `
     <div style="min-width:230px;">
-      <strong style="color:#7c3aed;font-size:13px;">✏️ Polígono Manual</strong><br>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <strong style="color:#7c3aed;font-size:13px;">✏️ Polígono Manual</strong>
+                <span style="${statusStyle}font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap;">${statusTexto}</span>
+            </div>
       <span style="font-size:11px;color:#6b7280;">Área: ${props.area_m2} m² &nbsp;|&nbsp; Vértices: ${props.vertices}</span>
       <div style="margin-top:8px;">
         <label style="font-size:12px;font-weight:600;">Classificação:</label><br>
@@ -4345,6 +4372,7 @@ function criarPopupPoligonoManual(featureId) {
       <div style="margin-top:10px;display:flex;gap:6px;">
         <button onclick="salvarPoligonoManual('${featureId}')" style="background:${jaSalvo ? '#15803d' : '#7c3aed'};flex:2;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">${jaSalvo ? '✅ Salvo' : '💾 Salvar para Aprendizado'}</button>
         <button onclick="ativarEdicaoPoligonoManual('${featureId}')" style="background:#d97706;flex:1;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">✏️ Editar</button>
+                <button onclick="deletarPoligonoManual('${featureId}')" style="background:#dc2626;flex:1;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">🗑️ Deletar</button>
       </div>
             ${jaSalvo ? '<small style="color:#15803d;margin-top:6px;display:block;">✅ Exemplo salvo na nuvem para aprendizado!</small>' : '<small style="color:#9ca3af;margin-top:6px;display:block;">Selecione o tipo e clique em Salvar (requer conexão com a nuvem).</small>'}
     </div>
@@ -4358,6 +4386,42 @@ function atualizarTipoManual(featureId, tipo) {
     const feature = manualPolygonFeatures.find(f => f.properties?.id === featureId);
     if (!feature) return;
     feature.properties.tipo_benfeitoria = normalizarTipoBenfeitoria(tipo);
+}
+
+function deletarPoligonoManual(featureId) {
+    if (!featureId) return;
+
+    const idx = manualPolygonFeatures.findIndex((f) => f.properties?.id === featureId);
+    if (idx < 0) {
+        alert('⚠️ Polígono manual não encontrado.');
+        return;
+    }
+
+    const feature = manualPolygonFeatures[idx];
+    const jaSalvoNuvem = feature?.properties?.feedback_status === 'aprovado';
+    const mensagemConfirmacao = jaSalvoNuvem
+        ? 'Este polígono já foi salvo na nuvem para aprendizado.\n\nDeseja removê-lo apenas do mapa atual? (o registro salvo na nuvem será mantido)'
+        : 'Deseja realmente deletar este polígono manual do mapa atual?';
+
+    if (!window.confirm(mensagemConfirmacao)) return;
+
+    manualPolygonFeatures.splice(idx, 1);
+
+    const layersParaRemover = [];
+    drawnItems.eachLayer((layer) => {
+        if (layer?.feature?.properties?.id === featureId) {
+            layersParaRemover.push(layer);
+        }
+    });
+    layersParaRemover.forEach((layer) => drawnItems.removeLayer(layer));
+
+    window.map.closePopup();
+    atualizarEstatisticas();
+
+    const mensagem = jaSalvoNuvem
+        ? '🗑️ Polígono removido do mapa atual. O exemplo já salvo na nuvem foi preservado.'
+        : '🗑️ Polígono manual removido do mapa atual.';
+    mostrarNotificacao(mensagem, 'info');
 }
 
 /**
@@ -4576,4 +4640,6 @@ window.iniciarDesenhoManual = iniciarDesenhoManual;
 window.salvarPoligonoManual = salvarPoligonoManual;
 window.ativarEdicaoPoligonoManual = ativarEdicaoPoligonoManual;
 window.ativarEdicaoPoligonoExportacao = ativarEdicaoPoligonoExportacao;
+window.deletarPoligonoExportacao = deletarPoligonoExportacao;
+window.deletarPoligonoManual = deletarPoligonoManual;
 window.atualizarTipoManual = atualizarTipoManual;
