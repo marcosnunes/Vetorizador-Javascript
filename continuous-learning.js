@@ -21,6 +21,8 @@ const FIRESTORE_QUOTA_BACKOFF_MS = 30 * 60 * 1000;
 const CLOUD_COUNT_CACHE_MS = 5 * 60 * 1000;
 const RETREINO_PENDENTE_QUOTA_KEY = 'vetorizador_retreino_pendente_quota_v1';
 const RETREINO_PROMPT_COOLDOWN_MS = 10 * 60 * 1000;
+const FIRESTORE_WRITE_HEARTBEAT_KEY = 'vetorizador_firestore_last_ok_at_v1';
+const FIRESTORE_WRITE_HEARTBEAT_MAX_AGE_MS = 15 * 60 * 1000;
 let ultimoDatasetCompartilhado = null;
 let ultimoDatasetCompartilhadoAt = 0;
 let firestoreQuotaBackoffAte = 0;
@@ -29,6 +31,25 @@ let ultimoResumoNuvem = null;
 let ultimoResumoNuvemAt = 0;
 let quotaExcedidaAtiva = false;
 let retreinoPendentePorQuota = null;
+
+function obterUltimoHeartbeatFirestoreOkAt() {
+    const memoria = Number(window.__firestoreLastOkAt || 0);
+    if (Number.isFinite(memoria) && memoria > 0) {
+        return memoria;
+    }
+
+    try {
+        const local = Number(localStorage.getItem(FIRESTORE_WRITE_HEARTBEAT_KEY) || 0);
+        return Number.isFinite(local) && local > 0 ? local : 0;
+    } catch {
+        return 0;
+    }
+}
+
+function heartbeatFirestoreRecente(agora = Date.now()) {
+    const ultimoOkAt = obterUltimoHeartbeatFirestoreOkAt();
+    return ultimoOkAt > 0 && (agora - ultimoOkAt) <= FIRESTORE_WRITE_HEARTBEAT_MAX_AGE_MS;
+}
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -174,22 +195,6 @@ function atualizarResumoOrigemUI({ nuvemTotal = null, quotaAtiva = false, minuto
     }
 }
 
-async function obterDatasetLocalTreino() {
-    const idbGetAll = window.idbGetAll || (() => []);
-    const runs = await idbGetAll('runs');
-    const feedback = await idbGetAll('feedback');
-
-    return {
-        exportedAt: new Date().toISOString(),
-        app: 'vetorizador-edificacoes',
-        version: 'fase5-continuous-learning',
-        source: 'indexeddb-local',
-        runs,
-        feedback,
-        exemplosTotal: feedback.length
-    };
-}
-
 async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {}) {
     const agora = Date.now();
     const cacheValido = !forcarAtualizacao &&
@@ -202,13 +207,9 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
 
     if (agora < firestoreQuotaBackoffAte) {
         const minutosRestantes = Math.ceil((firestoreQuotaBackoffAte - agora) / 60000);
-        console.warn(`⚠️ Firestore em cooldown por cota (${minutosRestantes} min restantes). Usando dataset local.`);
+        console.warn(`⚠️ Firestore em cooldown por cota (${minutosRestantes} min restantes).`);
         quotaExcedidaAtiva = true;
-        const datasetLocal = await obterDatasetLocalTreino();
-        datasetLocal.source = 'indexeddb-local-quota-backoff';
-        ultimoDatasetCompartilhado = datasetLocal;
-        ultimoDatasetCompartilhadoAt = agora;
-        return datasetLocal;
+        throw new Error(`Firestore em cooldown por cota (${minutosRestantes} min restantes).`);
     }
 
     try {
@@ -224,6 +225,7 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
 
         datasetNormalizado.exemplosTotal = datasetNormalizado.feedback.length;
         quotaExcedidaAtiva = false;
+        firestoreQuotaBackoffAte = 0;
         ultimoDatasetCompartilhado = datasetNormalizado;
         ultimoDatasetCompartilhadoAt = agora;
         return datasetNormalizado;
@@ -231,16 +233,9 @@ async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {
         if (isQuotaExceededError(error)) {
             firestoreQuotaBackoffAte = agora + FIRESTORE_QUOTA_BACKOFF_MS;
             quotaExcedidaAtiva = true;
-            console.warn('⏱️ Quota do Firestore excedida. Ativando fallback local temporário para evitar novas leituras caras.');
+            console.warn('⏱️ Quota do Firestore excedida. Retreinamento cloud-only ficará temporariamente indisponível.');
         }
-        console.warn('⚠️ Falha ao obter dataset compartilhado, usando dataset local:', error ?.message || error);
-        const datasetLocal = await obterDatasetLocalTreino();
-        if (isQuotaExceededError(error)) {
-            datasetLocal.source = 'indexeddb-local-quota-backoff';
-        }
-        ultimoDatasetCompartilhado = datasetLocal;
-        ultimoDatasetCompartilhadoAt = agora;
-        return datasetLocal;
+        throw error;
     }
 }
 
@@ -253,45 +248,46 @@ async function atualizarContagemExemplos() {
             retreinoPendentePorQuota = carregarRetreinoPendentePorQuota();
         }
 
-        const dataset = await obterDatasetTreinoCompartilhado();
-        const feedback = Array.isArray(dataset.feedback) ? dataset.feedback : [];
-        const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
-        exemploColetados = feedbackElegivel.length;
-
         // Contagem canônica para exibição: sempre vem direto do Firestore
         const resumoNuvem = await obterResumoNuvem();
         const nuvemOk = Number.isFinite(resumoNuvem?.total);
         if (nuvemOk) {
             ultimoTotalNuvemTotal = resumoNuvem.total;
+            exemploColetados = resumoNuvem.total;
+        } else if (Number.isFinite(ultimoTotalNuvemTotal)) {
+            exemploColetados = ultimoTotalNuvemTotal;
         }
 
         const agora = Date.now();
-        const quotaAtiva = !nuvemOk && (quotaExcedidaAtiva || agora < firestoreQuotaBackoffAte);
+        const escritaRecenteOk = heartbeatFirestoreRecente(agora);
+        const nuvemDisponivel = nuvemOk || escritaRecenteOk;
+        const quotaAtiva = !nuvemDisponivel && (quotaExcedidaAtiva || agora < firestoreQuotaBackoffAte);
         const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
 
-        // Exibição: total real da nuvem; fallback para contagem local do dataset
-        const exemplosExibicao = nuvemOk ? ultimoTotalNuvemTotal : exemploColetados;
+        // Exibição: usa sempre o último total confirmado da nuvem.
+        // Se a leitura falhar pontualmente, mantém valor anterior para evitar falso "indisponível".
+        const exemplosExibicao = Number.isFinite(ultimoTotalNuvemTotal) ? ultimoTotalNuvemTotal : 0;
 
         atualizarResumoOrigemUI({
-            nuvemTotal: nuvemOk ? ultimoTotalNuvemTotal : null,
+            nuvemTotal: Number.isFinite(ultimoTotalNuvemTotal) ? ultimoTotalNuvemTotal : null,
             quotaAtiva,
             minutosRestantes
         });
 
         tentarNotificarRetreinoPosQuota({ quotaAtiva });
 
-        console.log(`📊 Exemplos na nuvem: ${ultimoTotalNuvemTotal ?? '?'} | dataset elegível local: ${exemploColetados}`);
+        console.log(`📊 Exemplos na nuvem: ${ultimoTotalNuvemTotal ?? '?'} | leituraNuvemOK=${nuvemOk} | escritaRecenteOK=${escritaRecenteOk}`);
 
         // ✨ Atualizar UI da barra de progresso
         atualizarUIAprendizadoContinuo(exemplosExibicao);
 
         // Se atingiu o lote de treino, sugerir retreinamento
-        if (exemploColetados % TRAINING_BATCH_SIZE === 0 && exemploColetados > 0) {
-            console.log(`🎉 MARCO: ${exemploColetados} exemplos coletados!`);
+        if (exemplosExibicao % TRAINING_BATCH_SIZE === 0 && exemplosExibicao > 0) {
+            console.log(`🎉 MARCO: ${exemplosExibicao} exemplos coletados!`);
             sugerirRetreinar();
         }
 
-        return exemploColetados;
+        return exemplosExibicao;
     } catch (error) {
         console.error('❌ Erro ao atualizar contagem:', error);
         return 0;
@@ -372,7 +368,7 @@ async function executarRetreninamentoAutomatico() {
 
     try {
         const dataset = await obterDatasetTreinoCompartilhado({ forcarAtualizacao: true });
-        const treinoParcialPorQuota = dataset.source === 'indexeddb-local-quota-backoff' || quotaExcedidaAtiva;
+        const treinoParcialPorQuota = quotaExcedidaAtiva;
 
         // Retreinar modelo
         const sucesso = await window.treinarModeloML(dataset);
@@ -393,7 +389,7 @@ async function executarRetreninamentoAutomatico() {
             if (loader) loader.style.display = 'none';
             if (window.mostrarNotificacao) {
                 window.mostrarNotificacao(
-                    `✅ Modelo retreinado com ${exemploColetados} exemplos (${dataset.source || 'dataset compartilhado'})!`,
+                    `✅ Modelo retreinado com ${exemploColetados} exemplos (nuvem)!`,
                     'success'
                 );
             }

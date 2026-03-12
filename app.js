@@ -22,7 +22,6 @@ import {
 } from './firestore-service.js';
 import {
     inicializarFilaOffline,
-    adicionarNaFila,
     sincronizarFila,
     contarOperacoesPendentes
 } from './offline-queue.js';
@@ -80,6 +79,17 @@ let learningDbPromise = null;
 let firebaseInicializado = false;
 let modoOffline = false;
 let sincronizacaoEmAndamento = false;
+const FIRESTORE_WRITE_HEARTBEAT_KEY = 'vetorizador_firestore_last_ok_at_v1';
+
+function registrarHeartbeatFirestoreOk() {
+    const agora = Date.now();
+    window.__firestoreLastOkAt = agora;
+    try {
+        localStorage.setItem(FIRESTORE_WRITE_HEARTBEAT_KEY, String(agora));
+    } catch {
+        // sem-op
+    }
+}
 
 // --- PARÂMETROS AJUSTÁVEIS ---
 /**
@@ -346,12 +356,15 @@ async function sincronizarFilaPendente() {
             switch (operationType) {
                 case 'run':
                     await salvarRunFirestore(payload.runId, payload.dadosRun);
+                    registrarHeartbeatFirestoreOk();
                     break;
                 case 'features':
                     await salvarFeaturesFirestore(payload.runId, payload.features);
+                    registrarHeartbeatFirestoreOk();
                     break;
                 case 'feedback':
                     await salvarFeedbackFirestore(payload.runId, payload.featureId, normalizarFeedbackPayload(payload.feedback));
+                    registrarHeartbeatFirestoreOk();
                     break;
                 default:
                     console.warn(`⚠️ Tipo de operação desconhecido: ${operationType}`);
@@ -1664,40 +1677,22 @@ async function idbGetAll(storeName) {
 }
 
 async function salvarRunAprendizado(runPayload) {
-    // Salva localmente no IndexedDB (sempre)
-    await idbPut('runs', runPayload);
-
-    // Tenta salvar no Firestore se online e inicializado
-    if (firebaseInicializado && estaOnline()) {
-        try {
-            // Salva run
-            await salvarRunFirestore(runPayload.runId, runPayload);
-
-            // Salva features como subcoleção
-            if (runPayload.features && runPayload.features.length > 0) {
-                await salvarFeaturesFirestore(runPayload.runId, runPayload.features);
-            }
-
-            console.log(`✅ Run ${runPayload.runId.substring(0, 8)} salva no Firestore`);
-        } catch (error) {
-            console.error('❌ Erro ao salvar run no Firestore - adicionando à fila offline:', error);
-            await adicionarNaFila('run', { runId: runPayload.runId, dadosRun: runPayload });
-            if (runPayload.features && runPayload.features.length > 0) {
-                await adicionarNaFila('features', { runId: runPayload.runId, features: runPayload.features });
-            }
-        }
-    } else {
-        // Adiciona à fila offline para sincronização posterior
-        await adicionarNaFila('run', { runId: runPayload.runId, dadosRun: runPayload });
-        if (runPayload.features && runPayload.features.length > 0) {
-            await adicionarNaFila('features', { runId: runPayload.runId, features: runPayload.features });
-        }
+    if (!firebaseInicializado || !estaOnline()) {
+        throw new Error('Firestore indisponível no momento. Verifique a conexão e tente novamente.');
     }
+
+    // Persistência cloud-only para aprendizado manual
+    await salvarRunFirestore(runPayload.runId, runPayload);
+    if (runPayload.features && runPayload.features.length > 0) {
+        await salvarFeaturesFirestore(runPayload.runId, runPayload.features);
+    }
+
+    registrarHeartbeatFirestoreOk();
+    console.log(`✅ Run ${runPayload.runId.substring(0, 8)} salva no Firestore`);
 }
 
 /**
- * Persiste feedback para aprendizado contínuo.
- * Ordem: IndexedDB (sempre) -> Firestore (quando online) -> fila offline (fallback).
+ * Persiste feedback para aprendizado contínuo em modo cloud-only.
  */
 async function salvarFeedbackAprendizado(feedbackPayload) {
     const feedbackNormalizado = normalizarFeedbackPayload(feedbackPayload);
@@ -1713,27 +1708,6 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
         categorizarMotivoRejeicao(feedbackNormalizado.reason) :
         null;
 
-    const registroFeedback = {
-        ...feedbackPayload,
-        ...feedbackNormalizado,
-        label: statusNormalizado,
-        feedbackStatus: statusNormalizado,
-        feedbackReason: feedbackNormalizado.reason,
-        tipoBenfeitoria,
-        editedGeometry: feedbackNormalizado.editedGeometry,
-        timestamp: feedbackNormalizado.timestamp,
-        finalQualityScore: Number(feedbackPayload.featureSnapshot ?.confidenceScore || 0),
-        hardNegativeCategory,
-        trainingEligible: avaliacaoQualidade.aptoTreino,
-        dataQualityScore: avaliacaoQualidade.score,
-        dataQualityFlags: avaliacaoQualidade.flags
-    };
-
-    // Salva localmente no IndexedDB (sempre)
-    await idbPut('feedback', registroFeedback);
-
-    console.log('✅ Feedback salvo em IndexedDB:', registroFeedback);
-
     const payloadFirestore = {
         ...feedbackNormalizado,
         label: statusNormalizado,
@@ -1744,32 +1718,17 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
         hardNegativeCategory
     };
 
-    // Sincronização remota em background (não bloquear UX do feedback)
-    void(async() => {
-        if (firebaseInicializado && estaOnline()) {
-            try {
-                await salvarFeedbackFirestore(
-                    feedbackPayload.runId,
-                    feedbackPayload.featureId,
-                    payloadFirestore
-                );
-                console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
-                return;
-            } catch (error) {
-                console.error('❌ Erro ao salvar feedback no Firestore - adicionando à fila offline:', error);
-            }
-        }
+    if (!firebaseInicializado || !estaOnline()) {
+        throw new Error('Firestore indisponível no momento. Verifique a conexão e tente novamente.');
+    }
 
-        try {
-            await adicionarNaFila('feedback', {
-                runId: feedbackPayload.runId,
-                featureId: feedbackPayload.featureId,
-                feedback: payloadFirestore
-            });
-        } catch (queueError) {
-            console.error('❌ Erro ao enfileirar feedback para sincronização:', queueError);
-        }
-    })();
+    await salvarFeedbackFirestore(
+        feedbackPayload.runId,
+        feedbackPayload.featureId,
+        payloadFirestore
+    );
+    registrarHeartbeatFirestoreOk();
+    console.log(`✅ Feedback ${feedbackPayload.feedbackId} salvo no Firestore`);
 
     // Atualiza contagem de exemplos em background para não travar UI.
     if (window.atualizarContagemExemplos) {
@@ -3829,7 +3788,7 @@ function criarPopupPoligonoManual(featureId) {
         <button onclick="salvarPoligonoManual('${featureId}')" style="background:${jaSalvo ? '#15803d' : '#7c3aed'};flex:2;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">${jaSalvo ? '✅ Salvo' : '💾 Salvar para Aprendizado'}</button>
         <button onclick="ativarEdicaoPoligonoManual('${featureId}')" style="background:#d97706;flex:1;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">✏️ Editar</button>
       </div>
-      ${jaSalvo ? '<small style="color:#15803d;margin-top:6px;display:block;">✅ Exemplo salvo no banco de aprendizado!</small>' : '<small style="color:#9ca3af;margin-top:6px;display:block;">Selecione o tipo e clique em Salvar para contribuir com o aprendizado.</small>'}
+            ${jaSalvo ? '<small style="color:#15803d;margin-top:6px;display:block;">✅ Exemplo salvo na nuvem para aprendizado!</small>' : '<small style="color:#9ca3af;margin-top:6px;display:block;">Selecione o tipo e clique em Salvar (requer conexão com a nuvem).</small>'}
     </div>
   `;
 }
@@ -3844,7 +3803,7 @@ function atualizarTipoManual(featureId, tipo) {
 }
 
 /**
- * Salva o polígono manual no banco de aprendizado (IndexedDB + Firestore).
+ * Salva o polígono manual no banco de aprendizado (cloud-only / Firestore).
  */
 async function salvarPoligonoManual(featureId) {
     const feature = manualPolygonFeatures.find(f => f.properties?.id === featureId);
@@ -3911,7 +3870,17 @@ async function salvarPoligonoManual(featureId) {
         });
     } catch (err) {
         console.error('Erro ao salvar polígono manual:', err);
-        alert(`❌ Erro ao salvar: ${err.message}`);
+        const mensagemErro = String(err ?.message || 'Falha desconhecida ao salvar.');
+        const indisponivelNuvem = mensagemErro.includes('Firestore indisponível no momento');
+
+        if (indisponivelNuvem) {
+            const aviso = '⚠️ Não foi possível salvar na nuvem agora. Verifique sua conexão e tente novamente.';
+            mostrarNotificacao(aviso, 'warning');
+            alert(aviso);
+            return;
+        }
+
+        alert(`❌ Erro ao salvar: ${mensagemErro}`);
     }
 }
 
