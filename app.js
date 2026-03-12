@@ -4568,6 +4568,26 @@ function iniciarDesenhoManual() {
  * Registra um polígono desenhado manualmente como exemplo de aprendizado.
  * Chamado pelo evento draw:created quando modoVetorizacao === 'manual'.
  */
+function obterEstiloPoligonoManual(feature) {
+    const salvoNuvem = feature?.properties?.feedback_status === 'aprovado';
+
+    if (salvoNuvem) {
+        return {
+            color: '#166534',
+            fillColor: '#22c55e',
+            weight: 4,
+            fillOpacity: 0.55
+        };
+    }
+
+    return {
+        color: '#5b21b6',
+        fillColor: '#7c3aed',
+        weight: 3,
+        fillOpacity: 0.38
+    };
+}
+
 function adicionarPoligonoManual(layer) {
     const featureId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const geojsonBruto = layer.toGeoJSON();
@@ -4594,7 +4614,7 @@ function adicionarPoligonoManual(layer) {
         }
     };
 
-    layer.setStyle({ color: '#7c3aed', fillColor: '#7c3aed', weight: 3, fillOpacity: 0.25 });
+    layer.setStyle(obterEstiloPoligonoManual(feature));
     layer.feature = feature;
     manualPolygonFeatures.push(feature);
     drawnItems.addLayer(layer);
@@ -4749,7 +4769,7 @@ async function salvarPoligonoManual(featureId) {
         // Atualiza popup e cor do layer
         drawnItems.eachLayer((l) => {
             if (l.feature?.properties?.id === featureId) {
-                l.setStyle({ color: '#15803d', fillColor: '#15803d', weight: 3, fillOpacity: 0.3 });
+                l.setStyle(obterEstiloPoligonoManual(feature));
                 l.setPopupContent(criarPopupPoligonoManual(featureId));
             }
         });
@@ -4862,7 +4882,7 @@ function ativarEdicaoPoligonoManual(featureId) {
                 // Readicionar layer atualizado
                 const novoLayer = L.polygon(
                     L.GeoJSON.coordsToLatLngs(geometriaEditada.coordinates[0]),
-                    { color: '#7c3aed', fillColor: '#7c3aed', weight: 3, fillOpacity: 0.25 }
+                    obterEstiloPoligonoManual(feature)
                 );
                 novoLayer.feature = feature;
                 drawnItems.addLayer(novoLayer);
@@ -4877,7 +4897,7 @@ function ativarEdicaoPoligonoManual(featureId) {
                 // Rebind original layer
                 const novoLayer = L.polygon(
                     L.GeoJSON.coordsToLatLngs(geometriaOriginal.coordinates[0]),
-                    { color: '#7c3aed', fillColor: '#7c3aed', weight: 3, fillOpacity: 0.25 }
+                    obterEstiloPoligonoManual(feature)
                 );
                 novoLayer.feature = feature;
                 drawnItems.addLayer(novoLayer);
