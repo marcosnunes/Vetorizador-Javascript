@@ -152,27 +152,22 @@ async function obterResumoNuvem({ forcarAtualizacao = false } = {}) {
     }
 }
 
-function atualizarResumoOrigemUI({ localElegiveis = 0, nuvemTotal = null, quotaAtiva = false, minutosRestantes = 0 } = {}) {
-    const elementoLocal = document.getElementById('exemplosLocais');
+function atualizarResumoOrigemUI({ nuvemTotal = null, quotaAtiva = false, minutosRestantes = 0 } = {}) {
     const elementoNuvem = document.getElementById('exemplosNuvem');
     const avisoQuota = document.getElementById('quotaAvisoFirestore');
 
-    if (elementoLocal) {
-        elementoLocal.textContent = Number.isFinite(localElegiveis) ? String(localElegiveis) : '-';
-    }
-
     if (elementoNuvem) {
         const nuvemDisponivel = Number.isFinite(nuvemTotal);
-        elementoNuvem.textContent = nuvemDisponivel ? String(nuvemTotal) : 'indisponível';
-        elementoNuvem.style.color = quotaAtiva ? '#b91c1c' : (nuvemDisponivel ? '#0f766e' : '#b45309');
-        elementoNuvem.style.fontStyle = nuvemDisponivel ? 'normal' : 'italic';
+        elementoNuvem.textContent = nuvemDisponivel ? String(nuvemTotal) : '—';
+        elementoNuvem.style.color = nuvemDisponivel ? '#0f766e' : '#9ca3af';
+        elementoNuvem.style.fontStyle = 'normal';
     }
 
     if (!avisoQuota) return;
 
     if (quotaAtiva) {
         avisoQuota.style.display = 'block';
-        avisoQuota.textContent = `⚠️ Cota do Firestore excedida. Exibindo dados locais temporariamente${minutosRestantes > 0 ? ` (${minutosRestantes} min)` : ''}.`;
+        avisoQuota.textContent = `⚠️ Firestore temporariamente indisponível${minutosRestantes > 0 ? ` (${minutosRestantes} min)` : ''}.`;
     } else {
         avisoQuota.style.display = 'none';
         avisoQuota.textContent = '';
@@ -263,10 +258,7 @@ async function atualizarContagemExemplos() {
         const feedbackElegivel = filtrarFeedbackElegivelTreino(feedback);
         exemploColetados = feedbackElegivel.length;
 
-        const datasetLocal = await obterDatasetLocalTreino();
-        const feedbackLocal = Array.isArray(datasetLocal.feedback) ? datasetLocal.feedback : [];
-        const totalLocalElegivel = filtrarFeedbackElegivelTreino(feedbackLocal).length;
-
+        // Contagem canônica para exibição: sempre vem direto do Firestore
         const resumoNuvem = await obterResumoNuvem();
         const nuvemOk = Number.isFinite(resumoNuvem?.total);
         if (nuvemOk) {
@@ -274,30 +266,24 @@ async function atualizarContagemExemplos() {
         }
 
         const agora = Date.now();
-        // Se obterResumoNuvem retornou um total válido, a nuvem está disponível —
-        // ignora o dataset.source obsoleto (que pôde ter sido definido antes da reconexão).
-        const quotaAtiva = !nuvemOk && (quotaExcedidaAtiva || dataset.source === 'indexeddb-local-quota-backoff' || agora < firestoreQuotaBackoffAte);
+        const quotaAtiva = !nuvemOk && (quotaExcedidaAtiva || agora < firestoreQuotaBackoffAte);
         const minutosRestantes = quotaAtiva ? Math.max(1, Math.ceil((firestoreQuotaBackoffAte - agora) / 60000)) : 0;
 
-        const mostrarSomenteLocal = quotaAtiva || !Number.isFinite(ultimoTotalNuvemTotal);
-        const exemplosExibicao = mostrarSomenteLocal ? totalLocalElegivel : exemploColetados;
+        // Exibição: total real da nuvem; fallback para contagem local do dataset
+        const exemplosExibicao = nuvemOk ? ultimoTotalNuvemTotal : exemploColetados;
 
         atualizarResumoOrigemUI({
-            localElegiveis: totalLocalElegivel,
-            nuvemTotal: ultimoTotalNuvemTotal,
+            nuvemTotal: nuvemOk ? ultimoTotalNuvemTotal : null,
             quotaAtiva,
             minutosRestantes
         });
 
         tentarNotificarRetreinoPosQuota({ quotaAtiva });
 
-        console.log(`📊 Exemplos coletados: ${exemploColetados}`);
-        console.log(`📦 Dados feedback recuperados: total=${feedback.length}, elegiveis=${feedbackElegivel.length}, origem=${dataset.source || 'desconhecida'}`);
+        console.log(`📊 Exemplos na nuvem: ${ultimoTotalNuvemTotal ?? '?'} | dataset elegível local: ${exemploColetados}`);
 
         // ✨ Atualizar UI da barra de progresso
-        atualizarUIAprendizadoContinuo(exemplosExibicao, {
-            modoLocal: mostrarSomenteLocal
-        });
+        atualizarUIAprendizadoContinuo(exemplosExibicao);
 
         // Se atingiu o lote de treino, sugerir retreinamento
         if (exemploColetados % TRAINING_BATCH_SIZE === 0 && exemploColetados > 0) {
@@ -313,26 +299,15 @@ async function atualizarContagemExemplos() {
 }
 
 // ✨ NOVA FUNÇÃO: Atualizar UI com progresso de aprendizado contínuo
-function atualizarUIAprendizadoContinuo(exemplos, { modoLocal = false } = {}) {
-    const elementoContagem = document.getElementById('exemplosColetados');
-    const elementoRotulo = document.getElementById('rotuloExemplosColetados');
+function atualizarUIAprendizadoContinuo(exemplos) {
     const elementoDescricaoObjetivo = document.getElementById('descricaoObjetivoAprendizado');
     const elementoBarra = document.getElementById('progressoAprendizado');
     const btnTreinarAgora = document.getElementById('btnTreinarAgora');
 
-    if (!elementoContagem || !elementoBarra) return;
-
-    // Atualizar texto de contagem
-    elementoContagem.textContent = exemplos;
-
-    if (elementoRotulo) {
-        elementoRotulo.textContent = modoLocal ? 'Exemplos Locais (fallback):' : 'Exemplos Coletados:';
-    }
+    if (!elementoBarra) return;
 
     if (elementoDescricaoObjetivo) {
-        elementoDescricaoObjetivo.textContent = modoLocal ?
-            'Objetivo local: 50 exemplos para próximo retreinamento (nuvem indisponível).' :
-            'Objetivo: 50 exemplos para próximo retreinamento';
+        elementoDescricaoObjetivo.textContent = 'Objetivo: 50 exemplos para próximo retreinamento';
     }
 
     // Calcular progresso (0-100%) para o lote de treino atual
