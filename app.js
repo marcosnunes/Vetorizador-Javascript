@@ -2131,14 +2131,6 @@ function ativarEdicaoPoligonoExportacao(featureId) {
                 instrucoes.remove();
                 atualizarVisualizacao();
 
-                if (window.lastGeoJSONLayer) {
-                    window.lastGeoJSONLayer.eachLayer((layer) => {
-                        if (layer.feature?.properties?.id === featureId) {
-                            layer.openPopup();
-                        }
-                    });
-                }
-
                 mostrarNotificacao('✅ Ajuste aplicado para exportação (sem feedback/aprendizado).', 'info');
             });
         }
