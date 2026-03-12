@@ -34,6 +34,7 @@ let debugMaskLayer = null;
 let searchResultMarker = null;
 let modoCapturaCoordenada = false;
 let modoVetorizacao = 'auto'; // 'auto' | 'manual'
+let activeDrawHandler = null; // handler ativo do Leaflet.Draw (Modo Manual)
 const geojsonFeatures = [];
 const manualPolygonFeatures = []; // Polígonos desenhados manualmente para aprendizado
 let activeRunId = null;
@@ -2748,6 +2749,18 @@ map.on(L.Draw.Event.DRAWSTART, () => {
     }
 });
 
+// Quando o desenho para (concluío ou cancelado) resetar botão do Modo Manual
+map.on(L.Draw.Event.DRAWSTOP, () => {
+    activeDrawHandler = null;
+    if (modoVetorizacao === 'manual') {
+        const btn = document.getElementById('btnDesenharBenfeitoria');
+        if (btn) {
+            btn.textContent = '✏️ Desenhar Benfeitoria';
+            btn.style.background = '#7c3aed';
+        }
+    }
+});
+
 map.on('click', capturarCoordenadaNoMapa);
 
 // --- Lógica principal ---
@@ -3674,16 +3687,31 @@ function definirModoVetorizacao(modo) {
     const btnAuto = document.getElementById('btnModoAuto');
     const btnManual = document.getElementById('btnModoManual');
     const desc = document.getElementById('modoVetorizacaoDesc');
+    const btnDraw = document.getElementById('btnDesenharBenfeitoria');
 
     if (btnAuto) btnAuto.classList.toggle('mode-btn-active', modo === 'auto');
     if (btnManual) btnManual.classList.toggle('mode-btn-active', modo === 'manual');
+
+    // Mostrar/ocultar botão de desenho manual
+    if (btnDraw) {
+        btnDraw.style.display = modo === 'manual' ? 'block' : 'none';
+        // Resetar estado do botão ao trocar modo
+        btnDraw.textContent = '✏️ Desenhar Benfeitoria';
+        btnDraw.style.background = '#7c3aed';
+    }
+
+    // Cancela draw ativo ao voltar para Automático
+    if (modo === 'auto' && activeDrawHandler) {
+        try { activeDrawHandler.disable(); } catch { /* sem-op */ }
+        activeDrawHandler = null;
+    }
 
     if (modo === 'manual') {
         L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar benfeitoria';
         L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar o contorno da benfeitoria';
         L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Continue clicando para adicionar vértices';
         L.drawLocal.draw.handlers.polygon.tooltip.end = 'Clique no primeiro ponto para fechar o polígono';
-        if (desc) desc.textContent = 'Desenhe o contorno de uma edificação ou trapiche para salvar como exemplo de aprendizado';
+        if (desc) desc.textContent = 'Clique em Desenhar Benfeitoria e traçe o contorno de um telhado ou trapiche.';
     } else {
         L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar área';
         L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar a área';
@@ -3694,10 +3722,44 @@ function definirModoVetorizacao(modo) {
 
     mostrarNotificacao(
         modo === 'manual'
-            ? '✏️ Modo Manual: desenhe polígonos de benfeitorias para contribuir com o aprendizado.'
+            ? '✏️ Modo Manual ativo. Clique em Desenhar Benfeitoria para começar.'
             : '🤖 Modo Automático: desenhe uma área para vetorizar com IA.',
         'info'
     );
+}
+
+/**
+ * Ativa ou cancela o modo de desenho manual de polígono via Leaflet.Draw.
+ * Chamado pelo botão "Desenhar Benfeitoria" no painel lateral.
+ */
+function iniciarDesenhoManual() {
+    const btn = document.getElementById('btnDesenharBenfeitoria');
+    if (activeDrawHandler) {
+        // Cancela draw em andamento
+        try { activeDrawHandler.disable(); } catch { /* sem-op */ }
+        activeDrawHandler = null;
+        if (btn) {
+            btn.textContent = '✏️ Desenhar Benfeitoria';
+            btn.style.background = '#7c3aed';
+        }
+        return;
+    }
+    const drawOptions = {
+        shapeOptions: {
+            color: '#7c3aed',
+            weight: 2,
+            fillOpacity: 0.18,
+            fillColor: '#7c3aed'
+        },
+        allowIntersection: false,
+        showLength: true
+    };
+    activeDrawHandler = new L.Draw.Polygon(map, drawOptions);
+    activeDrawHandler.enable();
+    if (btn) {
+        btn.textContent = '❌ Cancelar Desenho';
+        btn.style.background = '#dc2626';
+    }
 }
 
 /**
@@ -3982,6 +4044,7 @@ window.idbPut = idbPut;
 window.idbGetAll = idbGetAll; // ✨ Para continuous-learning.js
 window.exportarRelatorioAppPdf = exportarRelatorioAppPdf;
 window.definirModoVetorizacao = definirModoVetorizacao;
+window.iniciarDesenhoManual = iniciarDesenhoManual;
 window.salvarPoligonoManual = salvarPoligonoManual;
 window.ativarEdicaoPoligonoManual = ativarEdicaoPoligonoManual;
 window.atualizarTipoManual = atualizarTipoManual;
