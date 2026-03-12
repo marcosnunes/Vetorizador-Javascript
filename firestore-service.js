@@ -197,6 +197,36 @@ export async function salvarFeedbackFirestore(runId, featureId, feedback) {
             dadosFeedback.originalGeometryCoordinateCount = geom.coordinates ?.[0] ?.length || 0;
         }
 
+        if (feedback ?.visualDescriptors && typeof feedback.visualDescriptors === 'object') {
+            const vd = feedback.visualDescriptors;
+            const parseNum = (v, casas = 4) => {
+                const n = Number(v);
+                if (!Number.isFinite(n)) return 0;
+                return Number(n.toFixed(casas));
+            };
+            const parseArrayNum = (arr, casas = 4) => {
+                if (!Array.isArray(arr)) return [];
+                return arr
+                    .map((v) => Number(v))
+                    .filter((v) => Number.isFinite(v))
+                    .slice(0, 8)
+                    .map((v) => Number(v.toFixed(casas)));
+            };
+
+            dadosFeedback.visualDescriptors = {
+                version: String(vd.version || 'vd_v1'),
+                sampleCount: Math.max(0, Math.round(Number(vd.sampleCount || 0))),
+                samplingStridePx: Math.max(1, Math.round(Number(vd.samplingStridePx || 1))),
+                colorMeanRgb: parseArrayNum(vd.colorMeanRgb, 2),
+                colorStdRgb: parseArrayNum(vd.colorStdRgb, 2),
+                luminanceMean: parseNum(vd.luminanceMean, 2),
+                luminanceStd: parseNum(vd.luminanceStd, 2),
+                gradientMean: parseNum(vd.gradientMean, 3),
+                gradientStd: parseNum(vd.gradientStd, 3),
+                edgeDensity: parseNum(vd.edgeDensity, 4)
+            };
+        }
+
         await setDoc(feedbackRef, dadosFeedback);
         console.log(`✅ Feedback salvo em Firestore (featureId: ${featureId})`);
         return true;

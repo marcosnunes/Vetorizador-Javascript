@@ -20,6 +20,9 @@ const DEFAULT_TRAINING_CONFIG = {
     simplification: 0.00001
 };
 
+const BASE_INPUT_DIM = 6;
+const VISUAL_INPUT_DIM = 8;
+
 const DATASET_HYGIENE_CONFIG = {
     madZThreshold: 3.5,
     maxOutlierRatio: 0.35,
@@ -330,9 +333,150 @@ function obterRotuloFeedback(feedback) {
     return feedback ?.label || feedback ?.status || feedback ?.feedbackStatus || 'neutro';
 }
 
+function clamp01(valor) {
+    return Math.max(0, Math.min(1, Number(valor) || 0));
+}
+
+function normalizarDescritorVisual(vd = {}) {
+    const meanRgb = Array.isArray(vd.colorMeanRgb) ? vd.colorMeanRgb : [0, 0, 0];
+
+    return [
+        clamp01((vd.luminanceMean || 0) / 255),
+        clamp01((vd.luminanceStd || 0) / 128),
+        clamp01((vd.gradientMean || 0) / 64),
+        clamp01((vd.gradientStd || 0) / 64),
+        clamp01(vd.edgeDensity || 0),
+        clamp01((meanRgb[0] || 0) / 255),
+        clamp01((meanRgb[1] || 0) / 255),
+        clamp01((meanRgb[2] || 0) / 255)
+    ];
+}
+
+function construirEntradaBase(config = DEFAULT_TRAINING_CONFIG) {
+    return [
+        Math.min(config.edgeThreshold / 200, 1),
+        Math.min(config.morphologySize / 9, 1),
+        Math.min(config.minArea / 100, 1),
+        Math.min(config.contrastBoost / 2, 1),
+        config.minQualityScore / 100,
+        Math.min(config.simplification * 100000, 1)
+    ];
+}
+
+function obterDimEntradaModelo(modelo = modeloTreinado) {
+    const shape = modelo?.inputs?.[0]?.shape;
+    const dim = Array.isArray(shape) ? Number(shape[shape.length - 1]) : NaN;
+    return Number.isFinite(dim) && dim > 0 ? dim : BASE_INPUT_DIM;
+}
+
+async function extrairDescritoresCenaAtualInferencia() {
+    if (typeof window.leafletImage !== 'function' || !window.map) return null;
+
+    const canvas = await new Promise((resolve) => {
+        window.leafletImage(window.map, (err, mapCanvas) => {
+            if (err || !mapCanvas) {
+                resolve(null);
+                return;
+            }
+            resolve(mapCanvas);
+        });
+    });
+
+    if (!canvas) return null;
+
+    let imageData;
+    try {
+        imageData = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    } catch {
+        return null;
+    }
+
+    const data = imageData.data;
+    const width = imageData.width;
+    const height = imageData.height;
+    const alvoAmostras = 5000;
+    const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / alvoAmostras)));
+
+    let n = 0;
+    let somaR = 0;
+    let somaG = 0;
+    let somaB = 0;
+    let somaL = 0;
+    let somaL2 = 0;
+    let somaGrad = 0;
+    let somaGrad2 = 0;
+    let bordas = 0;
+
+    for (let y = 1; y < height - 1; y += stride) {
+        for (let x = 1; x < width - 1; x += stride) {
+            const idx = ((y * width) + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const lum = (0.299 * r) + (0.587 * g) + (0.114 * b);
+
+            const idxL = ((y * width) + (x - 1)) * 4;
+            const idxR = ((y * width) + (x + 1)) * 4;
+            const idxU = (((y - 1) * width) + x) * 4;
+            const idxD = (((y + 1) * width) + x) * 4;
+
+            const lumL = (0.299 * data[idxL]) + (0.587 * data[idxL + 1]) + (0.114 * data[idxL + 2]);
+            const lumR = (0.299 * data[idxR]) + (0.587 * data[idxR + 1]) + (0.114 * data[idxR + 2]);
+            const lumU = (0.299 * data[idxU]) + (0.587 * data[idxU + 1]) + (0.114 * data[idxU + 2]);
+            const lumD = (0.299 * data[idxD]) + (0.587 * data[idxD + 1]) + (0.114 * data[idxD + 2]);
+
+            const gx = (lumR - lumL) * 0.5;
+            const gy = (lumD - lumU) * 0.5;
+            const grad = Math.sqrt((gx * gx) + (gy * gy));
+
+            somaR += r;
+            somaG += g;
+            somaB += b;
+            somaL += lum;
+            somaL2 += lum * lum;
+            somaGrad += grad;
+            somaGrad2 += grad * grad;
+            if (grad >= 28) bordas += 1;
+            n += 1;
+        }
+    }
+
+    if (n < 120) return null;
+
+    const mediaL = somaL / n;
+    const mediaGrad = somaGrad / n;
+    const stdL = Math.sqrt(Math.max(0, (somaL2 / n) - (mediaL * mediaL)));
+    const stdGrad = Math.sqrt(Math.max(0, (somaGrad2 / n) - (mediaGrad * mediaGrad)));
+
+    return {
+        luminanceMean: mediaL,
+        luminanceStd: stdL,
+        gradientMean: mediaGrad,
+        gradientStd: stdGrad,
+        edgeDensity: bordas / n,
+        colorMeanRgb: [somaR / n, somaG / n, somaB / n]
+    };
+}
+
+async function construirEntradaInferencia(configAtual = DEFAULT_TRAINING_CONFIG, contexto = {}) {
+    const base = construirEntradaBase(configAtual);
+    const totalDim = obterDimEntradaModelo();
+    const extraDim = Math.max(0, totalDim - BASE_INPUT_DIM);
+    if (extraDim === 0) return base;
+
+    const vd = contexto.visualDescriptors || await extrairDescritoresCenaAtualInferencia();
+    const visual = normalizarDescritorVisual(vd);
+
+    if (extraDim <= visual.length) {
+        return [...base, ...visual.slice(0, extraDim)];
+    }
+
+    return [...base, ...visual, ...new Array(extraDim - visual.length).fill(0)];
+}
+
 
 // Estrutura do modelo neural
-async function criarModeloML() {
+async function criarModeloML(inputDim = BASE_INPUT_DIM) {
     // Carregar TensorFlow.js dinamicamente se não estiver disponível
     if (typeof tf === 'undefined' || typeof window.tf === 'undefined') {
         try {
@@ -376,9 +520,9 @@ async function criarModeloML() {
     // Usar window.tf para garantir acesso ao objeto global
     const modelo = window.tf.sequential({
         layers: [
-            // Entrada: 6 parâmetros CV
+            // Entrada: parâmetros CV + descritores visuais compactos (opcional)
             window.tf.layers.dense({
-                inputShape: [6],
+                inputShape: [Math.max(BASE_INPUT_DIM, Number(inputDim) || BASE_INPUT_DIM)],
                 units: 16,
                 activation: 'relu',
                 name: 'entrada'
@@ -445,15 +589,9 @@ function prepararDatasetTreinamento(dataset) {
 
             const config = obterConfigTreinamento(feature, run);
 
-            // Criar entrada: [edgeThreshold, morphologySize, minArea, contrastBoost, minQualityScore, simplification]
-            // Normalizar para [0, 1]
             const entradaRaw = [
-                Math.min(config.edgeThreshold / 200, 1), // 0-200 → 0-1
-                Math.min(config.morphologySize / 9, 1), // 0-9 → 0-1
-                Math.min(config.minArea / 100, 1), // 0-100m² → 0-1
-                Math.min(config.contrastBoost / 2, 1), // 0-2 → 0-1
-                config.minQualityScore / 100, // 0-100 → 0-1
-                Math.min(config.simplification * 100000, 1) // muito pequeno → 0-1
+                ...construirEntradaBase(config),
+                ...normalizarDescritorVisual(fb.visualDescriptors)
             ];
 
             // Criar saída: qualidade predita (feedback label)
@@ -692,8 +830,10 @@ async function treinarModeloML(dataset) {
         console.log('🧼 Auto-sanitização de outliers concluída:', resultadoSanitizacao);
     }
 
+    const inputDim = exemplos[0]?.entradaRaw?.length || (BASE_INPUT_DIM + VISUAL_INPUT_DIM);
+
     // Criar modelo
-    const modelo = await criarModeloML();
+    const modelo = await criarModeloML(inputDim);
     if (!modelo) return false;
 
     try {
@@ -795,24 +935,16 @@ async function treinarModeloML(dataset) {
 }
 
 // Fazer predição com modelo
-async function fazerPredictionML(parametrosCurrent) {
+async function fazerPredictionML(parametrosCurrent, contexto = {}) {
     if (!modeloTreinado) {
         console.warn('⚠️ Nenhum modelo treinado disponível');
         return null;
     }
 
     try {
-        // Preparar entrada normalizada
-        const entrada = window.tf.tensor2d([
-            [
-                Math.min(parametrosCurrent.edgeThreshold / 200, 1),
-                Math.min(parametrosCurrent.morphologySize / 9, 1),
-                Math.min(parametrosCurrent.minArea / 100, 1),
-                Math.min(parametrosCurrent.contrastBoost / 2, 1),
-                parametrosCurrent.minQualityScore / 100,
-                Math.min(parametrosCurrent.simplification * 100000, 1)
-            ]
-        ]);
+        // Preparar entrada normalizada (retrocompatível com modelos antigos e novos)
+        const vetorEntrada = await construirEntradaInferencia(parametrosCurrent, contexto);
+        const entrada = window.tf.tensor2d([vetorEntrada]);
 
         // Predizer
         const saida = modeloTreinado.predict(entrada);

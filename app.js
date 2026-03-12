@@ -440,6 +440,211 @@ function normalizarFeedbackPayload(feedbackPayload = {}) {
     };
 }
 
+function obterAnelExternoDescritor(geometry) {
+    if (!geometry) return null;
+
+    if (geometry.type === 'Polygon') {
+        return Array.isArray(geometry.coordinates?.[0]) ? geometry.coordinates[0] : null;
+    }
+
+    if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+        const candidatos = geometry.coordinates
+            .map((poly) => (Array.isArray(poly?.[0]) ? poly[0] : null))
+            .filter((ring) => Array.isArray(ring) && ring.length >= 4);
+        if (candidatos.length === 0) return null;
+
+        let melhor = candidatos[0];
+        let melhorArea = 0;
+        candidatos.forEach((ring) => {
+            let area = 0;
+            for (let i = 0; i < ring.length - 1; i++) {
+                const [x1, y1] = ring[i];
+                const [x2, y2] = ring[i + 1];
+                area += (x1 * y2) - (x2 * y1);
+            }
+            const absArea = Math.abs(area);
+            if (absArea > melhorArea) {
+                melhorArea = absArea;
+                melhor = ring;
+            }
+        });
+        return melhor;
+    }
+
+    return null;
+}
+
+function pontoDentroPoligono(x, y, pontos) {
+    let inside = false;
+    for (let i = 0, j = pontos.length - 1; i < pontos.length; j = i++) {
+        const xi = pontos[i].x;
+        const yi = pontos[i].y;
+        const xj = pontos[j].x;
+        const yj = pontos[j].y;
+
+        const intersecta = ((yi > y) !== (yj > y)) &&
+            (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi);
+        if (intersecta) inside = !inside;
+    }
+    return inside;
+}
+
+function arredondarNumero(valor, casas = 4) {
+    if (!Number.isFinite(valor)) return 0;
+    return Number(valor.toFixed(casas));
+}
+
+async function extrairDescritoresVisuaisCompactos(geometry) {
+    if (!geometry || typeof leafletImage !== 'function' || !window.map) return null;
+
+    const ring = obterAnelExternoDescritor(geometry);
+    if (!Array.isArray(ring) || ring.length < 4) return null;
+
+    const canvas = await new Promise((resolve) => {
+        leafletImage(window.map, (err, mapCanvas) => {
+            if (err || !mapCanvas) {
+                resolve(null);
+                return;
+            }
+            resolve(mapCanvas);
+        });
+    });
+
+    if (!canvas) return null;
+
+    let imageData;
+    try {
+        imageData = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    } catch {
+        return null;
+    }
+
+    const pontos = ring.map(([lng, lat]) => window.map.latLngToContainerPoint([lat, lng]));
+    if (pontos.length < 3) return null;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    pontos.forEach((p) => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+    });
+
+    minX = Math.max(1, Math.floor(minX));
+    minY = Math.max(1, Math.floor(minY));
+    maxX = Math.min(canvas.width - 2, Math.ceil(maxX));
+    maxY = Math.min(canvas.height - 2, Math.ceil(maxY));
+
+    const bboxW = Math.max(0, maxX - minX + 1);
+    const bboxH = Math.max(0, maxY - minY + 1);
+    if (bboxW === 0 || bboxH === 0) return null;
+
+    const alvoAmostras = 4000;
+    const stride = Math.max(1, Math.floor(Math.sqrt((bboxW * bboxH) / alvoAmostras)));
+    const data = imageData.data;
+    const width = imageData.width;
+
+    let n = 0;
+    let somaR = 0;
+    let somaG = 0;
+    let somaB = 0;
+    let somaL = 0;
+    let somaR2 = 0;
+    let somaG2 = 0;
+    let somaB2 = 0;
+    let somaL2 = 0;
+    let somaGrad = 0;
+    let somaGrad2 = 0;
+    let bordas = 0;
+
+    for (let y = minY; y <= maxY; y += stride) {
+        for (let x = minX; x <= maxX; x += stride) {
+            if (!pontoDentroPoligono(x + 0.5, y + 0.5, pontos)) continue;
+
+            const idx = ((y * width) + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const lum = (0.299 * r) + (0.587 * g) + (0.114 * b);
+
+            const idxL = ((y * width) + (x - 1)) * 4;
+            const idxR = ((y * width) + (x + 1)) * 4;
+            const idxU = (((y - 1) * width) + x) * 4;
+            const idxD = (((y + 1) * width) + x) * 4;
+
+            const lumL = (0.299 * data[idxL]) + (0.587 * data[idxL + 1]) + (0.114 * data[idxL + 2]);
+            const lumR = (0.299 * data[idxR]) + (0.587 * data[idxR + 1]) + (0.114 * data[idxR + 2]);
+            const lumU = (0.299 * data[idxU]) + (0.587 * data[idxU + 1]) + (0.114 * data[idxU + 2]);
+            const lumD = (0.299 * data[idxD]) + (0.587 * data[idxD + 1]) + (0.114 * data[idxD + 2]);
+
+            const gx = (lumR - lumL) * 0.5;
+            const gy = (lumD - lumU) * 0.5;
+            const grad = Math.sqrt((gx * gx) + (gy * gy));
+
+            somaR += r;
+            somaG += g;
+            somaB += b;
+            somaL += lum;
+            somaR2 += r * r;
+            somaG2 += g * g;
+            somaB2 += b * b;
+            somaL2 += lum * lum;
+            somaGrad += grad;
+            somaGrad2 += grad * grad;
+            if (grad >= 28) bordas += 1;
+            n += 1;
+        }
+    }
+
+    if (n < 40) return null;
+
+    const mediaR = somaR / n;
+    const mediaG = somaG / n;
+    const mediaB = somaB / n;
+    const mediaL = somaL / n;
+    const mediaGrad = somaGrad / n;
+
+    const stdR = Math.sqrt(Math.max(0, (somaR2 / n) - (mediaR * mediaR)));
+    const stdG = Math.sqrt(Math.max(0, (somaG2 / n) - (mediaG * mediaG)));
+    const stdB = Math.sqrt(Math.max(0, (somaB2 / n) - (mediaB * mediaB)));
+    const stdL = Math.sqrt(Math.max(0, (somaL2 / n) - (mediaL * mediaL)));
+    const stdGrad = Math.sqrt(Math.max(0, (somaGrad2 / n) - (mediaGrad * mediaGrad)));
+
+    return {
+        version: 'vd_v1',
+        sampleCount: n,
+        samplingStridePx: stride,
+        colorMeanRgb: [arredondarNumero(mediaR, 2), arredondarNumero(mediaG, 2), arredondarNumero(mediaB, 2)],
+        colorStdRgb: [arredondarNumero(stdR, 2), arredondarNumero(stdG, 2), arredondarNumero(stdB, 2)],
+        luminanceMean: arredondarNumero(mediaL, 2),
+        luminanceStd: arredondarNumero(stdL, 2),
+        gradientMean: arredondarNumero(mediaGrad, 3),
+        gradientStd: arredondarNumero(stdGrad, 3),
+        edgeDensity: arredondarNumero(bordas / n, 4)
+    };
+}
+
+async function enriquecerFeedbackComDescritoresVisuais(feedbackPayload = {}) {
+    if (!feedbackPayload || feedbackPayload.visualDescriptors) return feedbackPayload;
+
+    const geometry = feedbackPayload.editedGeometry || feedbackPayload.featureGeometry || feedbackPayload.originalGeometry;
+    if (!geometry) return feedbackPayload;
+
+    try {
+        const visualDescriptors = await extrairDescritoresVisuaisCompactos(geometry);
+        if (!visualDescriptors) return feedbackPayload;
+        return {
+            ...feedbackPayload,
+            visualDescriptors
+        };
+    } catch {
+        return feedbackPayload;
+    }
+}
+
 function normalizarTextoLivre(value = '') {
     return String(value || '')
         .normalize('NFD')
@@ -2111,18 +2316,8 @@ function ativarEdicaoPoligonoExportacao(featureId) {
             btnSalvar.addEventListener('click', () => {
                 const geometriaEditada = editablePolygon.toGeoJSON().geometry;
                 feature.geometry = geometriaEditada;
-                feature.properties.vertices = Array.isArray(geometriaEditada.coordinates?.[0]) ? geometriaEditada.coordinates[0].length : feature.properties.vertices;
-
-                try {
-                    const areaEditada = turf.area({
-                        type: 'Feature',
-                        geometry: geometriaEditada,
-                        properties: {}
-                    });
-                    feature.properties.area_m2 = Number(areaEditada).toFixed(2);
-                } catch {
-                    // sem-op
-                }
+                feature.properties.vertices = contarVerticesGeometria(geometriaEditada);
+                feature.properties.area_m2 = calcularAreaGeometriaM2(geometriaEditada).toFixed(2);
 
                 feature.properties.export_adjusted_at = new Date().toISOString();
                 feature.properties.geometria_original_export = geometriaOriginal;
@@ -2244,12 +2439,13 @@ async function salvarRunAprendizado(runPayload) {
  * Persiste feedback para aprendizado contínuo em modo cloud-only.
  */
 async function salvarFeedbackAprendizado(feedbackPayload) {
-    const feedbackNormalizado = normalizarFeedbackPayload(feedbackPayload);
+    const feedbackComDescritores = await enriquecerFeedbackComDescritoresVisuais(feedbackPayload);
+    const feedbackNormalizado = normalizarFeedbackPayload(feedbackComDescritores);
     const tipoBenfeitoria = normalizarTipoBenfeitoria(
-        feedbackPayload.tipoBenfeitoria || feedbackPayload.featureSnapshot ?.tipoBenfeitoria
+        feedbackComDescritores.tipoBenfeitoria || feedbackComDescritores.featureSnapshot ?.tipoBenfeitoria
     );
     const avaliacaoQualidade = avaliarQualidadeFeedback({
-        ...feedbackPayload,
+        ...feedbackComDescritores,
         ...feedbackNormalizado
     });
     const statusNormalizado = feedbackNormalizado.status;
@@ -2264,7 +2460,8 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
         trainingEligible: avaliacaoQualidade.aptoTreino,
         dataQualityScore: avaliacaoQualidade.score,
         dataQualityFlags: avaliacaoQualidade.flags,
-        hardNegativeCategory
+        hardNegativeCategory,
+        visualDescriptors: feedbackComDescritores.visualDescriptors
     };
 
     if (!firebaseInicializado || !estaOnline()) {
@@ -2272,8 +2469,8 @@ async function salvarFeedbackAprendizado(feedbackPayload) {
     }
 
     await salvarFeedbackFirestore(
-        feedbackPayload.runId,
-        feedbackPayload.featureId,
+        feedbackComDescritores.runId,
+        feedbackComDescritores.featureId,
         payloadFirestore
     );
     registrarHeartbeatFirestoreOk();
@@ -2795,6 +2992,31 @@ function calcularScoreConfianca(polygon) {
         };
     } catch {
         return { score: 0, compactness: 0, vertices: 0 };
+    }
+}
+
+function contarVerticesGeometria(geometry) {
+    const ring = geometry?.type === 'Polygon'
+        ? geometry?.coordinates?.[0]
+        : geometry?.type === 'MultiPolygon'
+            ? geometry?.coordinates?.[0]?.[0]
+            : null;
+
+    if (!Array.isArray(ring) || ring.length < 3) return 0;
+
+    const primeiro = ring[0];
+    const ultimo = ring[ring.length - 1];
+    const fechado = Array.isArray(primeiro) && Array.isArray(ultimo) && primeiro[0] === ultimo[0] && primeiro[1] === ultimo[1];
+
+    return fechado ? Math.max(0, ring.length - 1) : ring.length;
+}
+
+function calcularAreaGeometriaM2(geometry) {
+    try {
+        const area = turf.area({ type: 'Feature', geometry, properties: {} });
+        return Number.isFinite(area) ? area : 0;
+    } catch {
+        return 0;
     }
 }
 
@@ -4351,8 +4573,7 @@ function adicionarPoligonoManual(layer) {
     const geojsonBruto = layer.toGeoJSON();
     let areaM2 = 0;
     try { areaM2 = turf.area(geojsonBruto); } catch { areaM2 = 0; }
-    const coords = geojsonBruto.geometry.coordinates;
-    const nVertices = Array.isArray(coords[0]) ? coords[0].length : 0;
+    const nVertices = contarVerticesGeometria(geojsonBruto.geometry);
     const manualRunId = `manual_run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     const feature = {
@@ -4631,7 +4852,8 @@ function ativarEdicaoPoligonoManual(featureId) {
             btnSalvar.addEventListener('click', () => {
                 const geometriaEditada = editablePolygon.toGeoJSON().geometry;
                 feature.geometry = geometriaEditada;
-                feature.properties.vertices = Array.isArray(geometriaEditada.coordinates[0]) ? geometriaEditada.coordinates[0].length : 0;
+                feature.properties.vertices = contarVerticesGeometria(geometriaEditada);
+                feature.properties.area_m2 = calcularAreaGeometriaM2(geometriaEditada).toFixed(2);
                 feature.properties.geometria_original = geometriaOriginal;
 
                 window.map.removeLayer(editablePolygon);
