@@ -3709,9 +3709,9 @@ function definirModoVetorizacao(modo) {
     if (modo === 'manual') {
         L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar benfeitoria';
         L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar o contorno da benfeitoria';
-        L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Continue clicando para adicionar vértices';
+        L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Continue clicando para adicionar vértices — duplo clique no último ponto para finalizar';
         L.drawLocal.draw.handlers.polygon.tooltip.end = 'Clique no primeiro ponto para fechar o polígono';
-        if (desc) desc.textContent = 'Clique em Desenhar Benfeitoria e traçe o contorno de um telhado ou trapiche.';
+        if (desc) desc.textContent = 'Clique em Desenhar Benfeitoria e trace o contorno. Duplo clique no último ponto para finalizar.';
     } else {
         L.drawLocal.draw.toolbar.buttons.polygon = 'Desenhar área';
         L.drawLocal.draw.handlers.polygon.tooltip.start = 'Clique para começar a desenhar a área';
@@ -3760,6 +3760,7 @@ function iniciarDesenhoManual() {
         btn.textContent = '❌ Cancelar Desenho';
         btn.style.background = '#dc2626';
     }
+    mostrarNotificacao('Clique para adicionar vértices. Duplo clique no último ponto para finalizar o polígono.', 'info');
 }
 
 /**
@@ -3825,8 +3826,8 @@ function criarPopupPoligonoManual(featureId) {
         </select>
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;">
-        <button onclick="salvarPoligonoManual('${featureId}')" style="background:${jaSalvo ? '#15803d' : '#7c3aed'};flex:1;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">${jaSalvo ? '✅ Salvo' : '💾 Salvar para Aprendizado'}</button>
-        <button onclick="ativarEdicaoPoligonoManual('${featureId}')" style="background:#d97706;flex:0 0 auto;padding:8px 10px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">✏️ Editar</button>
+        <button onclick="salvarPoligonoManual('${featureId}')" style="background:${jaSalvo ? '#15803d' : '#7c3aed'};flex:2;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">${jaSalvo ? '✅ Salvo' : '💾 Salvar para Aprendizado'}</button>
+        <button onclick="ativarEdicaoPoligonoManual('${featureId}')" style="background:#d97706;flex:1;padding:8px 6px;font-size:11px;font-weight:600;border-radius:4px;border:none;color:white;cursor:pointer;">✏️ Editar</button>
       </div>
       ${jaSalvo ? '<small style="color:#15803d;margin-top:6px;display:block;">✅ Exemplo salvo no banco de aprendizado!</small>' : '<small style="color:#9ca3af;margin-top:6px;display:block;">Selecione o tipo e clique em Salvar para contribuir com o aprendizado.</small>'}
     </div>
