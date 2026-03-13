@@ -233,7 +233,7 @@ function atualizarEstadoBotaoTreinoAzure(emExecucao = false) {
     btn.disabled = Boolean(emExecucao);
     btn.style.opacity = emExecucao ? '0.7' : '1';
     btn.style.cursor = emExecucao ? 'not-allowed' : 'pointer';
-    btn.textContent = emExecucao ? '⏳ Treino Azure em andamento...' : '☁️ Treinar no Azure (1 clique)';
+    btn.textContent = emExecucao ? '⏳ Treino Azure em andamento...' : '☁️ Treinar no Azure';
 }
 
 async function chamarMlops(action, payload = null, jobId = '') {
