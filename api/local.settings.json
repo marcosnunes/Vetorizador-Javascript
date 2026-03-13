@@ -2,6 +2,11 @@
   "IsEncrypted": false,
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "FUNCTIONS_WORKER_RUNTIME": "node"
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AZURE_AI_ENABLED": "false",
+    "AZURE_ML_ENDPOINT_URL": "",
+    "AZURE_ML_ENDPOINT_KEY": "",
+    "AZURE_ML_DEPLOYMENT_NAME": "blue",
+    "ML_INFERENCE_ALLOWED_ORIGINS": "*"
   }
 }

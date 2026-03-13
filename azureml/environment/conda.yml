@@ -1,0 +1,8 @@
+name: vetorizador-online-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+      - azureml-inference-server-http

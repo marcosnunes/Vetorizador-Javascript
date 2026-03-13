@@ -5,57 +5,150 @@
 let modeloAutocarregado = null;
 let metricsHistorico = [];
 window.autoInferenceAtivo = false;
+window.autoInferenceProvider = 'none';
+
+const AZURE_ML_PROXY_PATH = '/api/ml-inference';
+
+function normalizarPrediction(prediction = {}, provider = 'desconhecido') {
+  const toNum = (value, fallback = 0) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const minArea = toNum(prediction.minAreaRecomendada, toNum(prediction.minAreaRecomendado, 15));
+  const simplification = toNum(prediction.simplificationRecomendada, toNum(prediction.simplificationRecomendado, 0.00001));
+
+  return {
+    qualidadePredita: toNum(prediction.qualidadePredita, 0.5),
+    edgeThresholdRecomendado: Math.round(toNum(prediction.edgeThresholdRecomendado, 90)),
+    morphologySizeRecomendado: Math.max(1, Math.round(toNum(prediction.morphologySizeRecomendado, 5))),
+    contrastBoostRecomendado: Number(toNum(prediction.contrastBoostRecomendado, 1.3).toFixed(3)),
+    minAreaRecomendada: Number(minArea.toFixed(3)),
+    simplificationRecomendada: Number(simplification.toFixed(6)),
+    // Compatibilidade com nomenclatura alternativa
+    minAreaRecomendado: Number(minArea.toFixed(3)),
+    simplificationRecomendado: Number(simplification.toFixed(6)),
+    provider: prediction.provider || provider,
+    modelVersion: prediction.modelVersion || null,
+    observacoes: Array.isArray(prediction.observacoes) ? prediction.observacoes : []
+  };
+}
+
+async function inferirViaAzureProxy(configAtual, contexto = {}) {
+  const response = await fetch(AZURE_ML_PROXY_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      configAtual,
+      contexto
+    })
+  });
+
+  const responseText = await response.text();
+  let payload = null;
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+    if (typeof payload === 'string') {
+      payload = JSON.parse(payload);
+    }
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const details = payload?.details || payload?.error || responseText || `status ${response.status}`;
+    throw new Error(`Azure proxy falhou: ${details}`);
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Azure proxy retornou payload inválido.');
+  }
+
+  return normalizarPrediction(payload, 'azure-ml');
+}
+
+async function probeAzureProxy() {
+  try {
+    const response = await fetch(AZURE_ML_PROXY_PATH, { method: 'GET' });
+    if (!response.ok) return false;
+    const payload = await response.json();
+    return payload?.available === true;
+  } catch {
+    return false;
+  }
+}
 
 // Auto-load model on app startup
 async function autocarregarModeloML() {
   try {
-    if (!window.carregarModeloLocalStorage) {
-      console.warn('⚠️ ML module não carregado');
-      return false;
-    }
+    let localDisponivel = false;
+    const azureDisponivel = await probeAzureProxy();
 
     if (window.carregarModeloGlobalFirestore) {
       const modeloGlobal = await window.carregarModeloGlobalFirestore();
       if (modeloGlobal) {
         modeloAutocarregado = modeloGlobal;
-        window.autoInferenceAtivo = true;
+        localDisponivel = true;
         console.log('✅ Modelo global auto-carregado para inferência');
-        return true;
       }
     }
 
-    const modelo = await window.carregarModeloLocalStorage();
-    if (modelo) {
-      modeloAutocarregado = modelo;
-      window.autoInferenceAtivo = true;
-      console.log('✅ Modelo ML auto-carregado para inferência');
-      return true;
-    } else {
-      window.autoInferenceAtivo = false;
-      console.log('⚠️ Nenhum modelo salvo encontrado');
-      return false;
+    if (!localDisponivel && window.carregarModeloLocalStorage) {
+      const modelo = await window.carregarModeloLocalStorage();
+      if (modelo) {
+        modeloAutocarregado = modelo;
+        localDisponivel = true;
+        console.log('✅ Modelo ML auto-carregado para inferência');
+      }
     }
+
+    window.autoInferenceAtivo = azureDisponivel || localDisponivel;
+    window.autoInferenceProvider = azureDisponivel ? 'azure-ml' : (localDisponivel ? 'local-model' : 'none');
+
+    if (!window.autoInferenceAtivo) {
+      console.log('⚠️ Auto-inferência indisponível (sem Azure proxy e sem modelo local).');
+    } else {
+      console.log(`🤖 Auto-inferência ativa via ${window.autoInferenceProvider}`);
+    }
+
+    return window.autoInferenceAtivo;
   } catch (error) {
     window.autoInferenceAtivo = false;
+    window.autoInferenceProvider = 'none';
     console.error('❌ Erro ao auto-carregar modelo:', error);
     return false;
   }
 }
 
 // Auto-infer optimal parameters for current settings
-async function autoInferirParametros(configAtual) {
-  if (!modeloAutocarregado) {
+async function autoInferirParametros(configAtual, contexto = {}) {
+  if (!window.autoInferenceAtivo) return null;
+
+  try {
+    const predictionAzure = await inferirViaAzureProxy(configAtual, contexto);
+    if (predictionAzure) {
+      window.autoInferenceProvider = 'azure-ml';
+      return predictionAzure;
+    }
+  } catch (error) {
+    console.warn('⚠️ Azure proxy indisponível, fallback para modelo local:', error?.message || error);
+  }
+
+  if (!modeloAutocarregado || !window.fazerPredictionML) {
     return null;
   }
 
   try {
-    const prediction = await window.fazerPredictionML(configAtual);
-    if (prediction) {
-      
-      return prediction;
+    const predictionLocal = await window.fazerPredictionML(configAtual, contexto);
+    if (predictionLocal) {
+      window.autoInferenceProvider = 'local-model';
+      return normalizarPrediction(predictionLocal, 'local-model');
     }
   } catch (error) {
-    console.error('❌ Erro na auto-inferência:', error);
+    console.error('❌ Erro na auto-inferência local:', error);
   }
 
   return null;
@@ -67,7 +160,7 @@ async function posProcessarComConfianca(features, modelPrediction) {
     return features; // Retorna features não processadas
   }
 
-  const confianca = modelPrediction.qualidadePredita;
+  const confianca = Number(modelPrediction.qualidadePredita || 0);
   const processadas = [];
 
   features.forEach((feature) => {
@@ -147,7 +240,9 @@ async function aplicarAutoInferenciaAoProcesamento(features) {
   try {
     // 1. Auto-inferir parâmetros
     const configLocal = window.CONFIG || {};
-    const prediction = await autoInferirParametros(configLocal);
+    const prediction = await autoInferirParametros(configLocal, {
+      presetProfile: configLocal.presetProfile || 'manual'
+    });
     
     if (prediction && prediction.qualidadePredita > 0.5) {
       // 2. Pós-processar com confiança
@@ -177,7 +272,8 @@ function registrarMetricaAutoInferencia(totalAntes, totalDepois, prediction) {
     reducao: ((1 - totalDepois / totalAntes) * 100).toFixed(1),
     confianca: (prediction.qualidadePredita * 100).toFixed(0),
     edgeThreshold: prediction.edgeThresholdRecomendado,
-    morphologySize: prediction.morphologySizeRecomendado
+    morphologySize: prediction.morphologySizeRecomendado,
+    provider: prediction.provider || window.autoInferenceProvider || 'desconhecido'
   };
 
   metricsHistorico.push(metrica);

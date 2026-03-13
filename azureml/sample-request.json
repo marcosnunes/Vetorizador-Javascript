@@ -1,0 +1,13 @@
+{
+  "configAtual": {
+    "edgeThreshold": 92,
+    "morphologySize": 5,
+    "minArea": 16,
+    "contrastBoost": 1.35,
+    "minQualityScore": 40,
+    "simplification": 0.00001
+  },
+  "contexto": {
+    "presetProfile": "urbano"
+  }
+}
