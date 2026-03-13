@@ -100,6 +100,32 @@ Para melhoria contínua, existe um modo manual para registrar exemplos de aprend
 
 ---
 
+## Treinar IA com 1 clique (Azure)
+
+O sistema possui um botao de treino em 1 clique para facilitar a evolucao da IA sem depender de uso manual do portal do Azure no dia a dia.
+
+### Como funciona de forma simples
+
+1. A equipe usa o modo manual para revisar e salvar exemplos.
+2. Esses exemplos ficam registrados na nuvem (Firestore).
+3. Com 1 clique no botao de treino, o sistema envia os dados para o fluxo de treinamento no Azure.
+4. O treinamento roda em segundo plano.
+5. Quando conclui, o modelo pode ser publicado e passa a melhorar as recomendacoes de inferencia.
+
+### O que voce pode esperar
+
+- Menos trabalho operacional para treinar novos modelos.
+- Processo mais padronizado para evolucao da IA.
+- Melhor narrativa para apresentacoes e auditoria de evolucao.
+
+### Importante
+
+- O botao pode operar em modo de demonstracao quando a automacao de treino ainda nao estiver totalmente conectada.
+- A vetorizacao continua funcionando mesmo se o treinamento no Azure estiver indisponivel.
+- Firestore continua sendo a base de exemplos; Azure e o ambiente de treino e inferencia em nuvem.
+
+---
+
 ## Acesso ao app
 
 Ambiente principal:

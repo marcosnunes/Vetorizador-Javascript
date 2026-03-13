@@ -34,6 +34,8 @@ let retreinoPendentePorQuota = null;
 let atualizacaoContagemEmAndamento = false;
 let ultimoRefreshContagemAt = 0;
 let monitoramentoContagemIniciado = false;
+let treinoAzureJobAtivo = null;
+let pollingTreinoAzureAtivo = false;
 
 function isQuotaExceededError(error) {
     const code = String(error ?.code || '').toLowerCase();
@@ -207,6 +209,147 @@ function atualizarPainelArquiteturaIA() {
     const resumoPadrao =
         'Híbrido: Azure ML para inferência online com fallback local; Firestore para feedback e contagem de exemplos.';
     elSummary.textContent = details || resumoPadrao;
+}
+
+function atualizarStatusTreinoAzure(mensagem, tipo = 'info') {
+    const el = document.getElementById('statusTreinoAzure');
+    if (!el) return;
+
+    el.textContent = mensagem;
+    if (tipo === 'erro') {
+        el.style.color = '#b91c1c';
+    } else if (tipo === 'sucesso') {
+        el.style.color = '#166534';
+    } else if (tipo === 'warning') {
+        el.style.color = '#92400e';
+    } else {
+        el.style.color = '#0f172a';
+    }
+}
+
+function atualizarEstadoBotaoTreinoAzure(emExecucao = false) {
+    const btn = document.getElementById('btnTreinarAzureUmClique');
+    if (!btn) return;
+    btn.disabled = Boolean(emExecucao);
+    btn.style.opacity = emExecucao ? '0.7' : '1';
+    btn.style.cursor = emExecucao ? 'not-allowed' : 'pointer';
+    btn.textContent = emExecucao ? '⏳ Treino Azure em andamento...' : '☁️ Treinar no Azure (1 clique)';
+}
+
+async function chamarMlops(action, payload = null, jobId = '') {
+    const base = '/api/mlops/train';
+    if (action === 'status') {
+        const response = await fetch(`${base}/status?jobId=${encodeURIComponent(jobId)}`, {
+            method: 'GET'
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(body?.error || `status ${response.status}`);
+        }
+        return body;
+    }
+
+    const response = await fetch(`${base}/${encodeURIComponent(action)}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload || {})
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(body?.error || `status ${response.status}`);
+    }
+    return body;
+}
+
+async function acompanharTreinoAzure(jobId) {
+    if (!jobId || pollingTreinoAzureAtivo) return;
+    pollingTreinoAzureAtivo = true;
+    atualizarEstadoBotaoTreinoAzure(true);
+
+    try {
+        for (let tentativa = 0; tentativa < 180; tentativa += 1) {
+            const statusResp = await chamarMlops('status', null, jobId);
+            const status = String(statusResp?.status || 'desconhecido').toLowerCase();
+            const modo = String(statusResp?.mode || 'remote');
+
+            if (status === 'queued') {
+                atualizarStatusTreinoAzure(`Azure MLOps: job ${jobId} em fila (${modo}).`, 'info');
+            } else if (status === 'running') {
+                atualizarStatusTreinoAzure(`Azure MLOps: job ${jobId} em execução (${modo}).`, 'info');
+            } else if (status === 'succeeded' || status === 'completed') {
+                atualizarStatusTreinoAzure(`✅ Azure MLOps: job ${jobId} concluído com sucesso.`, 'sucesso');
+                treinoAzureJobAtivo = null;
+                return;
+            } else if (status === 'promoted') {
+                atualizarStatusTreinoAzure(`✅ Azure MLOps: job ${jobId} promovido para produção.`, 'sucesso');
+                treinoAzureJobAtivo = null;
+                return;
+            } else if (status === 'failed' || status === 'error' || status === 'canceled') {
+                atualizarStatusTreinoAzure(`❌ Azure MLOps: job ${jobId} falhou (${status}).`, 'erro');
+                treinoAzureJobAtivo = null;
+                return;
+            } else {
+                atualizarStatusTreinoAzure(`Azure MLOps: job ${jobId} status=${status}.`, 'warning');
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 8000));
+        }
+
+        atualizarStatusTreinoAzure(`⚠️ Azure MLOps: timeout de monitoramento do job ${jobId}.`, 'warning');
+    } catch (error) {
+        atualizarStatusTreinoAzure(`❌ Azure MLOps: erro ao monitorar job (${error?.message || error}).`, 'erro');
+    } finally {
+        pollingTreinoAzureAtivo = false;
+        atualizarEstadoBotaoTreinoAzure(false);
+    }
+}
+
+async function iniciarTreinoAzureUmClique() {
+    if (pollingTreinoAzureAtivo) {
+        atualizarStatusTreinoAzure('Azure MLOps: já existe um treino em andamento.', 'warning');
+        return;
+    }
+
+    atualizarEstadoBotaoTreinoAzure(true);
+    atualizarStatusTreinoAzure('Azure MLOps: preparando dataset do Firestore...', 'info');
+
+    try {
+        const dataset = await obterDatasetTreinoCompartilhado({ forcarAtualizacao: true });
+        const feedbackTotal = Array.isArray(dataset?.feedback) ? dataset.feedback.length : 0;
+
+        if (feedbackTotal < 10) {
+            atualizarStatusTreinoAzure('⚠️ Azure MLOps: mínimo de 10 feedbacks para iniciar treino.', 'warning');
+            return;
+        }
+
+        const resposta = await chamarMlops('start', {
+            dataset,
+            options: {
+                source: 'vetorizador-ui',
+                trigger: 'manual-one-click',
+                feedbackTotal
+            }
+        });
+
+        treinoAzureJobAtivo = resposta?.jobId || null;
+        const modo = resposta?.mode || 'remote';
+        atualizarStatusTreinoAzure(
+            `Azure MLOps: job ${treinoAzureJobAtivo || 'n/a'} iniciado (${modo}).`,
+            modo === 'dry-run' ? 'warning' : 'info'
+        );
+
+        if (treinoAzureJobAtivo) {
+            await acompanharTreinoAzure(treinoAzureJobAtivo);
+        }
+    } catch (error) {
+        atualizarStatusTreinoAzure(`❌ Azure MLOps: falha ao iniciar treino (${error?.message || error}).`, 'erro');
+    } finally {
+        if (!pollingTreinoAzureAtivo) {
+            atualizarEstadoBotaoTreinoAzure(false);
+        }
+    }
 }
 
 async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {}) {
@@ -800,3 +943,4 @@ window.calcularMetricasQualidade = calcularMetricasQualidade;
 window.atualizarDashboardMetricas = atualizarDashboardMetricas;
 window.APIEndpoints = APIEndpoints;
 window.inicializarPhase5 = inicializarPhase5;
+window.iniciarTreinoAzureUmClique = iniciarTreinoAzureUmClique;
