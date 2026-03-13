@@ -170,6 +170,45 @@ function atualizarResumoOrigemUI({ nuvemTotal = null, quotaAtiva = false, minuto
     }
 }
 
+function atualizarPainelArquiteturaIA() {
+    const elInference = document.getElementById('aiInferenceSource');
+    const elLearning = document.getElementById('aiLearningStore');
+    const elMode = document.getElementById('aiArchitectureMode');
+    const elSummary = document.getElementById('aiFlowSummary');
+
+    if (!elInference || !elLearning || !elMode || !elSummary) return;
+
+    const status = window.obterStatusArquiteturaIA ?.() || {};
+    const provider = String(status.inferenceProvider || window.autoInferenceProvider || 'none');
+    const mode = String(status.architectureMode || 'hibrido');
+    const details = String(status.details || '').trim();
+
+    const mapProviderLabel = {
+        'azure-ml': 'Azure ML',
+        'local-model': 'Modelo local',
+        none: 'Indisponível'
+    };
+
+    const mapModeLabel = {
+        hibrido: 'Híbrido',
+        'azure-only': 'Azure-only',
+        'local-only': 'Local-only',
+        indisponivel: 'Indisponível'
+    };
+
+    elInference.textContent = mapProviderLabel[provider] || provider;
+    elMode.textContent = mapModeLabel[mode] || mode;
+    elLearning.textContent = 'Firestore';
+
+    elInference.className = `ai-badge ${provider === 'azure-ml' ? 'ai-badge-azure' : (provider === 'local-model' ? 'ai-badge-local' : 'ai-badge-neutral')}`;
+    elMode.className = `ai-badge ${mode === 'hibrido' ? 'ai-badge-hybrid' : (mode === 'azure-only' ? 'ai-badge-azure' : (mode === 'local-only' ? 'ai-badge-local' : 'ai-badge-neutral'))}`;
+    elLearning.className = 'ai-badge ai-badge-firestore';
+
+    const resumoPadrao =
+        'Híbrido: Azure ML para inferência online com fallback local; Firestore para feedback e contagem de exemplos.';
+    elSummary.textContent = details || resumoPadrao;
+}
+
 async function obterDatasetTreinoCompartilhado({ forcarAtualizacao = false } = {}) {
     const agora = Date.now();
     const cacheValido = !forcarAtualizacao &&
@@ -255,6 +294,7 @@ async function atualizarContagemExemplos() {
             quotaAtiva,
             minutosRestantes
         });
+        atualizarPainelArquiteturaIA();
 
         tentarNotificarRetreinoPosQuota({ quotaAtiva });
 
@@ -699,6 +739,7 @@ async function inicializarPhase5() {
 
         // 2. Atualizar métricas
         await atualizarDashboardMetricas();
+        atualizarPainelArquiteturaIA();
 
         // 3. Restaurar último treinamento
         try {
@@ -714,6 +755,10 @@ async function inicializarPhase5() {
         // 4. Monitoramento contínuo de contagem na UX (quase tempo real)
         if (!monitoramentoContagemIniciado) {
             monitoramentoContagemIniciado = true;
+
+            window.addEventListener('ai-architecture-status-change', () => {
+                atualizarPainelArquiteturaIA();
+            });
 
             setInterval(() => {
                 void atualizarContagemExemplos();

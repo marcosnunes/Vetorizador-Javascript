@@ -6,8 +6,28 @@ let modeloAutocarregado = null;
 let metricsHistorico = [];
 window.autoInferenceAtivo = false;
 window.autoInferenceProvider = 'none';
+window.aiArchitectureStatus = {
+  inferenceProvider: 'none',
+  architectureMode: 'hibrido',
+  fallbackAtivo: false,
+  details: 'Inicializando componentes de inferência.'
+};
 
 const AZURE_ML_PROXY_PATH = '/api/ml-inference';
+
+function atualizarStatusArquitetura(parcial = {}) {
+  const atual = window.aiArchitectureStatus || {};
+  const proximo = {
+    ...atual,
+    ...parcial,
+    updatedAt: new Date().toISOString()
+  };
+
+  window.aiArchitectureStatus = proximo;
+  window.dispatchEvent(new CustomEvent('ai-architecture-status-change', {
+    detail: proximo
+  }));
+}
 
 function normalizarPrediction(prediction = {}, provider = 'desconhecido') {
   const toNum = (value, fallback = 0) => {
@@ -108,6 +128,15 @@ async function autocarregarModeloML() {
     window.autoInferenceAtivo = azureDisponivel || localDisponivel;
     window.autoInferenceProvider = azureDisponivel ? 'azure-ml' : (localDisponivel ? 'local-model' : 'none');
 
+    atualizarStatusArquitetura({
+      inferenceProvider: window.autoInferenceProvider,
+      architectureMode: (azureDisponivel && localDisponivel) ? 'hibrido' : (azureDisponivel ? 'azure-only' : (localDisponivel ? 'local-only' : 'indisponivel')),
+      fallbackAtivo: azureDisponivel && localDisponivel,
+      details: azureDisponivel
+        ? 'Inferência principal em Azure ML com fallback local ativo.'
+        : (localDisponivel ? 'Inferência local ativa (Azure indisponível/configuração ausente).' : 'Inferência indisponível.')
+    });
+
     if (!window.autoInferenceAtivo) {
       console.log('⚠️ Auto-inferência indisponível (sem Azure proxy e sem modelo local).');
     } else {
@@ -118,6 +147,12 @@ async function autocarregarModeloML() {
   } catch (error) {
     window.autoInferenceAtivo = false;
     window.autoInferenceProvider = 'none';
+    atualizarStatusArquitetura({
+      inferenceProvider: 'none',
+      architectureMode: 'indisponivel',
+      fallbackAtivo: false,
+      details: `Falha ao inicializar auto-inferência: ${error?.message || error}`
+    });
     console.error('❌ Erro ao auto-carregar modelo:', error);
     return false;
   }
@@ -131,10 +166,19 @@ async function autoInferirParametros(configAtual, contexto = {}) {
     const predictionAzure = await inferirViaAzureProxy(configAtual, contexto);
     if (predictionAzure) {
       window.autoInferenceProvider = 'azure-ml';
+      atualizarStatusArquitetura({
+        inferenceProvider: 'azure-ml',
+        details: 'Inferência atendida pelo endpoint Azure ML.'
+      });
       return predictionAzure;
     }
   } catch (error) {
     console.warn('⚠️ Azure proxy indisponível, fallback para modelo local:', error?.message || error);
+    atualizarStatusArquitetura({
+      inferenceProvider: 'local-model',
+      fallbackAtivo: true,
+      details: 'Fallback local acionado porque o endpoint Azure não respondeu.'
+    });
   }
 
   if (!modeloAutocarregado || !window.fazerPredictionML) {
@@ -145,10 +189,18 @@ async function autoInferirParametros(configAtual, contexto = {}) {
     const predictionLocal = await window.fazerPredictionML(configAtual, contexto);
     if (predictionLocal) {
       window.autoInferenceProvider = 'local-model';
+      atualizarStatusArquitetura({
+        inferenceProvider: 'local-model',
+        details: 'Inferência local ativa.'
+      });
       return normalizarPrediction(predictionLocal, 'local-model');
     }
   } catch (error) {
     console.error('❌ Erro na auto-inferência local:', error);
+    atualizarStatusArquitetura({
+      inferenceProvider: 'none',
+      details: `Falha de inferência local: ${error?.message || error}`
+    });
   }
 
   return null;
@@ -313,3 +365,11 @@ window.posProcessarComConfianca = posProcessarComConfianca;
 window.reduzirFalsosPositivos = reduzirFalsosPositivos;
 window.aplicarAutoInferenciaAoProcesamento = aplicarAutoInferenciaAoProcesamento;
 window.obterMetricasAutoInferencia = obterMetricasAutoInferencia;
+window.obterStatusArquiteturaIA = function obterStatusArquiteturaIA() {
+  return window.aiArchitectureStatus || {
+    inferenceProvider: window.autoInferenceProvider || 'none',
+    architectureMode: 'indisponivel',
+    fallbackAtivo: false,
+    details: 'Status indisponível.'
+  };
+};

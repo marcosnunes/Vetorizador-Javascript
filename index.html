@@ -283,6 +283,25 @@
                         <h3>🧠 Aprendizado Contínuo</h3>
                         <p style="font-size: 12px; color: #666; margin: 10px 0;">O modelo aprende com os polígonos que você desenha manualmente e classifica no <strong>Modo Manual</strong>.</p>
 
+                        <div class="ai-architecture-panel">
+                            <div class="ai-architecture-title">Arquitetura IA em execução</div>
+                            <div class="ai-architecture-row">
+                                <span>Inferência</span>
+                                <span id="aiInferenceSource" class="ai-badge ai-badge-neutral">Verificando...</span>
+                            </div>
+                            <div class="ai-architecture-row">
+                                <span>Aprendizado (dados)</span>
+                                <span id="aiLearningStore" class="ai-badge ai-badge-firestore">Firestore</span>
+                            </div>
+                            <div class="ai-architecture-row">
+                                <span>Modo de arquitetura</span>
+                                <span id="aiArchitectureMode" class="ai-badge ai-badge-neutral">Híbrido</span>
+                            </div>
+                            <small id="aiFlowSummary" class="ai-flow-summary">
+                Híbrido: Azure ML para inferência online com fallback local; Firestore para feedback e contagem de exemplos.
+              </small>
+                        </div>
+
                         <div style="background: white; padding: 12px; border-radius: 6px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                                 <span style="font-weight: bold;">☁️ Exemplos na Nuvem:</span>
