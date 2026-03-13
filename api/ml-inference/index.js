@@ -25,6 +25,46 @@ function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
 }
 
+async function verificarRuntimeAzure(endpoint, key, deploymentName = '') {
+  if (!endpoint || !key) {
+    return { ready: false, status: 0, reason: 'missing-config' };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`
+    };
+    if (deploymentName) {
+      headers['azureml-model-deployment'] = deploymentName;
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ healthcheck: true }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+    return {
+      ready: response.ok,
+      status: response.status || 0,
+      reason: response.ok ? 'ok' : 'unhealthy'
+    };
+  } catch (error) {
+    clearTimeout(timeout);
+    return {
+      ready: false,
+      status: 0,
+      reason: String(error?.name || error?.message || 'network-error')
+    };
+  }
+}
+
 function toBoolean(value, defaultValue = false) {
   if (value === undefined || value === null || value === '') return defaultValue;
   const normalized = String(value).trim().toLowerCase();
@@ -115,6 +155,7 @@ module.exports = async function handler(context, req) {
   const hasConfig = Boolean(endpoint && key);
 
   if (req.method === 'GET') {
+    const runtime = await verificarRuntimeAzure(endpoint, key, deploymentName);
     context.res = {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -122,7 +163,10 @@ module.exports = async function handler(context, req) {
         ok: true,
         enabled,
         configured: hasConfig,
-        available: enabled && hasConfig,
+        available: enabled && hasConfig && runtime.ready,
+        runtimeReady: runtime.ready,
+        runtimeStatus: runtime.status,
+        runtimeReason: runtime.reason,
         provider: 'azure-ml-proxy'
       }
     };

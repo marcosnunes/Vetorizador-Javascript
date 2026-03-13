@@ -95,7 +95,9 @@ async function probeAzureProxy() {
     const response = await fetch(AZURE_ML_PROXY_PATH, { method: 'GET' });
     if (!response.ok) return false;
     const payload = await response.json();
-    return payload?.available === true;
+    const runtimeReady = payload?.runtimeReady === true;
+    const available = payload?.available === true;
+    return available && runtimeReady;
   } catch {
     return false;
   }
