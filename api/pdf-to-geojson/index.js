@@ -203,6 +203,94 @@ function parseNumericValue(value) {
   return null;
 }
 
+function normalizeRingFromAnyPoints(rawPoints) {
+  if (!Array.isArray(rawPoints) || rawPoints.length === 0) return null;
+
+  const points = [];
+  for (const item of rawPoints) {
+    let x = null;
+    let y = null;
+
+    if (Array.isArray(item) && item.length >= 2) {
+      x = parseNumericValue(item[0]);
+      y = parseNumericValue(item[1]);
+    } else if (item && typeof item === 'object') {
+      x = parseNumericValue(item.east ?? item.x ?? item.lon ?? item.lng ?? item.longitude);
+      y = parseNumericValue(item.north ?? item.y ?? item.lat ?? item.latitude);
+    }
+
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      points.push([x, y]);
+    }
+  }
+
+  if (points.length < 3) return null;
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    points.push([first[0], first[1]]);
+  }
+
+  return points.length >= 4 ? points : null;
+}
+
+function coercePolygonGeometry(geometry) {
+  if (!geometry || typeof geometry !== 'object') return null;
+
+  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates) && Array.isArray(geometry.coordinates[0])) {
+    return {
+      type: 'Polygon',
+      coordinates: [normalizeRingFromAnyPoints(geometry.coordinates[0]) || geometry.coordinates[0]]
+    };
+  }
+
+  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates?.[0]?.[0])) {
+    const ring = normalizeRingFromAnyPoints(geometry.coordinates[0][0]);
+    if (ring) {
+      return { type: 'Polygon', coordinates: [ring] };
+    }
+  }
+
+  if (geometry.type === 'LineString' && Array.isArray(geometry.coordinates)) {
+    const ring = normalizeRingFromAnyPoints(geometry.coordinates);
+    if (ring) {
+      return { type: 'Polygon', coordinates: [ring] };
+    }
+  }
+
+  return null;
+}
+
+function tryCoercePayloadGeoJson(payload) {
+  const geometryFromFeature = coercePolygonGeometry(payload?.geojson?.features?.[0]?.geometry);
+  if (geometryFromFeature) {
+    return {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: geometryFromFeature, properties: payload?.geojson?.features?.[0]?.properties || {} }]
+    };
+  }
+
+  const candidates = [
+    payload?.geojson?.features?.[0]?.coordinates,
+    payload?.geojson?.coordinates,
+    payload?.coordinates,
+    payload?.vertices
+  ];
+
+  for (const candidate of candidates) {
+    const ring = normalizeRingFromAnyPoints(candidate);
+    if (ring) {
+      return {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }]
+      };
+    }
+  }
+
+  return null;
+}
+
 function estimateExpectedVertexCount(rawText) {
   const text = String(rawText || '');
   if (!text.trim()) return 0;
@@ -673,12 +761,24 @@ function validateGeoJsonPayload(payload) {
     throw new Error('Payload da IA inválido.');
   }
 
-  const geojson = payload.geojson;
+  let geojson = payload.geojson;
+  const repaired = tryCoercePayloadGeoJson(payload);
+  if (repaired) {
+    payload.geojson = repaired;
+    geojson = repaired;
+  }
+
   if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features) || geojson.features.length === 0) {
     throw new Error('GeoJSON inválido: esperado FeatureCollection com features.');
   }
 
-  const geometry = geojson.features[0]?.geometry;
+  let geometry = geojson.features[0]?.geometry;
+  const coercedGeometry = coercePolygonGeometry(geometry);
+  if (coercedGeometry) {
+    geojson.features[0].geometry = coercedGeometry;
+    geometry = coercedGeometry;
+  }
+
   if (!geometry || geometry.type !== 'Polygon' || !Array.isArray(geometry.coordinates) || !Array.isArray(geometry.coordinates[0])) {
     throw new Error('GeoJSON inválido: esperado Polygon com coordinates.');
   }
