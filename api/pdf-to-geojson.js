@@ -6,6 +6,8 @@ const POLL_INTERVAL_MS = 2000;
 const DOCINTEL_FALLBACK_BATCH_SIZE = 2;
 const MAX_DOCINTEL_ANALYZE_RETRIES = 2;
 const DOCINTEL_RETRY_BASE_DELAY_MS = 900;
+const MAX_OPENAI_RETRIES = 2;
+const OPENAI_RETRY_BASE_DELAY_MS = 1000;
 
 function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
@@ -347,6 +349,20 @@ function normalizeRingFromAnyPoints(rawPoints) {
   const points = [];
   collectPoints(rawPoints, points, 0);
 
+  if (points.length < 3) {
+    const rawText = typeof rawPoints === 'string' ? rawPoints : JSON.stringify(rawPoints || '');
+    const nums = String(rawText || '').match(/-?\d+(?:[.,]\d+)?/g) || [];
+    if (nums.length >= 6) {
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const x = parseNumericValue(nums[i]);
+        const y = parseNumericValue(nums[i + 1]);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          points.push([x, y]);
+        }
+      }
+    }
+  }
+
   if (points.length < 3) return null;
 
   const cleaned = [];
@@ -371,22 +387,30 @@ function normalizeRingFromAnyPoints(rawPoints) {
 function coercePolygonGeometry(geometry) {
   if (!geometry || typeof geometry !== 'object') return null;
 
-  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates) && Array.isArray(geometry.coordinates[0])) {
-    return {
-      type: 'Polygon',
-      coordinates: [normalizeRingFromAnyPoints(geometry.coordinates[0]) || geometry.coordinates[0]]
-    };
-  }
-
-  if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates?.[0]?.[0])) {
-    const ring = normalizeRingFromAnyPoints(geometry.coordinates[0][0]);
+  if (geometry.type === 'Polygon') {
+    const coordsContainer = toArrayLike(geometry.coordinates) || geometry.coordinates;
+    const firstRingCandidate = Array.isArray(coordsContainer)
+      ? (toArrayLike(coordsContainer[0]) || coordsContainer[0])
+      : coordsContainer;
+    const ring = normalizeRingFromAnyPoints(firstRingCandidate || coordsContainer);
     if (ring) {
       return { type: 'Polygon', coordinates: [ring] };
     }
   }
 
-  if (geometry.type === 'LineString' && Array.isArray(geometry.coordinates)) {
-    const ring = normalizeRingFromAnyPoints(geometry.coordinates);
+  if (geometry.type === 'MultiPolygon') {
+    const multi = toArrayLike(geometry.coordinates) || geometry.coordinates;
+    const poly = Array.isArray(multi) ? (toArrayLike(multi[0]) || multi[0]) : multi;
+    const firstRing = Array.isArray(poly) ? (toArrayLike(poly[0]) || poly[0]) : poly;
+    const ring = normalizeRingFromAnyPoints(firstRing);
+    if (ring) {
+      return { type: 'Polygon', coordinates: [ring] };
+    }
+  }
+
+  if (geometry.type === 'LineString') {
+    const line = toArrayLike(geometry.coordinates) || geometry.coordinates;
+    const ring = normalizeRingFromAnyPoints(line);
     if (ring) {
       return { type: 'Polygon', coordinates: [ring] };
     }
@@ -465,6 +489,67 @@ function getExtractedVertexCount(payload) {
     && first[1] === last[1];
 
   return closed ? Math.max(0, ring.length - 1) : ring.length;
+}
+
+function buildHeuristicGeojsonFromText(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return null;
+
+  const lines = text.split(/\r?\n/);
+  const points = [];
+
+  for (const line of lines) {
+    const matches = line.match(/-?\d+(?:[.,]\d+)?/g);
+    if (!matches || matches.length < 2) continue;
+
+    for (let i = 0; i + 1 < matches.length; i++) {
+      const rawA = matches[i];
+      const rawB = matches[i + 1];
+      if (!/[.,]/.test(rawA) || !/[.,]/.test(rawB)) continue;
+
+      const a = parseNumericValue(rawA);
+      const b = parseNumericValue(rawB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+
+      const isLatLon = Math.abs(a) <= 180 && Math.abs(b) <= 90;
+      const isProjected = Math.abs(a) >= 1000 && Math.abs(b) >= 1000;
+      if (!isLatLon && !isProjected) continue;
+
+      points.push([a, b]);
+    }
+  }
+
+  if (points.length < 3) return null;
+
+  const dedup = [];
+  for (const p of points) {
+    const prev = dedup[dedup.length - 1];
+    if (!prev || prev[0] !== p[0] || prev[1] !== p[1]) {
+      dedup.push(p);
+    }
+  }
+
+  if (dedup.length < 3) return null;
+  const first = dedup[0];
+  const last = dedup[dedup.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    dedup.push([first[0], first[1]]);
+  }
+
+  if (dedup.length < 4) return null;
+
+  const firstPointIsLatLon = Math.abs(dedup[0][0]) <= 180 && Math.abs(dedup[0][1]) <= 90;
+  const projectionKey = firstPointIsLatLon ? 'WGS84' : 'SIRGAS2000_22S';
+
+  return {
+    geojson: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [dedup] }, properties: {} }]
+    },
+    projectionKey,
+    sourcePattern: firstPointIsLatLon ? 'latlong' : 'utm',
+    extractedVertices: dedup.length - 1
+  };
 }
 
 async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRange = '', modelId = 'prebuilt-read') {
@@ -722,8 +807,8 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '', op
   ].join('\n');
 
   const focusedText = buildCoordinateFocusedText(ocrText);
-  const compactOcrText = String(ocrText || '').slice(0, 220000);
-  const compactFocusedText = String(focusedText || '').slice(0, 220000);
+  const compactOcrText = String(ocrText || '').slice(0, 80000);
+  const compactFocusedText = String(focusedText || '').slice(0, 80000);
   const expectedVertices = Number.isFinite(options.expectedVertices) ? options.expectedVertices : 0;
   const minimumVertices = Number.isFinite(options.minimumVertices) ? options.minimumVertices : 0;
   const previousVertices = Number.isFinite(options.previousVertices) ? options.previousVertices : 0;
@@ -745,27 +830,40 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '', op
 
   const responseFormat = { type: 'json_object' };
 
-  const openAiResponse = await fetch(chatUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': openAiConfig.apiKey
-    },
-    body: JSON.stringify({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: 0,
-      max_tokens: 8000,
-      response_format: responseFormat
-    })
-  });
+  let openAiPayload = {};
+  for (let attempt = 0; attempt <= MAX_OPENAI_RETRIES; attempt++) {
+    const openAiResponse = await fetch(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': openAiConfig.apiKey
+      },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0,
+        max_tokens: 8000,
+        response_format: responseFormat
+      })
+    });
 
-  const openAiPayload = await openAiResponse.json().catch(() => ({}));
+    openAiPayload = await openAiResponse.json().catch(() => ({}));
+    if (openAiResponse.ok) {
+      break;
+    }
 
-  if (!openAiResponse.ok) {
-    throw new Error(`Azure OpenAI falhou: ${openAiResponse.status} - ${getErrorMessage(openAiPayload)}`);
+    const msg = getErrorMessage(openAiPayload);
+    const transientStatus = openAiResponse.status === 429 || openAiResponse.status === 500 || openAiResponse.status === 503 || openAiResponse.status === 504;
+    const backendFailure = /backend call failure/i.test(String(msg));
+    if ((transientStatus || backendFailure) && attempt < MAX_OPENAI_RETRIES) {
+      const waitMs = OPENAI_RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+      await sleep(waitMs);
+      continue;
+    }
+
+    throw new Error(`Azure OpenAI falhou: ${openAiResponse.status} - ${msg}`);
   }
 
   const message = openAiPayload.choices?.[0]?.message || {};
@@ -1007,6 +1105,28 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (localOcrText) {
+      const heuristic = buildHeuristicGeojsonFromText(localOcrText);
+      if (heuristic) {
+        return res.status(200).json({
+          success: true,
+          matricula: '',
+          projectionKey: heuristic.projectionKey,
+          geometryMode: 'absolute',
+          sourcePattern: heuristic.sourcePattern,
+          warnings: ['Geometria gerada por fallback heurístico a partir do OCR local.'],
+          geojson: heuristic.geojson,
+          pagesAnalyzed: 0,
+          pageNumbers: [],
+          pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+          usedPagedFallback: false,
+          textSourceUsed: 'client-ocr-heuristic',
+          expectedVertices: heuristic.extractedVertices,
+          extractedVertices: heuristic.extractedVertices
+        });
+      }
+    }
+
     const ocrResult = localOcrText
       ? {
         text: localOcrText,

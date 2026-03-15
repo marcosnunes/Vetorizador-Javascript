@@ -45,7 +45,7 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, re
     pdfBase64,
     fileName,
     totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
-    ocrText: String(ocrText || '').slice(0, 220000)
+    ocrText: String(ocrText || '').slice(0, 80000)
   });
   const candidateRoutes = getAzurePdfToGeoJsonRoutes();
   let response = null;
@@ -138,6 +138,41 @@ async function extractPdfTextLocally(arrayBuffer, maxPages = 40) {
     }
 
     return fullText.trim();
+  } catch {
+    return '';
+  }
+}
+
+async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 8) {
+  try {
+    if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
+      return '';
+    }
+
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    const totalPages = Math.min(pdfDoc.numPages || 0, Math.max(1, maxPages));
+    const chunks = [];
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) continue;
+
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const result = await window.Tesseract.recognize(canvas, 'por+eng');
+      const text = String(result?.data?.text || '').trim();
+      if (text) {
+        chunks.push(`--- PAGINA ${pageNum} ---\n${text}`);
+      }
+    }
+
+    return chunks.join('\n\n').trim();
   } catch {
     return '';
   }
@@ -1213,15 +1248,38 @@ fileInput.addEventListener("change", async (event) => {
       }
 
       updateStatus("⚠️ OCR Azure indisponível. Tentando extração local de texto...", "info");
+      const MIN_TEXT_LENGTH = 120;
       const localOcrText = await extractPdfTextLocally(arrayBuffer);
-      if (!localOcrText) {
-        throw apiError;
-      }
 
       if (typeof displayLogMessage === 'function') {
         displayLogMessage('[PDFtoArcgis][LogUI] ⚙️ Fallback local de OCR ativado (PDF.js) para manter o fluxo.');
       }
-      apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint, 0, localOcrText);
+
+      let fallbackError = apiError;
+      if (localOcrText && localOcrText.length >= MIN_TEXT_LENGTH) {
+        try {
+          apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint, 0, localOcrText);
+        } catch (errLocal) {
+          fallbackError = errLocal;
+        }
+      }
+
+      if (!apiResult) {
+        updateStatus("⚠️ Tentando OCR avançado (Tesseract) para PDF digitalizado...", "info");
+        const cfg = getPdfToArcgisConfig();
+        const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
+          ? Math.max(1, Number(cfg.maxTesseractPages))
+          : 10;
+        const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
+        if (!tesseractText || tesseractText.length < MIN_TEXT_LENGTH) {
+          throw fallbackError;
+        }
+
+        if (typeof displayLogMessage === 'function') {
+          displayLogMessage('[PDFtoArcgis][LogUI] 🔎 OCR avançado (Tesseract) aplicado; reenviando para API.');
+        }
+        apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint, 0, tesseractText);
+      }
     }
 
     progressBar.value = 100;
