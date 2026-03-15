@@ -1,5 +1,6 @@
 const DEFAULT_OPENAI_API_VERSION = '2024-10-21';
 const DEFAULT_DOCINTEL_API_VERSION = '2024-11-30';
+const LEGACY_DOCINTEL_API_VERSION = '2023-07-31';
 const MAX_DOCINTEL_POLLS = 60;
 const POLL_INTERVAL_MS = 2000;
 const DOCINTEL_FALLBACK_BATCH_SIZE = 2;
@@ -133,6 +134,31 @@ function extractTextFromAnalyzeResult(analyzeResult) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildDocIntelAnalyzeCandidates(docIntelConfig, modelId, pagesRange = '') {
+  const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
+  const configuredApiVersion = String(docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION).trim() || DEFAULT_DOCINTEL_API_VERSION;
+  const candidates = [
+    {
+      label: 'documentintelligence',
+      apiVersion: configuredApiVersion,
+      url: `${endpoint}/documentintelligence/documentModels/${encodeURIComponent(modelId)}:analyze?api-version=${encodeURIComponent(configuredApiVersion)}`
+    }
+  ];
+
+  if (configuredApiVersion !== LEGACY_DOCINTEL_API_VERSION) {
+    candidates.push({
+      label: 'formrecognizer',
+      apiVersion: LEGACY_DOCINTEL_API_VERSION,
+      url: `${endpoint}/formrecognizer/documentModels/${encodeURIComponent(modelId)}:analyze?api-version=${encodeURIComponent(LEGACY_DOCINTEL_API_VERSION)}`
+    });
+  }
+
+  return candidates.map((candidate) => ({
+    ...candidate,
+    url: pagesRange ? `${candidate.url}&pages=${encodeURIComponent(pagesRange)}` : candidate.url
+  }));
 }
 
 function getErrorMessage(payload, fallback = 'Erro desconhecido') {
@@ -289,31 +315,50 @@ function getExtractedVertexCount(payload) {
 }
 
 async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRange = '', modelId = 'prebuilt-read') {
-  const endpoint = sanitizeEndpoint(docIntelConfig.endpoint);
-  const apiVersion = docIntelConfig.apiVersion || DEFAULT_DOCINTEL_API_VERSION;
+  const analyzeCandidates = buildDocIntelAnalyzeCandidates(docIntelConfig, modelId, pagesRange);
+  let analyzeResponse = null;
+  let selectedCandidate = null;
+  const failedCandidates = [];
 
-  let analyzeUrl = `${endpoint}/documentintelligence/documentModels/${encodeURIComponent(modelId)}:analyze?api-version=${encodeURIComponent(apiVersion)}`;
-  if (pagesRange) {
-    analyzeUrl += `&pages=${encodeURIComponent(pagesRange)}`;
+  for (const candidate of analyzeCandidates) {
+    const response = await fetch(candidate.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Ocp-Apim-Subscription-Key': docIntelConfig.apiKey
+      },
+      body: JSON.stringify({ base64Source: pdfBase64 })
+    });
+
+    if (response.ok) {
+      analyzeResponse = response;
+      selectedCandidate = candidate;
+      break;
+    }
+
+    const errorPayload = await response.json().catch(() => ({}));
+    failedCandidates.push({
+      label: candidate.label,
+      apiVersion: candidate.apiVersion,
+      status: response.status,
+      message: getErrorMessage(errorPayload)
+    });
+
+    if (response.status !== 404) {
+      throw new Error(`Document Intelligence (analyze) falhou [${candidate.label} ${candidate.apiVersion}]: ${response.status} - ${getErrorMessage(errorPayload)}`);
+    }
   }
 
-  const analyzeResponse = await fetch(analyzeUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Ocp-Apim-Subscription-Key': docIntelConfig.apiKey
-    },
-    body: JSON.stringify({ base64Source: pdfBase64 })
-  });
-
-  if (!analyzeResponse.ok) {
-    const errorPayload = await analyzeResponse.json().catch(() => ({}));
-    throw new Error(`Document Intelligence (analyze) falhou: ${analyzeResponse.status} - ${getErrorMessage(errorPayload)}`);
+  if (!analyzeResponse) {
+    const tried = failedCandidates
+      .map((candidate) => `${candidate.label} ${candidate.apiVersion} => ${candidate.status} (${candidate.message})`)
+      .join(' | ');
+    throw new Error(`Document Intelligence (analyze) falhou: 404 - recurso/rota não encontrado. Verifique o endpoint do Azure AI Document Intelligence e a versão da API. Tentativas: ${tried}`);
   }
 
   const operationLocation = analyzeResponse.headers.get('operation-location');
   if (!operationLocation) {
-    throw new Error('Document Intelligence não retornou operation-location.');
+    throw new Error(`Document Intelligence não retornou operation-location na rota ${selectedCandidate?.label || 'desconhecida'}.`);
   }
 
   for (let attempt = 0; attempt < MAX_DOCINTEL_POLLS; attempt++) {
