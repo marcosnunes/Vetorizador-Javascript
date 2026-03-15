@@ -54,6 +54,7 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
 
   if (!response.ok || !payload?.success) {
     const reason = payload?.error || `HTTP ${response.status}`;
+    if (payload?.ocrPreview) console.warn('[PDFtoArcgis] ocrPreview recebido da API:', payload.ocrPreview);
     throw new Error(`Serviço de extração online indisponível: ${reason}`);
   }
 
@@ -1281,6 +1282,7 @@ fileInput.addEventListener("change", async (event) => {
 
     let apiResult;
     try {
+      console.log('[PDFtoArcgis] OCR preview antes do envio:', `[${extractedText.length} chars]`, extractedText.slice(0, 400));
       apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, extractedText);
     } catch (firstError) {
       const msg = String(firstError?.message || '');

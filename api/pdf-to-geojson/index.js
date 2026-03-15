@@ -1876,12 +1876,17 @@ module.exports = async function (context, req) {
     context.log.error('[pdf-to-geojson] erro:', error);
     const message = error?.message || 'Falha ao processar PDF com IA Azure.';
     const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido|Extração incompleta|Document Intelligence \(analyze\) falhou: 400|Invalid request|não foi possível localizar coordenadas UTM válidas/i.test(message);
+    const ocrPreview = localOcrText
+      ? `[${localOcrText.length} chars] ...${localOcrText.slice(0, 300)}...[[fim]]...${localOcrText.slice(-150)}`
+      : '(sem ocrText recebido)';
+    context.log.warn('[pdf-to-geojson] ocrPreview:', ocrPreview);
     context.res = {
       status: isNonTransient ? 422 : 502,
       headers: corsHeaders,
       body: {
         success: false,
-        error: message
+        error: message,
+        ...(isNonTransient ? { ocrPreview } : {})
       }
     };
   }
