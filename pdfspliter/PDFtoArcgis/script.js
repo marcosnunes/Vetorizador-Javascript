@@ -90,7 +90,34 @@ async function extractPdfTextLocally(arrayBuffer, maxPages = 40) {
   }
 }
 
-async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 8) {
+function preprocessCanvasForOcr(canvas, ctx) {
+  try {
+    const width = canvas.width;
+    const height = canvas.height;
+    if (!width || !height) return;
+
+    const img = ctx.getImageData(0, 0, width, height);
+    const data = img.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const gray = Math.round((r * 0.299) + (g * 0.587) + (b * 0.114));
+      const boosted = Math.min(255, Math.max(0, (gray - 110) * 2));
+      const bin = boosted > 140 ? 255 : 0;
+      data[i] = bin;
+      data[i + 1] = bin;
+      data[i + 2] = bin;
+    }
+
+    ctx.putImageData(img, 0, 0);
+  } catch {
+    // Mantem OCR mesmo se preprocessamento falhar.
+  }
+}
+
+async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
   try {
     if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
       return '';
@@ -103,7 +130,7 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 8) {
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 2 });
+      const viewport = page.getViewport({ scale: 2.8 });
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) continue;
@@ -111,6 +138,7 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 8) {
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
       await page.render({ canvasContext: ctx, viewport }).promise;
+      preprocessCanvasForOcr(canvas, ctx);
 
       const result = await window.Tesseract.recognize(canvas, 'por+eng');
       const text = String(result?.data?.text || '').trim();
@@ -1237,7 +1265,7 @@ fileInput.addEventListener("change", async (event) => {
       updateStatus("⚠️ Texto insuficiente no PDF.js. Tentando OCR avançado (Tesseract)...", "info");
       const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
         ? Math.max(1, Number(cfg.maxTesseractPages))
-        : 10;
+        : 30;
       const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
       if (tesseractText && tesseractText.length > extractedText.length) {
         extractedText = tesseractText;
@@ -1264,7 +1292,7 @@ fileInput.addEventListener("change", async (event) => {
       updateStatus('⚠️ OCR inicial sem coordenadas UTM válidas. Tentando OCR reforçado...', 'info');
       const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
         ? Math.max(1, Number(cfg.maxTesseractPages))
-        : 10;
+        : 30;
       const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
       const enhancedText = mergeOcrTexts(extractedText, tesseractText);
 
