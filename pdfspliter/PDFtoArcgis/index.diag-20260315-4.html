@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Extrator de Coordenadas para ArcGIS</title>
+
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css" />
+
+  <script src="vendor/shpwrite.js"></script>
+  <script src="vendor/shp.min.js"></script>
+  <script src="vendor/pizzip.min.js"></script>
+  <script src="vendor/proj4.min.js"></script>
+  <script src="vendor/FileSaver.min.js"></script>
+  <script src="vendor/docx.umd.js"></script>
+  <script>
+    window.PDFTOARCGIS_CONFIG = Object.assign({
+      workspaceAiExtractorUrl: "/api/pdf-to-geojson",
+      maxWorkspaceRetries: 1
+    }, window.PDFTOARCGIS_CONFIG || {});
+  </script>
+  <script>
+    (function ensureDocxLoaded() {
+      if (window.docx && window.docx.Document) {
+        console.log("[DOCX] Biblioteca carregada (local).");
+        return;
+      }
+      console.warn("[DOCX] Biblioteca nao encontrada. Verifique o arquivo local.");
+    })();
+  </script>
+</head>
+<body>
+    <div id="mySidenav" class="sidenav">
+        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">×</a>
+        <a href="/pdfspliter/Dividir/index.html">Dividir</a>
+        <a href="/pdfspliter/UnirPDF/index.html">Unir PDF</a>
+        <a href="/pdfspliter/DividirApenas/index.html">Dividir Apenas</a>
+        <a href="/pdfspliter/JPGtoPDF/index.html">JPG to PDF</a>
+        <a href="/pdfspliter/PDFtoJPG/index.html">PDF to JPG</a>
+        <a href="/pdfspliter/PDFtoArcgis/index.html">PDF to ArcGIS</a>
+    </div>
+
+  <div class="navigation">
+    <nav>
+      <div class="nav-wrapper">
+        <span class="open-nav" onclick="openNav()">☰</span>
+      </div>
+    </nav>
+  </div>
+
+  <div class="row hero-section">
+    <div class="container">
+      <div class="col-md-12 columnBlockLayout">
+        <h1><i class="fas fa-map-marked-alt"></i> Extrator de Coordenadas</h1>
+        <p>Extração de Shapefiles (Polígono + Vértices) para ArcGIS e QGIS.</p>
+
+        <label for="fileInput" class="custom-file-upload">
+          <i class="fas fa-upload"></i>
+          <span id="fileNameDisplay">Escolher Matrícula (PDF)</span>
+        </label>
+        <input type="file" id="fileInput" accept=".pdf" style="display:none" />
+
+        <label for="shpInput" class="custom-file-upload">
+          <i class="fas fa-database"></i>
+          <span>Carregar SHP (ZIP)</span>
+        </label>
+        <input type="file" id="shpInput" accept=".zip" style="display:none" />
+      </div>
+    </div>
+  </div>
+
+  <div class="row info-section sectionBlockLayout">
+    <div class="container">
+      <div class="col-md-12 columnBlockLayout">
+        <h2>Instruções</h2>
+        <p>
+          1. Clique em "Escolher Matrícula (PDF)" para carregar um memorial descritivo em PDF.<br>
+          2. Aguarde a leitura do documento e selecione a matrícula desejada em "Documentos detectados".<br>
+          3. Verifique o sistema de coordenadas detectado e, se necessário, use o modo avançado para forçar o CRS.<br>
+          4. Revise a validação topológica e a tabela de vértices antes de exportar.<br>
+          5. Use "CSV" para baixar a matrícula selecionada ou "Salvar na Pasta" para exportar SHP + CSV.<br>
+          6. Ferramenta inversa (memorial descritivo): use "Carregar SHP (ZIP)" com o shapefile completo em .zip (mínimo: .shp, .shx, .dbf e .prj).
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row info-section sectionBlockLayout">
+    <div class="container">
+      <div class="col-md-12 columnBlockLayout">
+        <div id="progressContainer" style="display:none;">
+          <label id="progressLabel" style="font-weight:bold;color:#ff9800;">Iniciando leitura...</label>
+          <progress id="progressBar" value="0" max="100" style="width:100%;height:15px;margin-top:5px;"></progress>
+        </div>
+
+        <!-- Seletor de matrículas detectadas no PDF unificado -->
+        <div id="docSelectorBox" class="stat-card" style="display:none; margin-bottom: 15px; text-align:left;">
+          <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">Documentos (matrículas) detectados</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+            <select id="docSelect" style="flex:1; min-width:280px; padding:10px; border-radius:5px; border:1px solid #ffc107;"></select>
+            <div id="docMeta" style="font-size: 0.95rem; color:#666; min-width:280px; white-space:pre-line;"></div>
+          </div>
+          <small style="color:#666; display:block; margin-top:8px;">CSV baixa somente a matrícula selecionada. “Salvar na Pasta” grava SHP + CSV de todas as matrículas.</small>
+        </div>
+
+        <!-- Resultado da detecção automática de CRS -->
+        <div id="crsDetectedBox" class="stat-card" style="display:none; margin-bottom: 15px; text-align:left;">
+          <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">Sistema de Coordenadas (do documento selecionado)</p>
+          <h3 id="crsDetectedTitle" style="margin: 8px 0; color: #2c3e50;">—</h3>
+          <div id="crsDetectedReason" style="font-size: 0.95rem; color:#666; white-space: pre-line;"></div>
+        </div>
+
+        <details id="advancedCrs" style="display:none; margin-bottom: 15px;">
+          <summary style="cursor:pointer; font-weight:bold; color:#ff9800;">Modo avançado: forçar CRS manualmente (aplica somente na matrícula selecionada)</summary>
+          <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <select id="projectionSelect" style="flex:1; min-width:280px; padding:10px; border-radius:5px; border:1px solid #ffc107;">
+              <option value="SIRGAS2000_21S">SIRGAS 2000 / UTM 21S (EPSG:31981)</option>
+              <option value="SIRGAS2000_22S">SIRGAS 2000 / UTM 22S (EPSG:31982)</option>
+              <option value="SIRGAS2000_23S">SIRGAS 2000 / UTM 23S (EPSG:31983)</option>
+              <option value="SIRGAS2000_24S">SIRGAS 2000 / UTM 24S (EPSG:31984)</option>
+              <option value="SAD69_22S">SAD 69 / UTM 22S (EPSG:29192)</option>
+              <option value="SAD69_23S">SAD 69 / UTM 23S (EPSG:29193)</option>
+              <option value="WGS84">WGS 84 (Graus Decimais - EPSG:4326)</option>
+            </select>
+            <button id="forceCrsBtn" class="btn-gold" style="flex: 0; min-width: 160px;">Aplicar CRS</button>
+          </div>
+          <small style="color:#666;">Use se a detecção automática falhar ou o memorial não informar datum/zona.</small>
+        </details>
+
+        <div id="status" style="display:none;"></div>
+
+        <!-- Painel de validação topológica -->
+        <div id="validationBox" class="stat-card" style="display:none; text-align:left; border-left: 4px solid #ff9800;">
+          <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">
+            <i class="fas fa-check-circle"></i> Validação Topológica do Polígono
+          </p>
+          
+          <div id="validationStatus" style="margin-top:10px; padding:10px; border-radius:5px; background-color:#f8f9fa;">
+            <h4 id="validationTitle" style="margin:0 0 10px 0; color:#2c3e50;">
+              <i class="fas fa-spinner fa-spin"></i> Validando...
+            </h4>
+            
+            <div id="validationErrors" style="display:none; margin-bottom:10px;">
+              <strong style="color:#dc3545;"><i class="fas fa-exclamation-triangle"></i> Erros Críticos:</strong>
+              <ul id="errorList" style="margin:5px 0; padding-left:20px; color:#dc3545;"></ul>
+            </div>
+            
+            <div id="validationWarnings" style="display:none; margin-bottom:10px;">
+              <strong style="color:#ff9800;"><i class="fas fa-exclamation-circle"></i> Avisos:</strong>
+              <ul id="warningList" style="margin:5px 0; padding-left:20px; color:#ff9800;"></ul>
+            </div>
+            
+            <div id="validationSuccess" style="display:none;">
+              <strong style="color:#28a745;"><i class="fas fa-check-circle"></i> Polígono Válido!</strong>
+              <div id="validationDetails" style="margin-top:5px; font-size:0.9rem; color:#666;"></div>
+            </div>
+          </div>
+          
+
+        </div>
+
+        <!-- Metadados usados na geração do memorial -->
+        <div id="memorialMetaBox" class="stat-card" style="display:none; text-align:left;">
+          <p style="text-transform: uppercase; font-size: 0.8rem; margin: 0; color: #666;">Dados para o Memorial Descritivo</p>
+
+          <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:260px;">
+              <label style="font-size:0.9rem; color:#666;">Responsável Técnico</label>
+              <input id="respTecnico" type="text" placeholder="Ex.: Wanderlei Bello Machado" 
+                     style="width:100%; padding:10px; border-radius:5px; border:1px solid #ffc107;">
+            </div>
+
+            <div style="flex:1; min-width:200px;">
+              <label style="font-size:0.9rem; color:#666;">CREA</label>
+              <input id="respCrea" type="text" placeholder="Ex.: CREA/PR 222.724/D" 
+                     style="width:100%; padding:10px; border-radius:5px; border:1px solid #ffc107;">
+            </div>
+
+            <div style="flex:1; min-width:220px;">
+              <label style="font-size:0.9rem; color:#666;">Cidade</label>
+              <input id="cidadeDetectada" type="text" placeholder="Ex.: Curitiba-PR" 
+                     style="width:100%; padding:10px; border-radius:5px; border:1px solid #ffc107;">
+            </div>
+          </div>
+
+          <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button id="generateDocxBtn" class="btn-gold" style="flex:1; min-width:200px; background-color:#0b8043;">
+              <i class="fas fa-file-word"></i> Gerar Memorial DOCX
+            </button>
+          </div>
+
+          <small style="display:block; color:#666; margin-top:8px;">
+            O CRS será incluído automaticamente no memorial (lido do .prj do SHP ou inferido pelas coordenadas).
+          </small>
+          <small style="display:block; color:#666; margin-top:4px;">
+            Para gerar o memorial via ferramenta inversa, envie o shapefile em .zip com todos os arquivos do conjunto (.shp, .shx, .dbf e .prj).
+          </small>
+        </div>
+
+        <div id="resultBox" style="display:none;">
+          <div class="stat-card">
+            <p style="text-transform:uppercase;font-size:0.8rem;margin:0;color:#666;">Vértices Encontrados (matrícula selecionada)</p>
+            <h2 id="countDisplay" style="font-size:3rem;margin:10px 0;color:#ff9800;">0</h2>
+            <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+              <button id="downloadBtn" class="btn-gold" style="flex:1;min-width:150px;">
+                <i class="fas fa-file-csv"></i> CSV
+              </button>
+              <button id="saveToFolderBtn" class="btn-gold" style="flex:1;min-width:180px;background-color:#0b8043;">
+                <i class="fas fa-folder-open"></i> Salvar na Pasta
+              </button>
+            </div>
+          </div>
+
+          <div class="table-container">
+            <table id="previewTable">
+              <thead>
+                <tr>
+                  <th>Ordem</th>
+                  <th>Ponto (ID)</th>
+                  <th>Norte (Y)</th>
+                  <th>Este (X)</th>
+                  <th>Dist. (m)</th>
+                  <th>Azimute</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF e OCR -->
+  <script src="vendor/pdf.min.js"></script>
+
+  
+  <!-- Script versionado por nome de arquivo para furar cache CDN/ServiceWorker -->
+  <script src="script.diag-20260315-4.js"></script>
+</body>
+</html>
