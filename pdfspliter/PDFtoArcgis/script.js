@@ -34,14 +34,19 @@ function getAzurePdfToGeoJsonRoutes() {
   return [...new Set(routes)];
 }
 
-async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
+async function callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint = 0, retryCount = 0, ocrText = '') {
   const cfg = getPdfToArcgisConfig();
   const MAX_RETRIES = Number.isFinite(Number(cfg.maxAzureRetries))
     ? Math.max(0, Number(cfg.maxAzureRetries))
     : 1;
   const INITIAL_DELAY_MS = 1200;
 
-  const payload = JSON.stringify({ pdfBase64, fileName });
+  const payload = JSON.stringify({
+    pdfBase64,
+    fileName,
+    totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+    ocrText: String(ocrText || '').slice(0, 220000)
+  });
   const candidateRoutes = getAzurePdfToGeoJsonRoutes();
   let response = null;
   let lastError = null;
@@ -82,7 +87,7 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
         displayLogMessage(`[PDFtoArcgis][LogUI] Azure API indisponível (${response.status}). Nova tentativa em ${(delay / 1000).toFixed(1)}s...`);
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
-      return callAzurePdfToGeoJson(pdfBase64, fileName, retryCount + 1);
+      return callAzurePdfToGeoJson(pdfBase64, fileName, totalPagesHint, retryCount + 1, ocrText);
     }
 
     const errText = await response.text().catch(() => '');
@@ -106,6 +111,36 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
   }
 
   return response.json();
+}
+
+async function inferPdfPageCount(arrayBuffer) {
+  try {
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    return Number.isFinite(pdfDoc?.numPages) ? pdfDoc.numPages : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function extractPdfTextLocally(arrayBuffer, maxPages = 40) {
+  try {
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    const totalPages = Math.min(pdfDoc.numPages || 0, maxPages);
+    let fullText = '';
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      fullText += `\n\n--- PAGINA ${pageNum} ---\n`;
+      fullText += buildPageTextWithLines(textContent);
+    }
+
+    return fullText.trim();
+  } catch {
+    return '';
+  }
 }
 
 function arrayBufferToBase64(arrayBuffer) {
@@ -1163,11 +1198,32 @@ fileInput.addEventListener("change", async (event) => {
 
     const arrayBuffer = await file.arrayBuffer();
     const pdfBase64 = arrayBufferToBase64(arrayBuffer);
+    const totalPagesHint = await inferPdfPageCount(arrayBuffer);
 
     progressBar.value = 35;
     document.getElementById("progressLabel").innerText = "Processando PDF na IA Azure...";
 
-    const apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name);
+    let apiResult;
+    try {
+      apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint);
+    } catch (apiError) {
+      const canFallbackLocalOcr = /API 500|OCR da Azure indisponivel|Backend call failure/i.test(String(apiError?.message || ''));
+      if (!canFallbackLocalOcr) {
+        throw apiError;
+      }
+
+      updateStatus("⚠️ OCR Azure indisponível. Tentando extração local de texto...", "info");
+      const localOcrText = await extractPdfTextLocally(arrayBuffer);
+      if (!localOcrText) {
+        throw apiError;
+      }
+
+      if (typeof displayLogMessage === 'function') {
+        displayLogMessage('[PDFtoArcgis][LogUI] ⚙️ Fallback local de OCR ativado (PDF.js) para manter o fluxo.');
+      }
+      apiResult = await callAzurePdfToGeoJson(pdfBase64, file.name, totalPagesHint, 0, localOcrText);
+    }
+
     progressBar.value = 100;
 
     if (!apiResult?.success) {

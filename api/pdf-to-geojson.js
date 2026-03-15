@@ -417,18 +417,66 @@ async function runDocumentIntelligence(pdfBase64, docIntelConfig, options = {}) 
   let modelId = 'prebuilt-read';
   let firstPass = null;
   const modelCandidates = ['prebuilt-read', 'prebuilt-layout', 'prebuilt-document'];
+  const firstPassErrors = [];
 
   for (const candidate of modelCandidates) {
-    const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', candidate);
-    if (String(pass?.text || '').trim()) {
-      modelId = candidate;
-      firstPass = pass;
-      break;
+    try {
+      const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, '', candidate);
+      if (String(pass?.text || '').trim()) {
+        modelId = candidate;
+        firstPass = pass;
+        break;
+      }
+    } catch (error) {
+      firstPassErrors.push(`${candidate}: ${error?.message || error}`);
     }
   }
 
   if (!firstPass) {
-    throw new Error('Document Intelligence concluiu, mas sem conteúdo textual extraído.');
+    if (totalPagesHint > 1) {
+      const mergedPages = new Map();
+      const mergedTexts = [];
+      let fallbackModel = modelId;
+
+      for (let start = 1; start <= totalPagesHint; start += DOCINTEL_FALLBACK_BATCH_SIZE) {
+        const end = Math.min(totalPagesHint, start + DOCINTEL_FALLBACK_BATCH_SIZE - 1);
+        const range = `${start}-${end}`;
+        let rangePass = null;
+
+        for (const candidate of modelCandidates) {
+          try {
+            const pass = await runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, range, candidate);
+            if (String(pass?.text || '').trim()) {
+              rangePass = pass;
+              fallbackModel = candidate;
+              break;
+            }
+          } catch {
+            // tenta próximo modelo e próximo range
+          }
+        }
+
+        if (!rangePass) continue;
+        if (rangePass.text) mergedTexts.push(rangePass.text);
+        for (const p of (rangePass.pages || [])) {
+          if (Number.isFinite(p?.pageNumber)) {
+            mergedPages.set(p.pageNumber, p);
+          }
+        }
+      }
+
+      if (mergedTexts.length > 0) {
+        return {
+          text: mergedTexts.join('\n\n'),
+          pages: [...mergedPages.values()].sort((a, b) => (a.pageNumber || 0) - (b.pageNumber || 0)),
+          usedPagedFallback: true,
+          modelId: fallbackModel
+        };
+      }
+    }
+
+    const detail = firstPassErrors.length > 0 ? ` Detalhes: ${firstPassErrors.join(' | ')}` : '';
+    throw new Error(`Document Intelligence concluiu, mas sem conteúdo textual extraído.${detail}`);
   }
 
   const firstPages = Array.isArray(firstPass.pages) ? firstPass.pages : [];
@@ -752,14 +800,9 @@ export default async function handler(req, res) {
     });
   }
 
-  if (!docIntelConfig.endpoint || !docIntelConfig.apiKey) {
-    return res.status(500).json({
-      error: 'Configuração Azure Document Intelligence incompleta. Defina endpoint e key.'
-    });
-  }
-
   const contentType = String(req?.headers?.['content-type'] || req?.headers?.['Content-Type'] || '').toLowerCase();
   let normalizedPdfBase64 = '';
+  let localOcrText = '';
   let fileName = '';
   let totalPagesHint = 0;
 
@@ -771,28 +814,44 @@ export default async function handler(req, res) {
     normalizedPdfBase64 = normalizePdfBase64(toBase64FromRawPdfBody(rawPdfBody));
   } else {
     const payloadPdfBase64 = req.body?.pdfBase64;
+    localOcrText = String(req.body?.ocrText || '').trim();
     fileName = req.body?.fileName;
     totalPagesHint = Number(req.body?.totalPagesHint || 0);
 
-    if (!payloadPdfBase64 || typeof payloadPdfBase64 !== 'string') {
+    if ((!payloadPdfBase64 || typeof payloadPdfBase64 !== 'string') && !localOcrText) {
       return res.status(400).json({
-        error: 'Campo pdfBase64 é obrigatório e deve ser string Base64 do PDF.'
+        error: 'Envie pdfBase64 (PDF em Base64) ou ocrText (texto OCR já extraído).'
       });
     }
 
-    normalizedPdfBase64 = normalizePdfBase64(payloadPdfBase64);
+    if (payloadPdfBase64 && typeof payloadPdfBase64 === 'string') {
+      normalizedPdfBase64 = normalizePdfBase64(payloadPdfBase64);
+    }
   }
 
-  if (!looksLikePdfBase64(normalizedPdfBase64)) {
+  if (!localOcrText && !looksLikePdfBase64(normalizedPdfBase64)) {
     return res.status(400).json({
       error: 'PDF inválido ou base64 malformado. Envie o arquivo PDF em Base64 válido.'
     });
   }
 
-  try {
-    const ocrResult = await runDocumentIntelligence(normalizedPdfBase64, docIntelConfig, {
-      totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
+  if (!localOcrText && (!docIntelConfig.endpoint || !docIntelConfig.apiKey)) {
+    return res.status(500).json({
+      error: 'Configuração Azure Document Intelligence incompleta. Defina endpoint e key.'
     });
+  }
+
+  try {
+    const ocrResult = localOcrText
+      ? {
+        text: localOcrText,
+        pages: [],
+        usedPagedFallback: false,
+        modelId: 'client-ocr-text'
+      }
+      : await runDocumentIntelligence(normalizedPdfBase64, docIntelConfig, {
+        totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
+      });
     const expectedVertices = estimateExpectedVertexCount(ocrResult.text);
     const minimumAcceptable = expectedVertices >= 20
       ? Math.floor(expectedVertices * 0.75)
@@ -893,7 +952,7 @@ export default async function handler(req, res) {
       pageNumbers,
       pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
       usedPagedFallback: !!ocrResult.usedPagedFallback,
-      textSourceUsed: 'document-intelligence',
+      textSourceUsed: localOcrText ? 'client-ocr-text' : 'document-intelligence',
       expectedVertices,
       extractedVertices
     });
