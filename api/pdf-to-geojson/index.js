@@ -1192,6 +1192,110 @@ async function runAzureOpenAIExtraction(ocrText, openAiConfig, fileName = '', op
   throw new Error('Azure OpenAI não retornou JSON válido no formato esperado.');
 }
 
+async function runOpenAiCompatibleExtraction(ocrText, llmConfig, fileName = '', options = {}) {
+  const endpoint = sanitizeEndpoint(llmConfig.endpoint);
+  const model = String(llmConfig.model || 'gpt-4o-mini').trim();
+  if (!endpoint || !llmConfig.apiKey) {
+    throw new Error('Configuração de IA incompatível incompleta (endpoint/apiKey).');
+  }
+
+  const hasChatPath = /\/chat\/completions\/?$/i.test(endpoint);
+  const chatUrl = hasChatPath ? endpoint : `${endpoint}/v1/chat/completions`;
+  const focusedText = buildCoordinateFocusedText(ocrText);
+  const compactOcrText = String(ocrText || '').slice(0, 80000);
+  const compactFocusedText = String(focusedText || '').slice(0, 80000);
+  const expectedVertices = Number.isFinite(options.expectedVertices) ? options.expectedVertices : 0;
+
+  const systemPrompt = [
+    'Você é um extrator geoespacial para documentos fundiários/cartoriais brasileiros.',
+    'Tarefa: converter texto OCR em um GeoJSON de polígono, pronto para GIS.',
+    'Responder SOMENTE com JSON válido (sem markdown).',
+    'GeoJSON deve ser FeatureCollection com 1 Feature Polygon e anel fechado.',
+    'Se houver coordenadas absolutas (UTM, lat/lon, DMS), use apenas valores explícitos.',
+    'Se houver apenas rumo/azimute + distância, construa polígono local relativo fechado.',
+    'Retorne também sourcePattern em {"utm","latlong","rumo_distancia","azimute_distancia","misto","desconhecido"}.',
+    'Não omitir vértices quando houver tabela completa.'
+  ].join('\n');
+
+  const userPrompt = [
+    `Arquivo: ${fileName || 'documento.pdf'}`,
+    `Páginas OCR detectadas: ${options.pagesAnalyzed || 'desconhecido'}`,
+    expectedVertices > 0
+      ? `Meta de cobertura: aproximadamente ${expectedVertices} vértices.`
+      : 'Meta de cobertura: extrair todos os vértices disponíveis.',
+    'Trecho focado em coordenadas:',
+    compactFocusedText || '(sem trecho focado disponível)',
+    'Texto OCR bruto completo:',
+    compactOcrText
+  ].join('\n\n');
+
+  let payload = {};
+  for (let attempt = 0; attempt <= MAX_OPENAI_RETRIES; attempt++) {
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    const authHeader = String(llmConfig.apiKeyHeader || 'Authorization').trim();
+    if (/^authorization$/i.test(authHeader)) {
+      headers.Authorization = `Bearer ${llmConfig.apiKey}`;
+    } else {
+      headers[authHeader] = llmConfig.apiKey;
+    }
+
+    const response = await httpFetch(chatUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0,
+        max_tokens: 8000,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    payload = await response.json().catch(() => ({}));
+    if (response.ok) {
+      break;
+    }
+
+    const msg = getErrorMessage(payload);
+    const transientStatus = response.status === 429 || response.status === 500 || response.status === 503 || response.status === 504;
+    if (transientStatus && attempt < MAX_OPENAI_RETRIES) {
+      const waitMs = OPENAI_RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+      await sleep(waitMs);
+      continue;
+    }
+
+    throw new Error(`IA compatível falhou: ${response.status} - ${msg}`);
+  }
+
+  const message = payload?.choices?.[0]?.message || {};
+  if (message.parsed && typeof message.parsed === 'object') {
+    return message.parsed;
+  }
+
+  const candidates = [
+    message.content,
+    message.text,
+    payload.output_text,
+    payload.response?.output_text
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = extractJsonFromModelContent(candidate);
+    const parsed = tryParseJsonText(normalized);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  }
+
+  throw new Error('IA compatível não retornou JSON válido no formato esperado.');
+}
+
 function validateGeoJsonPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Payload da IA inválido.');
@@ -1362,6 +1466,15 @@ module.exports = async function (context, req) {
     apiVersion: env.AZURE_OPENAI_API_VERSION || DEFAULT_OPENAI_API_VERSION
   };
 
+  const llmConfig = {
+    endpoint: env.PDFTOARCGIS_LLM_ENDPOINT,
+    apiKey: env.PDFTOARCGIS_LLM_API_KEY,
+    model: env.PDFTOARCGIS_LLM_MODEL || 'gpt-4o-mini',
+    apiKeyHeader: env.PDFTOARCGIS_LLM_API_KEY_HEADER || 'Authorization'
+  };
+  const useLlmExtraction = String(env.PDFTOARCGIS_USE_LLM_EXTRACTION || 'true').toLowerCase() === 'true';
+  const llmOnlyMode = String(env.PDFTOARCGIS_LLM_ONLY_MODE || 'false').toLowerCase() === 'true';
+
   const usesDirectChatEndpoint = /\/openai\/deployments\/.+\/chat\/completions/i.test(String(openAiConfig.endpoint || ''));
 
   const docIntelConfig = {
@@ -1458,34 +1571,54 @@ module.exports = async function (context, req) {
   }
 
   try {
-    if (localOcrText) {
-      const heuristic = buildHeuristicGeojsonFromText(localOcrText);
-      if (heuristic) {
-        context.res = {
-          status: 200,
-          headers: corsHeaders,
-          body: {
-            success: true,
-            matricula: '',
-            projectionKey: heuristic.projectionKey,
-            geometryMode: 'absolute',
-            sourcePattern: heuristic.sourcePattern,
-            warnings: ['Geometria gerada por fallback heurístico a partir do OCR local.'],
-            geojson: heuristic.geojson,
-            pagesAnalyzed: 0,
-            pageNumbers: [],
-            pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
-            usedPagedFallback: false,
-            textSourceUsed: 'client-ocr-heuristic',
-            expectedVertices: heuristic.extractedVertices,
-            extractedVertices: heuristic.extractedVertices
-          }
-        };
-        return;
-      }
-    }
-
     if (!USE_AZURE_AI) {
+      let llmAttempted = false;
+      if (useLlmExtraction && llmConfig.endpoint && llmConfig.apiKey && localOcrText) {
+        llmAttempted = true;
+        try {
+          const aiPayload = await runOpenAiCompatibleExtraction(localOcrText, llmConfig, fileName, {
+            pagesAnalyzed: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+            expectedVertices: estimateExpectedVertexCount(localOcrText)
+          });
+          const normalized = normalizeModelPayload(aiPayload);
+          const validated = validateGeoJsonPayload(normalized);
+          const extractedVertices = getExtractedVertexCount(validated);
+
+          context.res = {
+            status: 200,
+            headers: corsHeaders,
+            body: {
+              success: true,
+              matricula: normalized.matricula || '',
+              projectionKey: normalized.projectionKey || 'SIRGAS2000_22S',
+              geometryMode: normalized.geometryMode || 'absolute',
+              sourcePattern: normalized.sourcePattern || 'desconhecido',
+              warnings: ['Extração executada por IA compatível (sem Azure).'],
+              geojson: validated,
+              pagesAnalyzed: 0,
+              pageNumbers: [],
+              pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+              usedPagedFallback: false,
+              textSourceUsed: 'client-ocr-llm',
+              expectedVertices: estimateExpectedVertexCount(localOcrText),
+              extractedVertices
+            }
+          };
+          return;
+        } catch (llmError) {
+          console.warn('[pdf-to-geojson] Fallback após falha da IA compatível:', llmError?.message || llmError);
+          if (llmOnlyMode) {
+            throw new Error(`Extração por IA falhou no modo estrito: ${llmError?.message || 'erro desconhecido'}`);
+          }
+        }
+      } else if (llmOnlyMode) {
+        throw new Error('Modo estrito de IA ativo, mas endpoint/apiKey da IA compatível não foram configurados.');
+      }
+
+      if (llmOnlyMode && !llmAttempted) {
+        throw new Error('Modo estrito de IA ativo sem tentativa válida de extração por IA.');
+      }
+
       const ring = extractUtmRingFromText(localOcrText);
       if (ring) {
         const extractedVertices = Math.max(0, ring.length - 1);
@@ -1545,6 +1678,31 @@ module.exports = async function (context, req) {
       }
 
       {
+        const heuristic = buildHeuristicGeojsonFromText(localOcrText);
+        if (heuristic) {
+          context.res = {
+            status: 200,
+            headers: corsHeaders,
+            body: {
+              success: true,
+              matricula: '',
+              projectionKey: heuristic.projectionKey,
+              geometryMode: 'absolute',
+              sourcePattern: heuristic.sourcePattern,
+              warnings: ['Fallback heurístico aplicado após falha da IA/regex.'],
+              geojson: heuristic.geojson,
+              pagesAnalyzed: 0,
+              pageNumbers: [],
+              pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+              usedPagedFallback: false,
+              textSourceUsed: 'client-ocr-heuristic',
+              expectedVertices: heuristic.extractedVertices,
+              extractedVertices: heuristic.extractedVertices
+            }
+          };
+          return;
+        }
+
         throw new Error('Não foi possível localizar coordenadas UTM válidas no OCR enviado.');
       }
     }
