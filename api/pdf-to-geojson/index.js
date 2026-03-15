@@ -262,6 +262,32 @@ function extractNumericCandidates(text) {
   return candidates;
 }
 
+function buildCoordinateDiagnostics(rawText) {
+  const text = String(rawText || '');
+  const lines = text.split(/\r?\n/);
+  const numericCandidates = extractNumericCandidates(text);
+  const utmPairs = [];
+  for (let i = 0; i + 1 < numericCandidates.length; i++) {
+    const pair = normalizeUtmPair(numericCandidates[i], numericCandidates[i + 1]);
+    if (pair) utmPairs.push(pair);
+    if (utmPairs.length >= 200) break;
+  }
+
+  const latLonHints = (text.match(/latitude|longitude|lat\b|lon\b|long\b/gi) || []).length;
+  const utmHints = (text.match(/utm|sirgas|norte|leste|e\s*=|n\s*=|vertice|v[\s\-_.]*\d{1,4}|m[\s\-_.]*\d{1,4}/gi) || []).length;
+
+  return {
+    textChars: text.length,
+    lineCount: lines.length,
+    numericCandidates: numericCandidates.length,
+    utmPairsByAdjacency: utmPairs.length,
+    utmHintHits: utmHints,
+    latLonHintHits: latLonHints,
+    previewStart: text.slice(0, 280),
+    previewEnd: text.slice(-180)
+  };
+}
+
 function toArrayLike(value) {
   if (Array.isArray(value)) return value;
   if (typeof value === 'string') {
@@ -1621,6 +1647,22 @@ module.exports = async function (context, req) {
   }
 
   try {
+    const inputDiag = buildCoordinateDiagnostics(localOcrText);
+    context.log('[pdf-to-geojson][INPUT]', {
+      fileName: String(fileName || ''),
+      totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+      hasPdfBase64: looksLikePdfBase64(normalizedPdfBase64),
+      localOcrDiag: inputDiag,
+      flags: {
+        USE_AZURE_AI,
+        useWorkspaceLocalAI,
+        workspaceLocalAIOnly,
+        useLlmExtraction,
+        llmOnlyMode,
+        allowAzureFallback
+      }
+    });
+
     if (!USE_AZURE_AI) {
       const expectedVerticesEstimate = estimateExpectedVertexCount(localOcrText);
       if (useWorkspaceLocalAI && localOcrText) {
@@ -1715,6 +1757,9 @@ module.exports = async function (context, req) {
 
       const ring = extractUtmRingFromText(localOcrText);
       if (ring) {
+        context.log('[pdf-to-geojson][MATCH] extractUtmRingFromText OK', {
+          vertices: Math.max(0, ring.length - 1)
+        });
         const extractedVertices = Math.max(0, ring.length - 1);
         context.res = {
           status: 200,
@@ -1744,6 +1789,9 @@ module.exports = async function (context, req) {
 
       const latLonRing = extractLatLonRingFromText(localOcrText);
       if (latLonRing) {
+        context.log('[pdf-to-geojson][MATCH] extractLatLonRingFromText OK', {
+          vertices: Math.max(0, latLonRing.length - 1)
+        });
         const extractedVertices = Math.max(0, latLonRing.length - 1);
         context.res = {
           status: 200,
@@ -1774,6 +1822,9 @@ module.exports = async function (context, req) {
       {
         const heuristic = buildHeuristicGeojsonFromText(localOcrText);
         if (heuristic) {
+          context.log('[pdf-to-geojson][MATCH] buildHeuristicGeojsonFromText OK', {
+            vertices: heuristic.extractedVertices
+          });
           context.res = {
             status: 200,
             headers: corsHeaders,
@@ -1808,6 +1859,7 @@ module.exports = async function (context, req) {
         );
 
         if (allowAzureFallback && hasPdfForFallback && hasDocIntelConfig && hasOpenAiConfig) {
+          context.log('[pdf-to-geojson][FALLBACK] tentando Azure fallback após falha no OCR local');
           try {
             const ocrResultFallback = await runDocumentIntelligence(normalizedPdfBase64, docIntelConfig, {
               totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
@@ -1990,14 +2042,21 @@ module.exports = async function (context, req) {
     const ocrPreview = localOcrText
       ? `[${localOcrText.length} chars] ...${localOcrText.slice(0, 300)}...[[fim]]...${localOcrText.slice(-150)}`
       : '(sem ocrText recebido)';
+    const debug = {
+      fileName: String(fileName || ''),
+      totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+      hasPdfBase64: looksLikePdfBase64(normalizedPdfBase64),
+      diagnostics: buildCoordinateDiagnostics(localOcrText)
+    };
     context.log.warn('[pdf-to-geojson] ocrPreview:', ocrPreview);
+    context.log.warn('[pdf-to-geojson] debug:', debug);
     context.res = {
       status: isNonTransient ? 422 : 502,
       headers: corsHeaders,
       body: {
         success: false,
         error: message,
-        ...(isNonTransient ? { ocrPreview } : {})
+        ...(isNonTransient ? { ocrPreview, debug } : {})
       }
     };
   }

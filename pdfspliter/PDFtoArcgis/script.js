@@ -54,6 +54,15 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
     ? Math.max(0, Number(cfg.maxWorkspaceRetries))
     : 1;
 
+  console.log('[PDFtoArcgis][REQ] /api/pdf-to-geojson', {
+    fileName,
+    totalPagesHint,
+    retryCount,
+    ocrChars: String(ocrText || '').length,
+    ocrSignal: countCoordinateSignal(ocrText),
+    pdfBase64Chars: String(pdfBase64 || '').length
+  });
+
   const response = await fetch(route, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -76,6 +85,10 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
   }
 
   if (!response.ok) {
+    console.warn('[PDFtoArcgis][RESP][ERROR]', {
+      status: response.status,
+      rawPreview: String(raw || '').slice(0, 400)
+    });
     const transient = new Set([429, 500, 503, 504]);
     if (transient.has(response.status) && retryCount < maxRetries) {
       await new Promise((resolve) => setTimeout(resolve, 1200 * Math.pow(2, retryCount)));
@@ -83,9 +96,20 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
     }
   }
 
+  console.log('[PDFtoArcgis][RESP]', {
+    status: response.status,
+    success: !!payload?.success,
+    sourcePattern: payload?.sourcePattern,
+    projectionKey: payload?.projectionKey,
+    extractedVertices: payload?.extractedVertices,
+    warningsCount: Array.isArray(payload?.warnings) ? payload.warnings.length : 0,
+    debug: payload?.debug || null
+  });
+
   if (!response.ok || !payload?.success) {
     const reason = payload?.error || `HTTP ${response.status}`;
     if (payload?.ocrPreview) console.warn('[PDFtoArcgis] ocrPreview recebido da API:', payload.ocrPreview);
+    if (payload?.debug) console.warn('[PDFtoArcgis] debug recebido da API:', payload.debug);
     throw new Error(`Serviço de extração online indisponível: ${reason}`);
   }
 
@@ -112,8 +136,15 @@ async function extractPdfTextLocally(arrayBuffer, maxPages = 40) {
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
+      const pageText = buildPageTextWithLines(textContent);
+      console.log('[PDFtoArcgis][PDF.js] página lida', {
+        page: pageNum,
+        chars: pageText.length,
+        signal: countCoordinateSignal(pageText),
+        preview: pageText.slice(0, 220)
+      });
       fullText += `\n\n--- PAGINA ${pageNum} ---\n`;
-      fullText += buildPageTextWithLines(textContent);
+      fullText += pageText;
     }
 
     return fullText.trim();
@@ -190,6 +221,16 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
       }
 
       const mergedPageText = mergeOcrTexts(text1, text2);
+      console.log('[PDFtoArcgis][Tesseract] página processada', {
+        page: pageNum,
+        pass1Chars: text1.length,
+        pass1Signal: countCoordinateSignal(text1),
+        pass2Chars: text2.length,
+        pass2Signal: countCoordinateSignal(text2),
+        mergedChars: mergedPageText.length,
+        mergedSignal: countCoordinateSignal(mergedPageText),
+        mergedPreview: mergedPageText.slice(0, 240)
+      });
       if (mergedPageText) {
         chunks.push(`--- PAGINA ${pageNum} ---\n${mergedPageText}`);
       }
@@ -1424,6 +1465,11 @@ fileInput.addEventListener("change", async (event) => {
   activeDocIndex = -1;
 
   try {
+    console.log('[PDFtoArcgis][START] arquivo selecionado', {
+      name: file.name,
+      sizeBytes: file.size,
+      type: file.type
+    });
     updateStatus("📄 Executando extração (OCR local + parser do workspace)...", "info");
     if (typeof displayLogMessage === 'function') {
       displayLogMessage('[PDFtoArcgis][LogUI] ☁️ Fluxo ativo: OCR local no navegador + parsing no serviço do projeto.');
@@ -1432,6 +1478,15 @@ fileInput.addEventListener("change", async (event) => {
     const arrayBuffer = await file.arrayBuffer();
     const totalPagesHint = await inferPdfPageCount(arrayBuffer);
     const cfg = getPdfToArcgisConfig();
+    console.log('[PDFtoArcgis][FILE] carregado', {
+      totalPagesHint,
+      bufferBytes: arrayBuffer.byteLength,
+      config: {
+        workspaceAiExtractorUrl: cfg.workspaceAiExtractorUrl || '/api/pdf-to-geojson',
+        maxWorkspaceRetries: cfg.maxWorkspaceRetries || 1,
+        maxTesseractPages: cfg.maxTesseractPages || 30
+      }
+    });
 
     progressBar.value = 35;
     document.getElementById("progressLabel").innerText = "Executando OCR local...";
@@ -1439,6 +1494,11 @@ fileInput.addEventListener("change", async (event) => {
     const MIN_TEXT_LENGTH = 120;
     let extractedText = await extractPdfTextLocally(arrayBuffer);
     const pdfBase64 = arrayBufferToBase64(arrayBuffer);
+    console.log('[PDFtoArcgis][OCR] PDF.js consolidado', {
+      chars: extractedText.length,
+      signal: countCoordinateSignal(extractedText),
+      preview: extractedText.slice(0, 350)
+    });
 
     // Roda Tesseract pro-ativamente se: texto curto OU sem candidatos UTM
     // (evita enviar rodapé/marca d'água sem coordenadas para a API)
@@ -1452,6 +1512,11 @@ fileInput.addEventListener("change", async (event) => {
       if (tesseractText && tesseractText.length > (extractedText || '').length) {
         extractedText = tesseractText;
       }
+      console.log('[PDFtoArcgis][OCR] pós-tesseract proativo', {
+        chars: extractedText.length,
+        signal: countCoordinateSignal(extractedText),
+        preview: extractedText.slice(0, 350)
+      });
     }
 
     if (!extractedText || extractedText.length < MIN_TEXT_LENGTH) {
@@ -1508,6 +1573,7 @@ fileInput.addEventListener("change", async (event) => {
           ? [...apiResult.warnings, 'Reprocessado com OCR reforçado (Tesseract + PDF.js).']
           : ['Reprocessado com OCR reforçado (Tesseract + PDF.js).'];
       } catch (secondError) {
+        console.warn('[PDFtoArcgis][API] falha no retry, tentando fallback local', secondError?.message || secondError);
         const localRing = buildLocalUtmRingFromText(enhancedText);
         if (!localRing) {
           throw secondError;
