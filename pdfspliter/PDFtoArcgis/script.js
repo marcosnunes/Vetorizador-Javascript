@@ -727,6 +727,36 @@ function inferCrsByCoordinates(vertices) {
   return null;
 }
 
+function isLikelyProjectedCrsKey(key) {
+  const k = String(key || '').toUpperCase();
+  if (!k) return true;
+  if (k.includes('WGS84') || k.includes('EPSG:4326')) return false;
+  return true;
+}
+
+function validateUtmCoordinateScale(vertices) {
+  const minEast = 100000;
+  const maxEast = 900000;
+  const minNorth = 1000000;
+  const maxNorth = 10000000;
+
+  let plausible = 0;
+  for (const vertex of vertices) {
+    const e = Math.abs(Number(vertex.east));
+    const n = Math.abs(Number(vertex.north));
+    if (e >= minEast && e <= maxEast && n >= minNorth && n <= maxNorth) {
+      plausible += 1;
+    }
+  }
+
+  const ratio = vertices.length ? (plausible / vertices.length) : 0;
+  return {
+    plausible,
+    ratio,
+    ok: plausible >= 3 && ratio >= 0.8
+  };
+}
+
 function detectProjectionFromText(fullText, vertices = []) {
   const t = (fullText || "").toLowerCase();
   const hasSAD = /sad[\s\-]?69/.test(t);
@@ -1154,6 +1184,13 @@ function applyAzureGeoJsonResult(apiResult, sourceFileName) {
 
   if (vertices.length < 3) {
     throw new Error('GeoJSON retornado possui menos de 3 vértices válidos.');
+  }
+
+  if (isLikelyProjectedCrsKey(projKey)) {
+    const scaleCheck = validateUtmCoordinateScale(vertices);
+    if (!scaleCheck.ok) {
+      throw new Error('Coordenadas extraídas com escala incompatível para UTM. A extração OCR provavelmente capturou números inválidos (ordem/distância/IDs).');
+    }
   }
 
   vertices = prepararVerticesComMedidas(vertices, projKey);

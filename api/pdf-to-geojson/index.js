@@ -428,12 +428,22 @@ function buildHeuristicGeojsonFromText(rawText) {
 
   const lines = text.split(/\r?\n/);
   const points = [];
+  const looksLikeCoordinateContext = /(coordenad|utm|sirgas|norte|sul|leste|oeste|este|north|east|x\s*=|y\s*=|\bn\s*=|\be\s*=|vertice|v[\s\-_.]*\d{1,4})/i.test(text);
+  const classifyPair = (a, b) => {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const absA = Math.abs(a);
+    const absB = Math.abs(b);
+    const isEasting = (v) => v >= 100000 && v <= 900000;
+    const isNorthing = (v) => v >= 1000000 && v <= 10000000;
+
+    if (isEasting(absA) && isNorthing(absB)) return [a, b];
+    if (isNorthing(absA) && isEasting(absB)) return [b, a];
+    return null;
+  };
   const tryPushPoint = (a, b) => {
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return;
-    const isLatLon = Math.abs(a) <= 180 && Math.abs(b) <= 90;
-    const isProjected = Math.abs(a) >= 10000 && Math.abs(b) >= 10000;
-    if (!isLatLon && !isProjected) return;
-    points.push([a, b]);
+    const pair = classifyPair(a, b);
+    if (!pair) return;
+    points.push(pair);
   };
 
   for (const line of lines) {
@@ -451,7 +461,7 @@ function buildHeuristicGeojsonFromText(rawText) {
     }
   }
 
-  if (points.length < 3) {
+  if (points.length < 3 && looksLikeCoordinateContext) {
     const allNumbers = Array.from(text.matchAll(/-?\d+(?:[.,]\d+)?/g), (m) => m[0]);
     for (let i = 0; i + 1 < allNumbers.length; i++) {
       const a = parseNumericValue(allNumbers[i]);
@@ -480,16 +490,13 @@ function buildHeuristicGeojsonFromText(rawText) {
 
   if (dedup.length < 4) return null;
 
-  const firstPointIsLatLon = Math.abs(dedup[0][0]) <= 180 && Math.abs(dedup[0][1]) <= 90;
-  const projectionKey = firstPointIsLatLon ? 'WGS84' : 'SIRGAS2000_22S';
-
   return {
     geojson: {
       type: 'FeatureCollection',
       features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [dedup] }, properties: {} }]
     },
-    projectionKey,
-    sourcePattern: firstPointIsLatLon ? 'latlong' : 'utm',
+    projectionKey: 'SIRGAS2000_22S',
+    sourcePattern: 'utm',
     extractedVertices: dedup.length - 1
   };
 }
