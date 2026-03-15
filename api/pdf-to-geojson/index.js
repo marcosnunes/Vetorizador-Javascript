@@ -203,7 +203,7 @@ function parseNumericValue(value) {
       .replace(/[Oo]/g, '0')
       .replace(/[Il|]/g, '1')
       .replace(/[Ss]/g, '5')
-      .replace(/\bB\b/g, '8')
+      .replace(/B/g, '8')
       .replace(/[^\d,.-\s]/g, '')
       .replace(/\s+/g, '');
     if (!normalized) return null;
@@ -482,6 +482,29 @@ function extractUtmRingFromText(rawText) {
     }
   }
 
+  // Fallback: classificação posicional para tabelas em colunas (OCR lê
+  // todos os Eastings antes dos Northings ou vice-versa).
+  if (points.length < 3) {
+    const isEasting = (v) => v >= 100000 && v <= 900000;
+    const isNorthing = (v) => v >= 1000000 && v <= 10000000;
+    const allTokens = extractNumericCandidates(text);
+    const eastings = [];
+    const northings = [];
+    for (const token of allTokens) {
+      const v = parseNumericValue(token);
+      if (!Number.isFinite(v)) continue;
+      const abs = Math.abs(v);
+      if (isEasting(abs)) eastings.push(v);
+      else if (isNorthing(abs)) northings.push(v);
+    }
+    const n = Math.min(eastings.length, northings.length);
+    if (n >= 3) {
+      for (let i = 0; i < n && points.length < 120; i++) {
+        points.push([eastings[i], northings[i]]);
+      }
+    }
+  }
+
   return cleanAndCloseRing(points);
 }
 
@@ -687,7 +710,6 @@ function buildHeuristicGeojsonFromText(rawText) {
 
   const lines = text.split(/\r?\n/);
   const points = [];
-  const looksLikeCoordinateContext = /(coordenad|utm|sirgas|norte|sul|leste|oeste|este|north|east|x\s*=|y\s*=|\bn\s*=|\be\s*=|vertice|v[\s\-_.]*\d{1,4})/i.test(text);
   const classifyPair = (a, b) => {
     if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
     const absA = Math.abs(a);
@@ -718,13 +740,35 @@ function buildHeuristicGeojsonFromText(rawText) {
     }
   }
 
-  if (points.length < 3 && looksLikeCoordinateContext) {
+  if (points.length < 3) {
     const allNumbers = extractNumericCandidates(text);
     for (let i = 0; i + 1 < allNumbers.length; i++) {
       const a = parseNumericValue(allNumbers[i]);
       const b = parseNumericValue(allNumbers[i + 1]);
       tryPushPoint(a, b);
       if (points.length >= 80) break;
+    }
+  }
+
+  // Fallback posicional para tabelas em colunas.
+  if (points.length < 3) {
+    const isEasting = (v) => v >= 100000 && v <= 900000;
+    const isNorthing = (v) => v >= 1000000 && v <= 10000000;
+    const allTokens = extractNumericCandidates(text);
+    const eastings = [];
+    const northings = [];
+    for (const token of allTokens) {
+      const v = parseNumericValue(token);
+      if (!Number.isFinite(v)) continue;
+      const abs = Math.abs(v);
+      if (isEasting(abs)) eastings.push(v);
+      else if (isNorthing(abs)) northings.push(v);
+    }
+    const n = Math.min(eastings.length, northings.length);
+    if (n >= 3) {
+      for (let i = 0; i < n && points.length < 80; i++) {
+        points.push([eastings[i], northings[i]]);
+      }
     }
   }
 
