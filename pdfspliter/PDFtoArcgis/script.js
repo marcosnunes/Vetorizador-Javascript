@@ -125,6 +125,26 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 8) {
   }
 }
 
+function mergeOcrTexts(...texts) {
+  const lines = [];
+  const seen = new Set();
+
+  for (const text of texts) {
+    const raw = String(text || '');
+    if (!raw.trim()) continue;
+    const split = raw.split(/\r?\n/);
+    for (const line of split) {
+      const compact = line.replace(/\s+/g, ' ').trim();
+      if (!compact || compact.length < 3) continue;
+      if (seen.has(compact)) continue;
+      seen.add(compact);
+      lines.push(compact);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 // Navegação lateral e rolagem para resultados.
 function openNav() {
   document.getElementById("mySidenav").style.width = "250px";
@@ -1231,7 +1251,35 @@ fileInput.addEventListener("change", async (event) => {
     progressBar.value = 75;
     document.getElementById("progressLabel").innerText = "Enviando OCR para extração no serviço do projeto...";
 
-    const apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, extractedText);
+    let apiResult;
+    try {
+      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, extractedText);
+    } catch (firstError) {
+      const msg = String(firstError?.message || '');
+      const shouldRetryWithEnhancedOcr = /UTM válidas|OCR enviado/i.test(msg);
+      if (!shouldRetryWithEnhancedOcr) {
+        throw firstError;
+      }
+
+      updateStatus('⚠️ OCR inicial sem coordenadas UTM válidas. Tentando OCR reforçado...', 'info');
+      const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
+        ? Math.max(1, Number(cfg.maxTesseractPages))
+        : 10;
+      const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
+      const enhancedText = mergeOcrTexts(extractedText, tesseractText);
+
+      if (!enhancedText || enhancedText.length < MIN_TEXT_LENGTH) {
+        throw firstError;
+      }
+
+      progressBar.value = 85;
+      document.getElementById("progressLabel").innerText = "Reprocessando com OCR reforçado...";
+      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, enhancedText);
+      apiResult.warnings = Array.isArray(apiResult.warnings)
+        ? [...apiResult.warnings, 'Reprocessado com OCR reforçado (Tesseract + PDF.js).']
+        : ['Reprocessado com OCR reforçado (Tesseract + PDF.js).'];
+    }
+
     apiResult.engineName = apiResult.engineName || 'Parser do workspace (sem Azure)';
     apiResult.warnings = Array.isArray(apiResult.warnings)
       ? apiResult.warnings

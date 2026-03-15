@@ -1483,7 +1483,7 @@ module.exports = async function (context, req) {
   } catch (error) {
     context.log.error('[pdf-to-geojson] erro:', error);
     const message = error?.message || 'Falha ao processar PDF com IA Azure.';
-    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido|Extração incompleta|Document Intelligence \(analyze\) falhou: 400|Invalid request/i.test(message);
+    const isNonTransient = /GeoJSON inválido|não retornou JSON válido|Payload da IA inválido|Extração incompleta|Document Intelligence \(analyze\) falhou: 400|Invalid request|não foi possível localizar coordenadas UTM válidas/i.test(message);
     context.res = {
       status: isNonTransient ? 422 : 502,
       headers: corsHeaders,
