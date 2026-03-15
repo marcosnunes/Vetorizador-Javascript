@@ -8,6 +8,7 @@ const MAX_DOCINTEL_ANALYZE_RETRIES = 2;
 const DOCINTEL_RETRY_BASE_DELAY_MS = 900;
 const MAX_OPENAI_RETRIES = 2;
 const OPENAI_RETRY_BASE_DELAY_MS = 1000;
+const USE_AZURE_AI = String((globalThis.process && globalThis.process.env && globalThis.process.env.PDFTOARCGIS_USE_AZURE_AI) || 'false').toLowerCase() === 'true';
 
 function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
@@ -266,8 +267,23 @@ function parseNumericValue(value) {
   }
 
   if (typeof value === 'string') {
-    const normalized = value.trim().replace(/\s+/g, '').replace(',', '.');
+    let normalized = value.trim().replace(/\s+/g, '');
     if (!normalized) return null;
+
+    const hasComma = normalized.includes(',');
+    const hasDot = normalized.includes('.');
+    if (hasComma && hasDot) {
+      if (normalized.lastIndexOf(',') > normalized.lastIndexOf('.')) {
+        normalized = normalized.replace(/\./g, '').replace(',', '.');
+      } else {
+        normalized = normalized.replace(/,/g, '');
+      }
+    } else if (hasComma) {
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else if ((normalized.match(/\./g) || []).length > 1) {
+      normalized = normalized.replace(/\./g, '');
+    }
+
     const parsed = Number.parseFloat(normalized);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -386,6 +402,26 @@ function normalizeRingFromAnyPoints(rawPoints) {
 
 function coercePolygonGeometry(geometry) {
   if (!geometry || typeof geometry !== 'object') return null;
+
+  const ringCandidates = [
+    geometry.coordinates,
+    geometry?.coordinates?.coordinates,
+    geometry?.coordinates?.rings,
+    geometry?.coordinates?.paths,
+    geometry?.coordinates?.points,
+    geometry?.coordinates?.vertices,
+    geometry.rings,
+    geometry.paths,
+    geometry.points,
+    geometry.vertices
+  ];
+
+  for (const candidate of ringCandidates) {
+    const ring = normalizeRingFromAnyPoints(candidate);
+    if (ring) {
+      return { type: 'Polygon', coordinates: [ring] };
+    }
+  }
 
   if (geometry.type === 'Polygon') {
     const coordsContainer = toArrayLike(geometry.coordinates) || geometry.coordinates;
@@ -932,6 +968,14 @@ function validateGeoJsonPayload(payload) {
   }
 
   if (!geometry || geometry.type !== 'Polygon' || !Array.isArray(geometry.coordinates) || !Array.isArray(geometry.coordinates[0])) {
+    const lastResortRing = normalizeRingFromAnyPoints(geometry?.coordinates ?? geometry);
+    if (lastResortRing) {
+      geojson.features[0].geometry = { type: 'Polygon', coordinates: [lastResortRing] };
+      geometry = geojson.features[0].geometry;
+    }
+  }
+
+  if (!geometry || geometry.type !== 'Polygon' || !Array.isArray(geometry.coordinates) || !Array.isArray(geometry.coordinates[0])) {
     const gType = String(geometry?.type || typeof geometry);
     const coordType = String(typeof geometry?.coordinates);
     throw new Error(`GeoJSON inválido: esperado Polygon com coordinates. Recebido geometry.type=${gType}, coordinatesType=${coordType}.`);
@@ -1075,7 +1119,7 @@ export default async function handler(req, res) {
     apiVersion: env.AZURE_DOCUMENTINTELLIGENCE_API_VERSION || DEFAULT_DOCINTEL_API_VERSION
   };
 
-  if (!openAiConfig.endpoint || !openAiConfig.apiKey || (!usesDirectChatEndpoint && !openAiConfig.deployment)) {
+  if (USE_AZURE_AI && (!openAiConfig.endpoint || !openAiConfig.apiKey || (!usesDirectChatEndpoint && !openAiConfig.deployment))) {
     return res.status(500).json({
       error: 'Configuração Azure OpenAI incompleta. Defina endpoint e api key; deployment é obrigatório quando o endpoint não for o chat/completions completo.'
     });
@@ -1110,13 +1154,19 @@ export default async function handler(req, res) {
     }
   }
 
-  if (!localOcrText && !looksLikePdfBase64(normalizedPdfBase64)) {
+  if (!USE_AZURE_AI && !localOcrText) {
+    return res.status(400).json({
+      error: 'Fluxo sem Azure ativo: envie ocrText no payload para extração.'
+    });
+  }
+
+  if (USE_AZURE_AI && !localOcrText && !looksLikePdfBase64(normalizedPdfBase64)) {
     return res.status(400).json({
       error: 'PDF inválido ou base64 malformado. Envie o arquivo PDF em Base64 válido.'
     });
   }
 
-  if (!localOcrText && (!docIntelConfig.endpoint || !docIntelConfig.apiKey)) {
+  if (USE_AZURE_AI && !localOcrText && (!docIntelConfig.endpoint || !docIntelConfig.apiKey)) {
     return res.status(500).json({
       error: 'Configuração Azure Document Intelligence incompleta. Defina endpoint e key.'
     });
@@ -1143,6 +1193,34 @@ export default async function handler(req, res) {
           extractedVertices: heuristic.extractedVertices
         });
       }
+    }
+
+    if (!USE_AZURE_AI) {
+      const ring = normalizeRingFromAnyPoints(localOcrText);
+      if (!ring) {
+        throw new Error('Não foi possível estruturar um polígono a partir do OCR enviado.');
+      }
+
+      const extractedVertices = Math.max(0, ring.length - 1);
+      return res.status(200).json({
+        success: true,
+        matricula: '',
+        projectionKey: 'SIRGAS2000_22S',
+        geometryMode: 'absolute',
+        sourcePattern: 'ocr-text',
+        warnings: ['Extração executada sem Azure (parser do workspace).'],
+        geojson: {
+          type: 'FeatureCollection',
+          features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }]
+        },
+        pagesAnalyzed: 0,
+        pageNumbers: [],
+        pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+        usedPagedFallback: false,
+        textSourceUsed: 'client-ocr-text',
+        expectedVertices: estimateExpectedVertexCount(localOcrText),
+        extractedVertices
+      });
     }
 
     const ocrResult = localOcrText

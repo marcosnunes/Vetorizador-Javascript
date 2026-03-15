@@ -17,7 +17,7 @@ function getWorkspaceAiExtractorUrl() {
 
 const ENABLE_TOPOLOGY_VALIDATION = false;
 
-async function callWorkspaceAiExtractor(pdfBase64, fileName, totalPagesHint = 0, ocrText = '', retryCount = 0) {
+async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = '', retryCount = 0) {
   const route = getWorkspaceAiExtractorUrl();
   const cfg = getPdfToArcgisConfig();
   const maxRetries = Number.isFinite(Number(cfg.maxWorkspaceRetries))
@@ -28,7 +28,6 @@ async function callWorkspaceAiExtractor(pdfBase64, fileName, totalPagesHint = 0,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      pdfBase64,
       fileName,
       totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
       ocrText: String(ocrText || '').slice(0, 80000)
@@ -49,7 +48,7 @@ async function callWorkspaceAiExtractor(pdfBase64, fileName, totalPagesHint = 0,
     const transient = new Set([429, 500, 503, 504]);
     if (transient.has(response.status) && retryCount < maxRetries) {
       await new Promise((resolve) => setTimeout(resolve, 1200 * Math.pow(2, retryCount)));
-      return callWorkspaceAiExtractor(pdfBase64, fileName, totalPagesHint, ocrText, retryCount + 1);
+      return callWorkspaceAiExtractor(fileName, totalPagesHint, ocrText, retryCount + 1);
     }
   }
 
@@ -124,19 +123,6 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 8) {
   } catch {
     return '';
   }
-}
-
-function arrayBufferToBase64(arrayBuffer) {
-  const bytes = new Uint8Array(arrayBuffer);
-  const chunkSize = 0x8000;
-  let binary = '';
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
 }
 
 // Navegação lateral e rolagem para resultados.
@@ -1212,58 +1198,44 @@ fileInput.addEventListener("change", async (event) => {
   activeDocIndex = -1;
 
   try {
-    updateStatus("📄 Executando extração inteligente no serviço online...", "info");
+    updateStatus("📄 Executando extração (OCR local + parser do workspace)...", "info");
     if (typeof displayLogMessage === 'function') {
-      displayLogMessage('[PDFtoArcgis][LogUI] ☁️ Fluxo ativo: extração pelo serviço do próprio projeto (workspace deployado).');
+      displayLogMessage('[PDFtoArcgis][LogUI] ☁️ Fluxo ativo: OCR local no navegador + parsing no serviço do projeto.');
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const pdfBase64 = arrayBufferToBase64(arrayBuffer);
     const totalPagesHint = await inferPdfPageCount(arrayBuffer);
     const cfg = getPdfToArcgisConfig();
 
     progressBar.value = 35;
-    document.getElementById("progressLabel").innerText = "Enviando PDF para extração online...";
+    document.getElementById("progressLabel").innerText = "Executando OCR local...";
 
-    let apiResult = null;
-    try {
-      apiResult = await callWorkspaceAiExtractor(pdfBase64, file.name, totalPagesHint);
-      apiResult.engineName = apiResult.engineName || 'IA do serviço online';
-      apiResult.warnings = Array.isArray(apiResult.warnings)
-        ? apiResult.warnings
-        : ['Extração inteligente executada pelo serviço do projeto.'];
-    } catch (serviceError) {
-      if (typeof displayLogMessage === 'function') {
-        displayLogMessage(`[PDFtoArcgis][LogUI] ⚠️ Serviço online falhou (${serviceError.message}). Reenviando com OCR local para melhorar o contexto.`);
+    const MIN_TEXT_LENGTH = 120;
+    let extractedText = await extractPdfTextLocally(arrayBuffer);
+
+    if (!extractedText || extractedText.length < MIN_TEXT_LENGTH) {
+      updateStatus("⚠️ Texto insuficiente no PDF.js. Tentando OCR avançado (Tesseract)...", "info");
+      const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
+        ? Math.max(1, Number(cfg.maxTesseractPages))
+        : 10;
+      const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
+      if (tesseractText && tesseractText.length > extractedText.length) {
+        extractedText = tesseractText;
       }
-      updateStatus('⚠️ Serviço online indisponível no PDF bruto. Tentando enviar OCR local para IA...', 'info');
-
-      document.getElementById("progressLabel").innerText = "Executando OCR local...";
-
-      const MIN_TEXT_LENGTH = 120;
-      let extractedText = await extractPdfTextLocally(arrayBuffer);
-
-      if (!extractedText || extractedText.length < MIN_TEXT_LENGTH) {
-        updateStatus("⚠️ Texto insuficiente no PDF.js. Tentando OCR avançado (Tesseract)...", "info");
-        const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
-          ? Math.max(1, Number(cfg.maxTesseractPages))
-          : 10;
-        const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
-        if (tesseractText && tesseractText.length > extractedText.length) {
-          extractedText = tesseractText;
-        }
-      }
-
-      if (!extractedText || extractedText.length < MIN_TEXT_LENGTH) {
-        throw new Error('Não foi possível obter texto suficiente do PDF localmente para extrair coordenadas.');
-      }
-
-      progressBar.value = 75;
-      document.getElementById("progressLabel").innerText = "Reenviando OCR local para serviço inteligente...";
-
-      apiResult = await callWorkspaceAiExtractor(pdfBase64, file.name, totalPagesHint, extractedText);
-      apiResult.engineName = apiResult.engineName || 'IA do serviço online (com OCR local de apoio)';
     }
+
+    if (!extractedText || extractedText.length < MIN_TEXT_LENGTH) {
+      throw new Error('Não foi possível obter texto suficiente do PDF localmente para extrair coordenadas.');
+    }
+
+    progressBar.value = 75;
+    document.getElementById("progressLabel").innerText = "Enviando OCR para extração no serviço do projeto...";
+
+    const apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, extractedText);
+    apiResult.engineName = apiResult.engineName || 'Parser do workspace (sem Azure)';
+    apiResult.warnings = Array.isArray(apiResult.warnings)
+      ? apiResult.warnings
+      : ['Extração sem Azure: OCR local + parser do workspace.'];
 
     progressBar.value = 100;
 
