@@ -331,6 +331,70 @@ function normalizeRingFromAnyPoints(rawPoints) {
   return cleaned.length >= 4 ? cleaned : null;
 }
 
+function normalizeUtmPair(a, b) {
+  const ax = parseNumericValue(a);
+  const bx = parseNumericValue(b);
+  if (!Number.isFinite(ax) || !Number.isFinite(bx)) return null;
+
+  const absA = Math.abs(ax);
+  const absB = Math.abs(bx);
+  const isEasting = (v) => v >= 100000 && v <= 900000;
+  const isNorthing = (v) => v >= 1000000 && v <= 10000000;
+
+  if (isEasting(absA) && isNorthing(absB)) return [ax, bx];
+  if (isNorthing(absA) && isEasting(absB)) return [bx, ax];
+  return null;
+}
+
+function extractUtmRingFromText(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return null;
+
+  const lines = text.split(/\r?\n/);
+  const points = [];
+  const hintRegex = /(coordenad|utm|sirgas|norte|leste|este|vertice|v\s*\d{1,4}|ponto|\bx\s*=|\by\s*=|\bn\s*=|\be\s*=)/i;
+
+  for (const line of lines) {
+    if (!hintRegex.test(line)) continue;
+    const nums = line.match(/-?\d[\d.,]*/g) || [];
+    for (let i = 0; i + 1 < nums.length; i++) {
+      const pair = normalizeUtmPair(nums[i], nums[i + 1]);
+      if (pair) {
+        points.push(pair);
+        break;
+      }
+    }
+  }
+
+  if (points.length < 3) {
+    const nums = text.match(/-?\d[\d.,]*/g) || [];
+    for (let i = 0; i + 1 < nums.length; i++) {
+      const pair = normalizeUtmPair(nums[i], nums[i + 1]);
+      if (pair) points.push(pair);
+      if (points.length >= 120) break;
+    }
+  }
+
+  if (points.length < 3) return null;
+
+  const cleaned = [];
+  for (const point of points) {
+    const prev = cleaned[cleaned.length - 1];
+    if (!prev || prev[0] !== point[0] || prev[1] !== point[1]) {
+      cleaned.push(point);
+    }
+  }
+
+  if (cleaned.length < 3) return null;
+  const first = cleaned[0];
+  const last = cleaned[cleaned.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    cleaned.push([first[0], first[1]]);
+  }
+
+  return cleaned.length >= 4 ? cleaned : null;
+}
+
 function coercePolygonGeometry(geometry) {
   if (!geometry || typeof geometry !== 'object') return null;
 
@@ -1266,9 +1330,9 @@ module.exports = async function (context, req) {
     }
 
     if (!USE_AZURE_AI) {
-      const ring = normalizeRingFromAnyPoints(localOcrText);
+      const ring = extractUtmRingFromText(localOcrText);
       if (!ring) {
-        throw new Error('Não foi possível estruturar um polígono a partir do OCR enviado.');
+        throw new Error('Não foi possível localizar coordenadas UTM válidas no OCR enviado.');
       }
 
       const extractedVertices = Math.max(0, ring.length - 1);
