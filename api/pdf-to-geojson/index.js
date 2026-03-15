@@ -203,36 +203,100 @@ function parseNumericValue(value) {
   return null;
 }
 
-function normalizeRingFromAnyPoints(rawPoints) {
-  if (!Array.isArray(rawPoints) || rawPoints.length === 0) return null;
-
-  const points = [];
-  for (const item of rawPoints) {
-    let x = null;
-    let y = null;
-
-    if (Array.isArray(item) && item.length >= 2) {
-      x = parseNumericValue(item[0]);
-      y = parseNumericValue(item[1]);
-    } else if (item && typeof item === 'object') {
-      x = parseNumericValue(item.east ?? item.x ?? item.lon ?? item.lng ?? item.longitude);
-      y = parseNumericValue(item.north ?? item.y ?? item.lat ?? item.latitude);
+function toArrayLike(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      try {
+        return toArrayLike(JSON.parse(trimmed));
+      } catch {
+        return null;
+      }
     }
+    return null;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value);
+    if (entries.length === 0) return null;
+    const numericKeys = entries.every(([k]) => /^\d+$/.test(k));
+    const ordered = numericKeys
+      ? entries.sort((a, b) => Number(a[0]) - Number(b[0]))
+      : entries;
+    return ordered.map(([, v]) => v);
+  }
+  return null;
+}
 
+function collectPoints(value, collector, depth = 0) {
+  if (depth > 5 || value == null) return;
+
+  const arr = toArrayLike(value);
+  if (arr) {
+    if (arr.length >= 2) {
+      const x = parseNumericValue(arr[0]);
+      const y = parseNumericValue(arr[1]);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        collector.push([x, y]);
+        return;
+      }
+    }
+    for (const item of arr) {
+      collectPoints(item, collector, depth + 1);
+    }
+    return;
+  }
+
+  if (value && typeof value === 'object') {
+    const x = parseNumericValue(value.east ?? value.x ?? value.lon ?? value.lng ?? value.longitude);
+    const y = parseNumericValue(value.north ?? value.y ?? value.lat ?? value.latitude);
     if (Number.isFinite(x) && Number.isFinite(y)) {
-      points.push([x, y]);
+      collector.push([x, y]);
+      return;
+    }
+    for (const nested of Object.values(value)) {
+      collectPoints(nested, collector, depth + 1);
+    }
+    return;
+  }
+
+  if (typeof value === 'string') {
+    const nums = value.match(/-?\d+(?:[.,]\d+)?/g);
+    if (nums && nums.length >= 2) {
+      const x = parseNumericValue(nums[0]);
+      const y = parseNumericValue(nums[1]);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        collector.push([x, y]);
+      }
     }
   }
+}
+
+function normalizeRingFromAnyPoints(rawPoints) {
+  const points = [];
+  collectPoints(rawPoints, points, 0);
 
   if (points.length < 3) return null;
 
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    points.push([first[0], first[1]]);
+  // Remove duplicatas consecutivas para evitar anel degenerado.
+  const cleaned = [];
+  for (const point of points) {
+    const prev = cleaned[cleaned.length - 1];
+    if (!prev || prev[0] !== point[0] || prev[1] !== point[1]) {
+      cleaned.push(point);
+    }
   }
 
-  return points.length >= 4 ? points : null;
+  if (cleaned.length < 3) return null;
+
+  const first = cleaned[0];
+  const last = cleaned[cleaned.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    cleaned.push([first[0], first[1]]);
+  }
+
+  return cleaned.length >= 4 ? cleaned : null;
 }
 
 function coercePolygonGeometry(geometry) {
@@ -780,7 +844,9 @@ function validateGeoJsonPayload(payload) {
   }
 
   if (!geometry || geometry.type !== 'Polygon' || !Array.isArray(geometry.coordinates) || !Array.isArray(geometry.coordinates[0])) {
-    throw new Error('GeoJSON inválido: esperado Polygon com coordinates.');
+    const gType = String(geometry?.type || typeof geometry);
+    const coordType = String(typeof geometry?.coordinates);
+    throw new Error(`GeoJSON inválido: esperado Polygon com coordinates. Recebido geometry.type=${gType}, coordinatesType=${coordType}.`);
   }
 
   const ring = geometry.coordinates[0];
