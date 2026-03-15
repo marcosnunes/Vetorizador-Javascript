@@ -96,7 +96,10 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
       || (typeof errPayload?.message === 'string' ? errPayload.message : '')
       || (typeof errPayload?.raw === 'string' ? errPayload.raw.slice(0, 300) : '')
       || `Erro HTTP ${response.status} na API Azure`;
-    throw new Error(message);
+    const friendlyMessage = /backend call failure/i.test(message)
+      ? 'Servico OCR da Azure indisponivel no momento. Tente novamente em alguns minutos.'
+      : message;
+    throw new Error(`API ${response.status}: ${friendlyMessage}`);
   }
 
   return response.json();

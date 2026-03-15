@@ -4,6 +4,8 @@ const LEGACY_DOCINTEL_API_VERSION = '2023-07-31';
 const MAX_DOCINTEL_POLLS = 60;
 const POLL_INTERVAL_MS = 2000;
 const DOCINTEL_FALLBACK_BATCH_SIZE = 2;
+const MAX_DOCINTEL_ANALYZE_RETRIES = 2;
+const DOCINTEL_RETRY_BASE_DELAY_MS = 900;
 
 function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
@@ -321,32 +323,46 @@ async function runDocumentIntelligenceAnalyze(pdfBase64, docIntelConfig, pagesRa
   const failedCandidates = [];
 
   for (const candidate of analyzeCandidates) {
-    const response = await fetch(candidate.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': docIntelConfig.apiKey
-      },
-      body: JSON.stringify({ base64Source: pdfBase64 })
-    });
+    for (let attempt = 0; attempt <= MAX_DOCINTEL_ANALYZE_RETRIES; attempt++) {
+      const response = await fetch(candidate.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Ocp-Apim-Subscription-Key': docIntelConfig.apiKey
+        },
+        body: JSON.stringify({ base64Source: pdfBase64 })
+      });
 
-    if (response.ok) {
-      analyzeResponse = response;
-      selectedCandidate = candidate;
+      if (response.ok) {
+        analyzeResponse = response;
+        selectedCandidate = candidate;
+        break;
+      }
+
+      const errorPayload = await response.json().catch(() => ({}));
+      const message = getErrorMessage(errorPayload);
+      const transientStatus = response.status === 429 || response.status === 500 || response.status === 503 || response.status === 504;
+      if (transientStatus && attempt < MAX_DOCINTEL_ANALYZE_RETRIES) {
+        const waitMs = DOCINTEL_RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+        await sleep(waitMs);
+        continue;
+      }
+
+      failedCandidates.push({
+        label: candidate.label,
+        apiVersion: candidate.apiVersion,
+        status: response.status,
+        message
+      });
+
+      if (response.status !== 404) {
+        throw new Error(`Document Intelligence (analyze) falhou [${candidate.label} ${candidate.apiVersion}]: ${response.status} - ${message}`);
+      }
+
       break;
     }
 
-    const errorPayload = await response.json().catch(() => ({}));
-    failedCandidates.push({
-      label: candidate.label,
-      apiVersion: candidate.apiVersion,
-      status: response.status,
-      message: getErrorMessage(errorPayload)
-    });
-
-    if (response.status !== 404) {
-      throw new Error(`Document Intelligence (analyze) falhou [${candidate.label} ${candidate.apiVersion}]: ${response.status} - ${getErrorMessage(errorPayload)}`);
-    }
+    if (analyzeResponse) break;
   }
 
   if (!analyzeResponse) {

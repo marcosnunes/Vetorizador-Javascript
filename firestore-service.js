@@ -44,6 +44,30 @@ function isQuotaExceededError(error) {
     );
 }
 
+const AGGREGATE_PERMISSION_CACHE_MS = 30 * 60 * 1000;
+let aggregatePermissionDeniedUntil = 0;
+
+function isPermissionDeniedError(error) {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+    return code.includes('permission-denied') || message.includes('permission-denied') || message.includes('permission denied');
+}
+
+async function contarFeedbackGlobalViaDatasetFallback() {
+    const dataset = await exportarDatasetCompartilhadoFirestore(120);
+    const feedback = Array.isArray(dataset?.feedback) ? dataset.feedback : [];
+    const inelegiveis = feedback.filter((fb) => fb?.trainingEligible === false).length;
+    const total = feedback.length;
+    const elegiveis = Math.max(0, total - inelegiveis);
+
+    return {
+        source: 'firestore-dataset-fallback-count',
+        total,
+        inelegiveis,
+        elegiveis
+    };
+}
+
 // ==================== SALVAR RUN ====================
 /**
  * Salva uma nova execução de vetorização
@@ -710,6 +734,10 @@ export async function lerModeloGlobalFirestore() {
 export async function contarFeedbackGlobalElegivelFirestore() {
     const db = obterFirestore();
 
+    if (aggregatePermissionDeniedUntil > Date.now()) {
+        return contarFeedbackGlobalViaDatasetFallback();
+    }
+
     try {
         const feedbackRef = collectionGroup(db, 'feedback');
         const totalSnap = await getCountFromServer(query(feedbackRef));
@@ -731,19 +759,11 @@ export async function contarFeedbackGlobalElegivelFirestore() {
         // Fallback robusto: quando aggregate/collectionGroup falha por regra/índice,
         // calcula a contagem usando o export compartilhado por runs.
         try {
+            if (isPermissionDeniedError(error)) {
+                aggregatePermissionDeniedUntil = Date.now() + AGGREGATE_PERMISSION_CACHE_MS;
+            }
             console.warn('⚠️ Falha na contagem agregada de feedback; usando fallback por dataset compartilhado.');
-            const dataset = await exportarDatasetCompartilhadoFirestore(120);
-            const feedback = Array.isArray(dataset?.feedback) ? dataset.feedback : [];
-            const inelegiveis = feedback.filter((fb) => fb?.trainingEligible === false).length;
-            const total = feedback.length;
-            const elegiveis = Math.max(0, total - inelegiveis);
-
-            return {
-                source: 'firestore-dataset-fallback-count',
-                total,
-                inelegiveis,
-                elegiveis
-            };
+            return await contarFeedbackGlobalViaDatasetFallback();
         } catch {
             // Segue para o fluxo padrão de erro abaixo.
         }
