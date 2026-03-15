@@ -16,3 +16,8 @@ pdfspliter/PDFtoArcgis/testes/
 
 .vercel
 .env*.local
+
+# Large binary/build artifacts — never commit to git
+vetoriza/target/
+pdfspliter/PDFtoArcgis/models/
+pdfspliter/PDFtoArcgis/llama-cli/

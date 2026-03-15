@@ -13,6 +13,15 @@
     "AZURE_MLOPS_API_KEY": "",
     "AZURE_MLOPS_START_URL": "",
     "AZURE_MLOPS_STATUS_URL": "",
-    "AZURE_MLOPS_PROMOTE_URL": ""
+    "AZURE_MLOPS_PROMOTE_URL": "",
+    "PDFTOARCGIS_USE_AZURE_AI": "false",
+    "PDFTOARCGIS_USE_WORKSPACE_LOCAL_AI": "true",
+    "PDFTOARCGIS_WORKSPACE_LOCAL_AI_ONLY": "true",
+    "PDFTOARCGIS_LOCAL_AI_PROVIDER": "llama_cli",
+    "PDFTOARCGIS_LOCAL_AI_LLAMA_BIN": "C:\\Users\\marco\\Documents\\Workspace\\Projetos_html\\Vetorizador\\V017\\Vetorizador-Javascript\\pdfspliter\\PDFtoArcgis\\llama-cli\\llama-completion.exe",
+    "PDFTOARCGIS_LOCAL_AI_MODEL_PATH": "C:\\Users\\marco\\Documents\\Workspace\\Projetos_html\\Vetorizador\\V017\\Vetorizador-Javascript\\pdfspliter\\PDFtoArcgis\\models\\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+    "PDFTOARCGIS_LOCAL_AI_TIMEOUT_MS": "240000",
+    "PDFTOARCGIS_USE_LLM_EXTRACTION": "false",
+    "PDFTOARCGIS_LLM_ONLY_MODE": "false"
   }
 }

@@ -9,7 +9,8 @@
         "build": "vite build",
         "preview": "vite preview",
         "lint": "eslint . --ext .js",
-        "deploy:azure": "node ./scripts/deploy-azure.mjs"
+        "deploy:azure": "node ./scripts/deploy-azure.mjs",
+        "healthcheck:local-ai": "node ./scripts/healthcheck-local-ai.mjs"
     },
     "dependencies": {
         "@tensorflow/tfjs": "^4.22.0",

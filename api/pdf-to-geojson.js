@@ -9,6 +9,7 @@ const DOCINTEL_RETRY_BASE_DELAY_MS = 900;
 const MAX_OPENAI_RETRIES = 2;
 const OPENAI_RETRY_BASE_DELAY_MS = 1000;
 const USE_AZURE_AI = String((globalThis.process && globalThis.process.env && globalThis.process.env.PDFTOARCGIS_USE_AZURE_AI) || 'false').toLowerCase() === 'true';
+const { runLocalWorkspaceAI } = require('./local-ai/workspace-ai');
 
 function sanitizeEndpoint(endpoint) {
   return String(endpoint || '').trim().replace(/\/$/, '');
@@ -1460,6 +1461,8 @@ export default async function handler(req, res) {
   };
   const useLlmExtraction = String(env.PDFTOARCGIS_USE_LLM_EXTRACTION || 'true').toLowerCase() === 'true';
   const llmOnlyMode = String(env.PDFTOARCGIS_LLM_ONLY_MODE || 'false').toLowerCase() === 'true';
+  const useWorkspaceLocalAI = String(env.PDFTOARCGIS_USE_WORKSPACE_LOCAL_AI || 'true').toLowerCase() === 'true';
+  const workspaceLocalAIOnly = String(env.PDFTOARCGIS_WORKSPACE_LOCAL_AI_ONLY || 'false').toLowerCase() === 'true';
 
   const usesDirectChatEndpoint = /\/openai\/deployments\/.+\/chat\/completions/i.test(String(openAiConfig.endpoint || ''));
 
@@ -1524,6 +1527,45 @@ export default async function handler(req, res) {
 
   try {
     if (!USE_AZURE_AI) {
+      const expectedVerticesEstimate = estimateExpectedVertexCount(localOcrText);
+      if (useWorkspaceLocalAI && localOcrText) {
+        try {
+          const localAiPayload = await runLocalWorkspaceAI({
+            ocrText: localOcrText,
+            fileName,
+            expectedVertices: expectedVerticesEstimate,
+            pagesAnalyzed: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
+          });
+          const normalized = normalizeModelPayload(localAiPayload);
+          const validated = validateGeoJsonPayload(normalized);
+          const extractedVertices = getExtractedVertexCount(validated);
+
+          return res.status(200).json({
+            success: true,
+            matricula: normalized.matricula || '',
+            projectionKey: normalized.projectionKey || 'SIRGAS2000_22S',
+            geometryMode: normalized.geometryMode || 'absolute',
+            sourcePattern: normalized.sourcePattern || 'desconhecido',
+            warnings: ['Extração executada por biblioteca de IA local do workspace.'],
+            geojson: validated,
+            pagesAnalyzed: 0,
+            pageNumbers: [],
+            pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+            usedPagedFallback: false,
+            textSourceUsed: 'client-ocr-local-workspace-ai',
+            expectedVertices: expectedVerticesEstimate,
+            extractedVertices
+          });
+        } catch (localAiError) {
+          console.warn('[pdf-to-geojson] Fallback após falha da IA local do workspace:', localAiError?.message || localAiError);
+          if (workspaceLocalAIOnly) {
+            throw new Error(`IA local do workspace falhou no modo estrito: ${localAiError?.message || 'erro desconhecido'}`);
+          }
+        }
+      } else if (workspaceLocalAIOnly) {
+        throw new Error('Modo estrito de IA local ativo, mas a IA local do workspace não está habilitada.');
+      }
+
       let llmAttempted = false;
       if (useLlmExtraction && llmConfig.endpoint && llmConfig.apiKey && localOcrText) {
         llmAttempted = true;

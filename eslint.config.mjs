@@ -40,5 +40,16 @@ export default defineConfig([
       "no-useless-escape": "off",
       "no-empty": "off"
     }
+  },
+  {
+    files: ["api/**/*.js"],
+    languageOptions: {
+      globals: {
+        ...globals.node
+      }
+    },
+    rules: {
+      "no-redeclare": "off"
+    }
   }
 ]);

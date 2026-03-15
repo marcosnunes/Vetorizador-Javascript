@@ -142,6 +142,24 @@ https://jolly-pebble-0487d1a1e.6.azurestaticapps.net/portfolio.html
 
 ---
 
+## Operação local corporativa (firewall estrito)
+
+Para rodar o PDFtoArcGIS sem endpoint externo de IA:
+
+1. Instale o `llama-cli` localmente (ja instalado nesta workspace em `pdfspliter/PDFtoArcgis/llama-cli`).
+2. Coloque o modelo `.gguf` em `pdfspliter/PDFtoArcgis/models`.
+3. Configure o `api/local.settings.json` com:
+	- `PDFTOARCGIS_USE_AZURE_AI=false`
+	- `PDFTOARCGIS_USE_WORKSPACE_LOCAL_AI=true`
+	- `PDFTOARCGIS_WORKSPACE_LOCAL_AI_ONLY=true`
+	- `PDFTOARCGIS_LOCAL_AI_PROVIDER=llama_cli`
+4. Rode o healthcheck:
+	- `npm run healthcheck:local-ai`
+
+Se o healthcheck passar, o backend esta pronto para extracao com IA local no workspace.
+
+---
+
 ## Suporte e contato comercial
 
 - Email: [marcos.nunes.lph@outlook.com](mailto:marcos.nunes.lph@outlook.com)
