@@ -443,7 +443,9 @@ function extractUtmRingFromText(rawText) {
 
   const lines = text.split(/\r?\n/);
   const points = [];
-  const hintRegex = /(coordenad|utm|sirgas|norte|leste|este|vertice|v\s*\d{1,4}|ponto|\bx\s*=|\by\s*=|\bn\s*=|\be\s*=|\bleste\b|\bnorte\b)/i;
+  // Rótulos SIGEF: M-01, V-01, P-01, PT-01 (com hífen, ponto ou espaço)
+  // Prefixos N/E seguidos de número ou parêntese (colunas de tabela)
+  const hintRegex = /(coordenad|utm|sirgas|norte|leste|este|vertice|[mvp][\s\-_.]{0,2}\d{1,4}|pt[\s\-_.]{0,2}\d{1,4}|ponto|\bx\s*=|\by\s*=|\bn\s*[=(]|\be\s*[=(]|\bn\s+\d|\be\s+\d|\bleste\b|\bnorte\b|latitude|longitude|geograf|per[ií]metr)/i;
 
   for (const line of lines) {
     if (!hintRegex.test(line)) continue;

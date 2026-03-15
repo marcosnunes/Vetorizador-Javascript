@@ -1260,15 +1260,26 @@ fileInput.addEventListener("change", async (event) => {
     document.getElementById("progressLabel").innerText = "Executando OCR local...";
 
     const MIN_TEXT_LENGTH = 120;
+    // Retorna true se o texto tem ≥3 números no range UTM (Easting ou Northing).
+    const hasUtmCandidates = (text) => {
+      const hits = (String(text || '').match(/\d{6,}/g) || [])
+        .map(n => parseInt(n, 10))
+        .filter(n => (n >= 100000 && n <= 900000) || (n >= 1000000 && n <= 10000000));
+      return hits.length >= 3;
+    };
+
     let extractedText = await extractPdfTextLocally(arrayBuffer);
 
-    if (!extractedText || extractedText.length < MIN_TEXT_LENGTH) {
-      updateStatus("⚠️ Texto insuficiente no PDF.js. Tentando OCR avançado (Tesseract)...", "info");
+    // Roda Tesseract pro-ativamente se: texto curto OU sem candidatos UTM
+    // (evita enviar rodapé/marca d'água sem coordenadas para a API)
+    if (!extractedText || extractedText.length < MIN_TEXT_LENGTH || !hasUtmCandidates(extractedText)) {
+      updateStatus("⚠️ Texto sem coordenadas UTM. Tentando OCR avançado (Tesseract)...", "info");
       const maxTesseractPages = Number.isFinite(Number(cfg.maxTesseractPages))
         ? Math.max(1, Number(cfg.maxTesseractPages))
         : 30;
       const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
-      if (tesseractText && tesseractText.length > extractedText.length) {
+      console.log('[PDFtoArcgis] Tesseract (proativo) preview:', `[${(tesseractText||'').length} chars]`, (tesseractText||'').slice(0, 600));
+      if (tesseractText && tesseractText.length > (extractedText || '').length) {
         extractedText = tesseractText;
       }
     }
@@ -1296,7 +1307,9 @@ fileInput.addEventListener("change", async (event) => {
         ? Math.max(1, Number(cfg.maxTesseractPages))
         : 30;
       const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
+      console.log('[PDFtoArcgis] Tesseract (retry) preview:', `[${(tesseractText||'').length} chars]`, (tesseractText||'').slice(0, 800));
       const enhancedText = mergeOcrTexts(extractedText, tesseractText);
+      console.log('[PDFtoArcgis] Enhanced OCR (merged) preview:', `[${(enhancedText||'').length} chars]`, (enhancedText||'').slice(0, 600));
 
       if (!enhancedText || enhancedText.length < MIN_TEXT_LENGTH) {
         throw firstError;
