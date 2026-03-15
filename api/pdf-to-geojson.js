@@ -240,7 +240,7 @@ function buildCoordinateFocusedText(rawText) {
   const seen = new Set();
 
   const hasVertexToken = /\b(?:V(?:É|E)?RTICE|VERTICE|PONTO|PT|M\s*[-.]?\s*\d+|V\s*\d{1,4})\b/i;
-  const hasUtmPair = /-?\d{5,7}[.,]\d+[^\d\n\r]{1,25}-?\d{5,7}[.,]\d+/;
+  const hasUtmPair = /-?\d[\dOIlSB\s.,]{4,}[^\d\n\r]{1,25}-?\d[\dOIlSB\s.,]{5,}/;
   const hasLatLonPair = /-?\d{1,3}[.,]\d{4,}[^\d\n\r]{1,20}-?\d{1,3}[.,]\d{4,}/;
   const hasDmsPair = /\d{1,3}\s*[°º]\s*\d{1,2}\s*['’′]\s*\d{1,2}(?:[.,]\d+)?\s*(?:["”″]\s*)?[NSOLWE]/i;
   const hasAzDist = /\b(?:AZIMUTE|RUMO|DIST[ÂA]NCIA|DIST\.?|METROS?|M\b|BEARING|N\s*\d{1,2}.*E|S\s*\d{1,2}.*W)\b/i;
@@ -267,7 +267,14 @@ function parseNumericValue(value) {
   }
 
   if (typeof value === 'string') {
-    let normalized = value.trim().replace(/\s+/g, '');
+    let normalized = value
+      .trim()
+      .replace(/[Oo]/g, '0')
+      .replace(/[Il|]/g, '1')
+      .replace(/[Ss]/g, '5')
+      .replace(/\bB\b/g, '8')
+      .replace(/[^\d,.-\s]/g, '')
+      .replace(/\s+/g, '');
     if (!normalized) return null;
 
     const hasComma = normalized.includes(',');
@@ -284,11 +291,44 @@ function parseNumericValue(value) {
       normalized = normalized.replace(/\./g, '');
     }
 
+    if ((normalized.match(/-/g) || []).length > 1) {
+      normalized = normalized.replace(/-/g, '');
+    }
+
     const parsed = Number.parseFloat(normalized);
     return Number.isFinite(parsed) ? parsed : null;
   }
 
   return null;
+}
+
+function extractNumericCandidates(text) {
+  const source = String(text || '');
+  if (!source) return [];
+
+  const candidates = [];
+  const seen = new Set();
+  const push = (token) => {
+    const cleaned = String(token || '').trim();
+    if (!cleaned || seen.has(cleaned)) return;
+    seen.add(cleaned);
+    candidates.push(cleaned);
+  };
+
+  const tolerantMatches = source.match(/-?[\dOIlSB][\dOIlSB\s.,]{3,}/g) || [];
+  for (const match of tolerantMatches) {
+    const compact = match.replace(/\s+/g, ' ').trim();
+    const digitsOnly = compact.replace(/\D/g, '');
+    if (digitsOnly.length < 5) continue;
+    push(compact);
+  }
+
+  const strictMatches = source.match(/-?\d[\d.,]*/g) || [];
+  for (const match of strictMatches) {
+    push(match);
+  }
+
+  return candidates;
 }
 
 function toArrayLike(value) {
@@ -421,11 +461,11 @@ function extractUtmRingFromText(rawText) {
 
   const lines = text.split(/\r?\n/);
   const points = [];
-  const hintRegex = /(coordenad|utm|sirgas|norte|leste|este|vertice|v\s*\d{1,4}|ponto|\bx\s*=|\by\s*=|\bn\s*=|\be\s*=)/i;
+  const hintRegex = /(coordenad|utm|sirgas|norte|leste|este|vertice|v\s*\d{1,4}|ponto|\bx\s*=|\by\s*=|\bn\s*=|\be\s*=|\bleste\b|\bnorte\b)/i;
 
   for (const line of lines) {
     if (!hintRegex.test(line)) continue;
-    const nums = line.match(/-?\d[\d.,]*/g) || [];
+    const nums = extractNumericCandidates(line);
     for (let i = 0; i + 1 < nums.length; i++) {
       const pair = normalizeUtmPair(nums[i], nums[i + 1]);
       if (pair) {
@@ -436,7 +476,23 @@ function extractUtmRingFromText(rawText) {
   }
 
   if (points.length < 3) {
-    const nums = text.match(/-?\d[\d.,]*/g) || [];
+    for (let i = 0; i + 1 < lines.length; i++) {
+      const joined = `${lines[i]} ${lines[i + 1]}`;
+      if (!hintRegex.test(joined)) continue;
+      const nums = extractNumericCandidates(joined);
+      for (let j = 0; j + 1 < nums.length; j++) {
+        const pair = normalizeUtmPair(nums[j], nums[j + 1]);
+        if (pair) {
+          points.push(pair);
+          break;
+        }
+      }
+      if (points.length >= 120) break;
+    }
+  }
+
+  if (points.length < 3) {
+    const nums = extractNumericCandidates(text);
     for (let i = 0; i + 1 < nums.length; i++) {
       const pair = normalizeUtmPair(nums[i], nums[i + 1]);
       if (pair) points.push(pair);
@@ -569,7 +625,7 @@ function estimateExpectedVertexCount(rawText) {
     }
   }
 
-  const lineRegex = /(?:^|\n)\s*(?:V\s*\d{1,4}|V(?:É|E)?RTICE\s*\d{1,4}|PONTO\s*\d{1,4}|PT\s*\d{1,4}|M\s*[-.]?\s*\d{1,4})?[^\n]{0,140}?-?\d{5,7}[.,]\d+[^\n]{1,30}-?\d{5,7}[.,]\d+[^\n]*(?=\n|$)/gi;
+  const lineRegex = /(?:^|\n)\s*(?:V\s*\d{1,4}|V(?:É|E)?RTICE\s*\d{1,4}|PONTO\s*\d{1,4}|PT\s*\d{1,4}|M\s*[-.]?\s*\d{1,4})?[^\n]{0,140}?-?\d[\dOIlSB\s.,]{4,}[^\n]{1,30}-?\d[\dOIlSB\s.,]{5,}[^\n]*(?=\n|$)/gi;
   const lineHits = text.match(lineRegex) || [];
 
   return Math.max(maxVertexId, lineHits.length);
@@ -616,14 +672,12 @@ function buildHeuristicGeojsonFromText(rawText) {
   };
 
   for (const line of lines) {
-    const matches = line.match(/-?\d+(?:[.,]\d+)?/g);
+    const matches = extractNumericCandidates(line);
     if (!matches || matches.length < 2) continue;
 
     for (let i = 0; i + 1 < matches.length; i++) {
       const rawA = matches[i];
       const rawB = matches[i + 1];
-      if (!/[.,]/.test(rawA) || !/[.,]/.test(rawB)) continue;
-
       const a = parseNumericValue(rawA);
       const b = parseNumericValue(rawB);
       tryPushPoint(a, b);
@@ -631,7 +685,7 @@ function buildHeuristicGeojsonFromText(rawText) {
   }
 
   if (points.length < 3 && looksLikeCoordinateContext) {
-    const allNumbers = Array.from(text.matchAll(/-?\d+(?:[.,]\d+)?/g), (m) => m[0]);
+    const allNumbers = extractNumericCandidates(text);
     for (let i = 0; i + 1 < allNumbers.length; i++) {
       const a = parseNumericValue(allNumbers[i]);
       const b = parseNumericValue(allNumbers[i + 1]);
