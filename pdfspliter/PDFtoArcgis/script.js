@@ -221,6 +221,136 @@ function mergeOcrTexts(...texts) {
   return lines.join('\n');
 }
 
+function parseNumericLoose(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  let normalized = value
+    .trim()
+    .replace(/[Oo]/g, '0')
+    .replace(/[Il|]/g, '1')
+    .replace(/[Ss]/g, '5')
+    .replace(/B/g, '8')
+    .replace(/[^\d,.-\s]/g, '')
+    .replace(/\s+/g, '');
+  if (!normalized) return null;
+
+  const hasComma = normalized.includes(',');
+  const hasDot = normalized.includes('.');
+  if (hasComma && hasDot) {
+    if (normalized.lastIndexOf(',') > normalized.lastIndexOf('.')) {
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  } else if ((normalized.match(/\./g) || []).length > 1) {
+    normalized = normalized.replace(/\./g, '');
+  }
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractNumericCandidatesLocal(text) {
+  const src = String(text || '');
+  const out = [];
+  const seen = new Set();
+  const push = (token) => {
+    const t = String(token || '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+
+  const tolerant = src.match(/-?[\dOIlSB][\dOIlSB\s.,]{3,}/g) || [];
+  for (const m of tolerant) {
+    const compact = m.replace(/\s+/g, ' ').trim();
+    if (compact.replace(/\D/g, '').length >= 5) push(compact);
+  }
+
+  const strict = src.match(/-?\d[\d.,]*/g) || [];
+  for (const m of strict) push(m);
+  return out;
+}
+
+function normalizeUtmPairLocal(a, b) {
+  const ax = parseNumericLoose(a);
+  const bx = parseNumericLoose(b);
+  if (!Number.isFinite(ax) || !Number.isFinite(bx)) return null;
+  const absA = Math.abs(ax);
+  const absB = Math.abs(bx);
+  const isE = (v) => v >= 100000 && v <= 900000;
+  const isN = (v) => v >= 1000000 && v <= 10000000;
+  if (isE(absA) && isN(absB)) return [ax, bx];
+  if (isN(absA) && isE(absB)) return [bx, ax];
+  return null;
+}
+
+function buildLocalUtmRingFromText(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return null;
+
+  const lines = text.split(/\r?\n/);
+  const points = [];
+  const hintRegex = /(coordenad|utm|sirgas|norte|leste|este|vertice|[mvp][\s\-_.]{0,2}\d{1,4}|pt[\s\-_.]{0,2}\d{1,4}|ponto|\bx\s*=|\by\s*=|\bn\s*[=(]|\be\s*[=(]|\bn\s+\d|\be\s+\d|\bleste\b|\bnorte\b|latitude|longitude|geograf|per[ií]metr)/i;
+
+  for (const line of lines) {
+    if (!hintRegex.test(line)) continue;
+    const nums = extractNumericCandidatesLocal(line);
+    for (let i = 0; i + 1 < nums.length; i++) {
+      const pair = normalizeUtmPairLocal(nums[i], nums[i + 1]);
+      if (pair) {
+        points.push(pair);
+        break;
+      }
+    }
+  }
+
+  if (points.length < 3) {
+    const nums = extractNumericCandidatesLocal(text);
+    for (let i = 0; i + 1 < nums.length; i++) {
+      const pair = normalizeUtmPairLocal(nums[i], nums[i + 1]);
+      if (pair) points.push(pair);
+      if (points.length >= 120) break;
+    }
+  }
+
+  if (points.length < 3) {
+    const isE = (v) => v >= 100000 && v <= 900000;
+    const isN = (v) => v >= 1000000 && v <= 10000000;
+    const nums = extractNumericCandidatesLocal(text);
+    const es = [];
+    const ns = [];
+    for (const n of nums) {
+      const v = parseNumericLoose(n);
+      if (!Number.isFinite(v)) continue;
+      const abs = Math.abs(v);
+      if (isE(abs)) es.push(v);
+      else if (isN(abs)) ns.push(v);
+    }
+    const len = Math.min(es.length, ns.length);
+    if (len >= 3) {
+      for (let i = 0; i < len && points.length < 120; i++) {
+        points.push([es[i], ns[i]]);
+      }
+    }
+  }
+
+  if (points.length < 3) return null;
+
+  const cleaned = [];
+  for (const p of points) {
+    const prev = cleaned[cleaned.length - 1];
+    if (!prev || prev[0] !== p[0] || prev[1] !== p[1]) cleaned.push([p[0], p[1]]);
+  }
+  if (cleaned.length < 3) return null;
+  const first = cleaned[0];
+  const last = cleaned[cleaned.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) cleaned.push([first[0], first[1]]);
+  return cleaned.length >= 4 ? cleaned : null;
+}
+
 // Navegação lateral e rolagem para resultados.
 function openNav() {
   document.getElementById("mySidenav").style.width = "250px";
@@ -1339,7 +1469,22 @@ fileInput.addEventListener("change", async (event) => {
       const msg = String(firstError?.message || '');
       const shouldRetryWithEnhancedOcr = /UTM válidas|OCR enviado/i.test(msg);
       if (!shouldRetryWithEnhancedOcr) {
-        throw firstError;
+        const localRing = buildLocalUtmRingFromText(extractedText);
+        if (localRing) {
+          apiResult = {
+            success: true,
+            projectionKey: 'SIRGAS2000_22S',
+            geometryMode: 'absolute',
+            sourcePattern: 'client-ocr-local-fallback',
+            warnings: ['Fallback local no navegador: coordenadas extraídas sem a API.'],
+            geojson: {
+              type: 'FeatureCollection',
+              features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [localRing] }, properties: {} }]
+            }
+          };
+        } else {
+          throw firstError;
+        }
       }
 
       updateStatus('⚠️ OCR inicial sem coordenadas UTM válidas. Tentando OCR reforçado...', 'info');
@@ -1357,10 +1502,28 @@ fileInput.addEventListener("change", async (event) => {
 
       progressBar.value = 85;
       document.getElementById("progressLabel").innerText = "Reprocessando com OCR reforçado...";
-      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, enhancedText, 0, pdfBase64);
-      apiResult.warnings = Array.isArray(apiResult.warnings)
-        ? [...apiResult.warnings, 'Reprocessado com OCR reforçado (Tesseract + PDF.js).']
-        : ['Reprocessado com OCR reforçado (Tesseract + PDF.js).'];
+      try {
+        apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, enhancedText, 0, pdfBase64);
+        apiResult.warnings = Array.isArray(apiResult.warnings)
+          ? [...apiResult.warnings, 'Reprocessado com OCR reforçado (Tesseract + PDF.js).']
+          : ['Reprocessado com OCR reforçado (Tesseract + PDF.js).'];
+      } catch (secondError) {
+        const localRing = buildLocalUtmRingFromText(enhancedText);
+        if (!localRing) {
+          throw secondError;
+        }
+        apiResult = {
+          success: true,
+          projectionKey: 'SIRGAS2000_22S',
+          geometryMode: 'absolute',
+          sourcePattern: 'client-ocr-local-fallback-enhanced',
+          warnings: ['Fallback local no navegador após falha da API (OCR reforçado).'],
+          geojson: {
+            type: 'FeatureCollection',
+            features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [localRing] }, properties: {} }]
+          }
+        };
+      }
     }
 
     apiResult.engineName = apiResult.engineName || 'Parser do workspace (sem Azure)';
