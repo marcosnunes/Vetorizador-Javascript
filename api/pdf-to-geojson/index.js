@@ -428,6 +428,13 @@ function buildHeuristicGeojsonFromText(rawText) {
 
   const lines = text.split(/\r?\n/);
   const points = [];
+  const tryPushPoint = (a, b) => {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+    const isLatLon = Math.abs(a) <= 180 && Math.abs(b) <= 90;
+    const isProjected = Math.abs(a) >= 10000 && Math.abs(b) >= 10000;
+    if (!isLatLon && !isProjected) return;
+    points.push([a, b]);
+  };
 
   for (const line of lines) {
     const matches = line.match(/-?\d+(?:[.,]\d+)?/g);
@@ -440,13 +447,17 @@ function buildHeuristicGeojsonFromText(rawText) {
 
       const a = parseNumericValue(rawA);
       const b = parseNumericValue(rawB);
-      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      tryPushPoint(a, b);
+    }
+  }
 
-      const isLatLon = Math.abs(a) <= 180 && Math.abs(b) <= 90;
-      const isProjected = Math.abs(a) >= 1000 && Math.abs(b) >= 1000;
-      if (!isLatLon && !isProjected) continue;
-
-      points.push([a, b]);
+  if (points.length < 3) {
+    const allNumbers = Array.from(text.matchAll(/-?\d+(?:[.,]\d+)?/g), (m) => m[0]);
+    for (let i = 0; i + 1 < allNumbers.length; i++) {
+      const a = parseNumericValue(allNumbers[i]);
+      const b = parseNumericValue(allNumbers[i + 1]);
+      tryPushPoint(a, b);
+      if (points.length >= 80) break;
     }
   }
 
