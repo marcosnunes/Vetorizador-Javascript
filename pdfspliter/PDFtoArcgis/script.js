@@ -4,6 +4,11 @@ if (typeof displayLogMessage !== 'function' && window.displayLogMessage) {
   var displayLogMessage = window.displayLogMessage;
 }
 
+console.error('[PDFtoArcgis][DIAG-20260315-3] script carregado', {
+  href: window.location.href,
+  ts: new Date().toISOString()
+});
+
 function getPdfToArcgisConfig() {
   const cfg = window.PDFTOARCGIS_CONFIG;
   return (cfg && typeof cfg === 'object') ? cfg : {};
