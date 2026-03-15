@@ -1523,6 +1523,7 @@ module.exports = async function (context, req) {
   const llmOnlyMode = String(env.PDFTOARCGIS_LLM_ONLY_MODE || 'false').toLowerCase() === 'true';
   const useWorkspaceLocalAI = String(env.PDFTOARCGIS_USE_WORKSPACE_LOCAL_AI || 'true').toLowerCase() === 'true';
   const workspaceLocalAIOnly = String(env.PDFTOARCGIS_WORKSPACE_LOCAL_AI_ONLY || 'false').toLowerCase() === 'true';
+  const allowAzureFallback = String(env.PDFTOARCGIS_ALLOW_AZURE_FALLBACK || 'true').toLowerCase() === 'true';
 
   const usesDirectChatEndpoint = /\/openai\/deployments\/.+\/chat\/completions/i.test(String(openAiConfig.endpoint || ''));
 
@@ -1794,6 +1795,70 @@ module.exports = async function (context, req) {
             }
           };
           return;
+        }
+
+        // Fallback opcional: usa Azure Document Intelligence + Azure OpenAI
+        // quando o OCR local não traz coordenadas suficientes.
+        const hasPdfForFallback = looksLikePdfBase64(normalizedPdfBase64);
+        const hasDocIntelConfig = Boolean(docIntelConfig.endpoint && docIntelConfig.apiKey);
+        const hasOpenAiConfig = Boolean(
+          openAiConfig.endpoint
+          && openAiConfig.apiKey
+          && (usesDirectChatEndpoint || openAiConfig.deployment)
+        );
+
+        if (allowAzureFallback && hasPdfForFallback && hasDocIntelConfig && hasOpenAiConfig) {
+          try {
+            const ocrResultFallback = await runDocumentIntelligence(normalizedPdfBase64, docIntelConfig, {
+              totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
+            });
+
+            const expectedVerticesFallback = estimateExpectedVertexCount(ocrResultFallback.text);
+            const minimumAcceptableFallback = expectedVerticesFallback >= 20
+              ? Math.floor(expectedVerticesFallback * 0.75)
+              : 0;
+            const pagesAnalyzedFallback = Array.isArray(ocrResultFallback.pages) ? ocrResultFallback.pages.length : 0;
+            const pageNumbersFallback = Array.isArray(ocrResultFallback.pages)
+              ? ocrResultFallback.pages.map((p) => p?.pageNumber).filter((n) => Number.isFinite(n))
+              : [];
+
+            const llmResultFallback = await runAzureOpenAIExtraction(ocrResultFallback.text, openAiConfig, fileName, {
+              pagesAnalyzed: pagesAnalyzedFallback,
+              expectedVertices: expectedVerticesFallback,
+              minimumVertices: minimumAcceptableFallback
+            });
+
+            const validatedFallback = validateGeoJsonPayload(llmResultFallback);
+            const extractedVerticesFallback = getExtractedVertexCount(validatedFallback.geojson);
+            const warningsFallback = [
+              ...(Array.isArray(validatedFallback.warnings) ? validatedFallback.warnings : []),
+              'Fallback acionado: OCR Azure Document Intelligence + extração Azure OpenAI.'
+            ];
+
+            context.res = {
+              status: 200,
+              headers: corsHeaders,
+              body: {
+                success: true,
+                matricula: validatedFallback.matricula || '',
+                projectionKey: validatedFallback.projectionKey || '',
+                geometryMode: validatedFallback.geometryMode || '',
+                sourcePattern: validatedFallback.sourcePattern || '',
+                warnings: [...new Set(warningsFallback)],
+                geojson: validatedFallback.geojson,
+                pagesAnalyzed: pagesAnalyzedFallback,
+                pageNumbers: pageNumbersFallback,
+                pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+                usedPagedFallback: !!ocrResultFallback.usedPagedFallback,
+                textSourceUsed: 'azure-fallback-after-local-ocr-failure',
+                expectedVertices: expectedVerticesFallback,
+                extractedVertices: extractedVerticesFallback
+              }
+            };
+            return;
+          } catch (azureFallbackError) {
+            console.warn('[pdf-to-geojson] Azure fallback falhou após OCR local:', azureFallbackError?.message || azureFallbackError);
+          }
         }
 
         throw new Error('Não foi possível localizar coordenadas UTM válidas no OCR enviado.');

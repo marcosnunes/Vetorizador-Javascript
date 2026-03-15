@@ -17,7 +17,37 @@ function getWorkspaceAiExtractorUrl() {
 
 const ENABLE_TOPOLOGY_VALIDATION = false;
 
-async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = '', retryCount = 0) {
+function countCoordinateSignal(text) {
+  const src = String(text || '');
+  if (!src) return 0;
+  const nums = (src.match(/\d{6,}/g) || [])
+    .map((n) => parseInt(n, 10))
+    .filter((n) => Number.isFinite(n));
+  let signal = 0;
+  for (const n of nums) {
+    if ((n >= 100000 && n <= 900000) || (n >= 1000000 && n <= 10000000)) {
+      signal += 1;
+    }
+  }
+  return signal;
+}
+
+function hasUtmCandidates(text, minHits = 3) {
+  return countCoordinateSignal(text) >= minHits;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
+}
+
+async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = '', retryCount = 0, pdfBase64 = '') {
   const route = getWorkspaceAiExtractorUrl();
   const cfg = getPdfToArcgisConfig();
   const maxRetries = Number.isFinite(Number(cfg.maxWorkspaceRetries))
@@ -30,7 +60,8 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
     body: JSON.stringify({
       fileName,
       totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
-      ocrText: String(ocrText || '').slice(0, 80000)
+      ocrText: String(ocrText || '').slice(0, 120000),
+      pdfBase64: String(pdfBase64 || '')
     })
   });
 
@@ -48,7 +79,7 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
     const transient = new Set([429, 500, 503, 504]);
     if (transient.has(response.status) && retryCount < maxRetries) {
       await new Promise((resolve) => setTimeout(resolve, 1200 * Math.pow(2, retryCount)));
-      return callWorkspaceAiExtractor(fileName, totalPagesHint, ocrText, retryCount + 1);
+      return callWorkspaceAiExtractor(fileName, totalPagesHint, ocrText, retryCount + 1, pdfBase64);
     }
   }
 
@@ -131,7 +162,7 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 2.8 });
+      const viewport = page.getViewport({ scale: 3.2 });
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) continue;
@@ -139,12 +170,28 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
       await page.render({ canvasContext: ctx, viewport }).promise;
-      preprocessCanvasForOcr(canvas, ctx);
 
-      const result = await window.Tesseract.recognize(canvas, 'por+eng');
-      const text = String(result?.data?.text || '').trim();
-      if (text) {
-        chunks.push(`--- PAGINA ${pageNum} ---\n${text}`);
+      // Passo 1: OCR em imagem original (preserva detalhes finos).
+      const pass1 = await window.Tesseract.recognize(canvas, 'por+eng', {
+        tessedit_pageseg_mode: '6',
+        preserve_interword_spaces: '1'
+      });
+      const text1 = String(pass1?.data?.text || '').trim();
+
+      // Passo 2 (condicional): OCR em imagem binarizada quando sinal de coordenada estiver fraco.
+      let text2 = '';
+      if (!hasUtmCandidates(text1, 4)) {
+        preprocessCanvasForOcr(canvas, ctx);
+        const pass2 = await window.Tesseract.recognize(canvas, 'por+eng', {
+          tessedit_pageseg_mode: '11',
+          preserve_interword_spaces: '1'
+        });
+        text2 = String(pass2?.data?.text || '').trim();
+      }
+
+      const mergedPageText = mergeOcrTexts(text1, text2);
+      if (mergedPageText) {
+        chunks.push(`--- PAGINA ${pageNum} ---\n${mergedPageText}`);
       }
     }
 
@@ -1260,15 +1307,8 @@ fileInput.addEventListener("change", async (event) => {
     document.getElementById("progressLabel").innerText = "Executando OCR local...";
 
     const MIN_TEXT_LENGTH = 120;
-    // Retorna true se o texto tem ≥3 números no range UTM (Easting ou Northing).
-    const hasUtmCandidates = (text) => {
-      const hits = (String(text || '').match(/\d{6,}/g) || [])
-        .map(n => parseInt(n, 10))
-        .filter(n => (n >= 100000 && n <= 900000) || (n >= 1000000 && n <= 10000000));
-      return hits.length >= 3;
-    };
-
     let extractedText = await extractPdfTextLocally(arrayBuffer);
+    const pdfBase64 = arrayBufferToBase64(arrayBuffer);
 
     // Roda Tesseract pro-ativamente se: texto curto OU sem candidatos UTM
     // (evita enviar rodapé/marca d'água sem coordenadas para a API)
@@ -1294,7 +1334,7 @@ fileInput.addEventListener("change", async (event) => {
     let apiResult;
     try {
       console.log('[PDFtoArcgis] OCR preview antes do envio:', `[${extractedText.length} chars]`, extractedText.slice(0, 400));
-      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, extractedText);
+      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, extractedText, 0, pdfBase64);
     } catch (firstError) {
       const msg = String(firstError?.message || '');
       const shouldRetryWithEnhancedOcr = /UTM válidas|OCR enviado/i.test(msg);
@@ -1317,7 +1357,7 @@ fileInput.addEventListener("change", async (event) => {
 
       progressBar.value = 85;
       document.getElementById("progressLabel").innerText = "Reprocessando com OCR reforçado...";
-      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, enhancedText);
+      apiResult = await callWorkspaceAiExtractor(file.name, totalPagesHint, enhancedText, 0, pdfBase64);
       apiResult.warnings = Array.isArray(apiResult.warnings)
         ? [...apiResult.warnings, 'Reprocessado com OCR reforçado (Tesseract + PDF.js).']
         : ['Reprocessado com OCR reforçado (Tesseract + PDF.js).'];
