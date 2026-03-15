@@ -1475,13 +1475,19 @@ async function restaurarAppPersistidaDoFirestoreSeNecessario() {
         console.log('☁️ APP global restaurada do Firestore para esta instância.');
     } catch (error) {
         if (String(error ?.message || '').includes('inválido')) {
-            console.warn('⚠️ APP remota ignorada por formato inválido:', error ?.message || error);
+            const invalidAppFlag = '__invalidRemoteAppAlreadyHandled';
+            const alreadyHandled = window[invalidAppFlag] === true;
 
-            try {
-                await limparAppBoundaryFirestore();
-                console.warn('🧹 APP remota inválida removida do Firestore para evitar novos avisos.');
-            } catch (cleanupError) {
-                console.warn('⚠️ Falha ao remover APP remota inválida do Firestore:', cleanupError ?.message || cleanupError);
+            if (!alreadyHandled) {
+                window[invalidAppFlag] = true;
+                console.warn('⚠️ APP remota ignorada por formato inválido:', error ?.message || error);
+
+                try {
+                    await limparAppBoundaryFirestore();
+                    console.warn('🧹 APP remota inválida removida do Firestore para evitar novos avisos.');
+                } catch (cleanupError) {
+                    console.warn('⚠️ Falha ao remover APP remota inválida do Firestore:', cleanupError ?.message || cleanupError);
+                }
             }
 
             localStorage.removeItem(APP_STORAGE_KEY);

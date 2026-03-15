@@ -35,7 +35,10 @@ function getAzurePdfToGeoJsonRoutes() {
 }
 
 async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
-  const MAX_RETRIES = 3;
+  const cfg = getPdfToArcgisConfig();
+  const MAX_RETRIES = Number.isFinite(Number(cfg.maxAzureRetries))
+    ? Math.max(0, Number(cfg.maxAzureRetries))
+    : 1;
   const INITIAL_DELAY_MS = 1200;
 
   const payload = JSON.stringify({ pdfBase64, fileName });
@@ -72,7 +75,7 @@ async function callAzurePdfToGeoJson(pdfBase64, fileName, retryCount = 0) {
   }
 
   if (!response.ok) {
-    const transientStatuses = new Set([429, 500, 503, 504]);
+    const transientStatuses = new Set([429, 503, 504]);
     if (transientStatuses.has(response.status) && retryCount < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount);
       if (typeof displayLogMessage === 'function') {

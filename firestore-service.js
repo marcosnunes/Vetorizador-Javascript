@@ -46,6 +46,9 @@ function isQuotaExceededError(error) {
 
 const AGGREGATE_PERMISSION_CACHE_MS = 30 * 60 * 1000;
 let aggregatePermissionDeniedUntil = 0;
+// Temporariamente desativado para evitar 403 de RunAggregationQuery enquanto as regras
+// de collectionGroup(feedback) nao estiverem liberadas no projeto.
+const ENABLE_FEEDBACK_AGGREGATE_COUNT = false;
 
 function isPermissionDeniedError(error) {
     const code = String(error?.code || '').toLowerCase();
@@ -733,6 +736,10 @@ export async function lerModeloGlobalFirestore() {
  */
 export async function contarFeedbackGlobalElegivelFirestore() {
     const db = obterFirestore();
+
+    if (!ENABLE_FEEDBACK_AGGREGATE_COUNT) {
+        return contarFeedbackGlobalViaDatasetFallback();
+    }
 
     if (aggregatePermissionDeniedUntil > Date.now()) {
         return contarFeedbackGlobalViaDatasetFallback();
