@@ -17,7 +17,8 @@
   <script src="vendor/docx.umd.js"></script>
   <script>
     window.PDFTOARCGIS_CONFIG = Object.assign({
-      azurePdfToGeoJsonUrl: "/api/pdf-to-geojson"
+      workspaceAiExtractorUrl: "/api/pdf-to-geojson",
+      maxWorkspaceRetries: 1
     }, window.PDFTOARCGIS_CONFIG || {});
   </script>
   <script>

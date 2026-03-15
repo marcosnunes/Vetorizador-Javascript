@@ -59,8 +59,12 @@ Para melhoria contínua, existe um modo manual para registrar exemplos de aprend
 ### 3) PDFtoArcGIS
 
 - Interpreta documentos técnicos e gera saída geoespacial.
-- Apoio de IA em nuvem para leitura e extração estruturada.
+- Apoio de IA para leitura e extração estruturada.
 - Facilita o aproveitamento de informações documentais em contexto cartográfico.
+
+No fluxo atual, a extração do PDFtoArcGIS é feita por um serviço inteligente integrado ao próprio projeto, publicado junto da plataforma.
+
+Na prática, o usuário final apenas envia o PDF e recebe o resultado estruturado para uso geoespacial, sem depender de configurações técnicas na máquina.
 
 ---
 

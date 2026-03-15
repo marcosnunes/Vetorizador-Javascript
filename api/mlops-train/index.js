@@ -1,4 +1,4 @@
-/* global module, process, globalThis */
+/* global module, process */
 
 function buildCorsHeaders(req) {
   const configuredOrigins = String(process.env.AZURE_MLOPS_ALLOWED_ORIGINS || '')
