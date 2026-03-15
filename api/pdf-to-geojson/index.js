@@ -386,6 +386,56 @@ function normalizeUtmPair(a, b) {
   return null;
 }
 
+function applyHemisphereSign(value, hemi) {
+  if (!Number.isFinite(value)) return null;
+  const h = String(hemi || '').toUpperCase();
+  if (!h) return value;
+  if (h === 'S' || h === 'W' || h === 'O') return -Math.abs(value);
+  if (h === 'N' || h === 'E' || h === 'L') return Math.abs(value);
+  return value;
+}
+
+function normalizeLatLonPair(a, b, latHemi = '', lonHemi = '') {
+  const lat = applyHemisphereSign(parseNumericValue(a), latHemi);
+  const lon = applyHemisphereSign(parseNumericValue(b), lonHemi);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+
+  return [lon, lat];
+}
+
+function parseDmsToDecimal(deg, min, sec, hemi) {
+  const d = parseNumericValue(deg);
+  const m = parseNumericValue(min);
+  const s = parseNumericValue(sec);
+  if (!Number.isFinite(d) || !Number.isFinite(m) || !Number.isFinite(s)) return null;
+
+  const abs = Math.abs(d) + (Math.abs(m) / 60) + (Math.abs(s) / 3600);
+  return applyHemisphereSign(abs, hemi);
+}
+
+function cleanAndCloseRing(points) {
+  if (!Array.isArray(points) || points.length < 3) return null;
+
+  const cleaned = [];
+  for (const point of points) {
+    if (!Array.isArray(point) || point.length < 2) continue;
+    const prev = cleaned[cleaned.length - 1];
+    if (!prev || prev[0] !== point[0] || prev[1] !== point[1]) {
+      cleaned.push([point[0], point[1]]);
+    }
+  }
+
+  if (cleaned.length < 3) return null;
+  const first = cleaned[0];
+  const last = cleaned[cleaned.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    cleaned.push([first[0], first[1]]);
+  }
+
+  return cleaned.length >= 4 ? cleaned : null;
+}
+
 function extractUtmRingFromText(rawText) {
   const text = String(rawText || '');
   if (!text.trim()) return null;
@@ -431,24 +481,76 @@ function extractUtmRingFromText(rawText) {
     }
   }
 
-  if (points.length < 3) return null;
+  return cleanAndCloseRing(points);
+}
 
-  const cleaned = [];
-  for (const point of points) {
-    const prev = cleaned[cleaned.length - 1];
-    if (!prev || prev[0] !== point[0] || prev[1] !== point[1]) {
-      cleaned.push(point);
+function extractLatLonRingFromText(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return null;
+
+  const points = [];
+  const latLonLabelRegex = /(?:LAT(?:ITUDE)?)[^\d-+]{0,24}([-+]?\d{1,2}(?:[.,]\d{3,})?)\s*([NS])?[\s\S]{0,100}?(?:LON(?:GITUDE)?|LONG(?:ITUDE)?)[^\d-+]{0,24}([-+]?\d{1,3}(?:[.,]\d{3,})?)\s*([EWOlL])?/gi;
+  const lonLatLabelRegex = /(?:LON(?:GITUDE)?|LONG(?:ITUDE)?)[^\d-+]{0,24}([-+]?\d{1,3}(?:[.,]\d{3,})?)\s*([EWOlL])?[\s\S]{0,100}?(?:LAT(?:ITUDE)?)[^\d-+]{0,24}([-+]?\d{1,2}(?:[.,]\d{3,})?)\s*([NS])?/gi;
+  const dmsRegex = /(\d{1,3})\s*[°º]\s*(\d{1,2})\s*['’′]\s*(\d{1,2}(?:[.,]\d+)?)\s*(?:["”″])?\s*([NSOEWL])/gi;
+
+  let match;
+  while ((match = latLonLabelRegex.exec(text)) !== null) {
+    const pair = normalizeLatLonPair(match[1], match[3], match[2], match[4]);
+    if (pair) points.push(pair);
+  }
+
+  while ((match = lonLatLabelRegex.exec(text)) !== null) {
+    const pair = normalizeLatLonPair(match[3], match[1], match[4], match[2]);
+    if (pair) points.push(pair);
+  }
+
+  const dmsCoords = [];
+  while ((match = dmsRegex.exec(text)) !== null) {
+    const decimal = parseDmsToDecimal(match[1], match[2], match[3], match[4]);
+    if (!Number.isFinite(decimal)) continue;
+
+    const hemi = String(match[4] || '').toUpperCase();
+    if (hemi === 'N' || hemi === 'S') {
+      dmsCoords.push({ type: 'lat', value: decimal });
+    } else if (hemi === 'E' || hemi === 'W' || hemi === 'O' || hemi === 'L') {
+      dmsCoords.push({ type: 'lon', value: decimal });
     }
   }
 
-  if (cleaned.length < 3) return null;
-  const first = cleaned[0];
-  const last = cleaned[cleaned.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    cleaned.push([first[0], first[1]]);
+  for (let i = 0; i + 1 < dmsCoords.length; i++) {
+    const a = dmsCoords[i];
+    const b = dmsCoords[i + 1];
+    if (a.type === 'lat' && b.type === 'lon') {
+      const pair = normalizeLatLonPair(a.value, b.value);
+      if (pair) points.push(pair);
+      i += 1;
+    } else if (a.type === 'lon' && b.type === 'lat') {
+      const pair = normalizeLatLonPair(b.value, a.value);
+      if (pair) points.push(pair);
+      i += 1;
+    }
   }
 
-  return cleaned.length >= 4 ? cleaned : null;
+  if (points.length < 3) {
+    const decimalPairs = text.matchAll(/([-+]?\d{1,3}[.,]\d{4,})[^\d\n\r]{1,20}([-+]?\d{1,3}[.,]\d{4,})/g);
+    for (const pairMatch of decimalPairs) {
+      const a = parseNumericValue(pairMatch[1]);
+      const b = parseNumericValue(pairMatch[2]);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+
+      let pair = null;
+      if (Math.abs(a) <= 90 && Math.abs(b) <= 180) {
+        pair = normalizeLatLonPair(a, b);
+      } else if (Math.abs(a) <= 180 && Math.abs(b) <= 90) {
+        pair = normalizeLatLonPair(b, a);
+      }
+
+      if (pair) points.push(pair);
+      if (points.length >= 120) break;
+    }
+  }
+
+  return cleanAndCloseRing(points);
 }
 
 function coercePolygonGeometry(geometry) {
@@ -1385,35 +1487,66 @@ module.exports = async function (context, req) {
 
     if (!USE_AZURE_AI) {
       const ring = extractUtmRingFromText(localOcrText);
-      if (!ring) {
-        throw new Error('Não foi possível localizar coordenadas UTM válidas no OCR enviado.');
+      if (ring) {
+        const extractedVertices = Math.max(0, ring.length - 1);
+        context.res = {
+          status: 200,
+          headers: corsHeaders,
+          body: {
+            success: true,
+            matricula: '',
+            projectionKey: 'SIRGAS2000_22S',
+            geometryMode: 'absolute',
+            sourcePattern: 'ocr-text-utm',
+            warnings: ['Extração executada sem Azure (parser do workspace - UTM).'],
+            geojson: {
+              type: 'FeatureCollection',
+              features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }]
+            },
+            pagesAnalyzed: 0,
+            pageNumbers: [],
+            pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+            usedPagedFallback: false,
+            textSourceUsed: 'client-ocr-text',
+            expectedVertices: estimateExpectedVertexCount(localOcrText),
+            extractedVertices
+          }
+        };
+        return;
       }
 
-      const extractedVertices = Math.max(0, ring.length - 1);
-      context.res = {
-        status: 200,
-        headers: corsHeaders,
-        body: {
-          success: true,
-          matricula: '',
-          projectionKey: 'SIRGAS2000_22S',
-          geometryMode: 'absolute',
-          sourcePattern: 'ocr-text',
-          warnings: ['Extração executada sem Azure (parser do workspace).'],
-          geojson: {
-            type: 'FeatureCollection',
-            features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }]
-          },
-          pagesAnalyzed: 0,
-          pageNumbers: [],
-          pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
-          usedPagedFallback: false,
-          textSourceUsed: 'client-ocr-text',
-          expectedVertices: estimateExpectedVertexCount(localOcrText),
-          extractedVertices
-        }
-      };
-      return;
+      const latLonRing = extractLatLonRingFromText(localOcrText);
+      if (latLonRing) {
+        const extractedVertices = Math.max(0, latLonRing.length - 1);
+        context.res = {
+          status: 200,
+          headers: corsHeaders,
+          body: {
+            success: true,
+            matricula: '',
+            projectionKey: 'WGS84',
+            geometryMode: 'absolute',
+            sourcePattern: 'ocr-text-latlon',
+            warnings: ['Extração executada sem Azure (parser do workspace - latitude/longitude).'],
+            geojson: {
+              type: 'FeatureCollection',
+              features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [latLonRing] }, properties: {} }]
+            },
+            pagesAnalyzed: 0,
+            pageNumbers: [],
+            pagesRequestedHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+            usedPagedFallback: false,
+            textSourceUsed: 'client-ocr-text',
+            expectedVertices: estimateExpectedVertexCount(localOcrText),
+            extractedVertices
+          }
+        };
+        return;
+      }
+
+      {
+        throw new Error('Não foi possível localizar coordenadas UTM válidas no OCR enviado.');
+      }
     }
 
     const ocrResult = localOcrText
