@@ -256,12 +256,39 @@ function preprocessCanvasForOcr(canvas, ctx, mode = 'binary') {
 }
 
 async function recognizeCanvasForOcr(canvas, pageSegMode) {
-  const result = await window.Tesseract.recognize(canvas.toDataURL('image/png'), 'por+eng', {
-    tessedit_pageseg_mode: String(pageSegMode),
-    preserve_interword_spaces: '1'
-  });
+  const source = canvas.toDataURL('image/png');
+  const languages = ['por+eng', 'eng'];
+  let lastError = null;
 
-  return String(result?.data?.text || '').trim();
+  for (const language of languages) {
+    try {
+      const result = await window.Tesseract.recognize(source, language, {
+        tessedit_pageseg_mode: String(pageSegMode),
+        preserve_interword_spaces: '1'
+      });
+
+      return String(result?.data?.text || '').trim();
+    } catch (error) {
+      lastError = error;
+      console.warn('[PDFtoArcgis][Tesseract] falha na tentativa de idioma', {
+        language,
+        pageSegMode,
+        message: error?.message || String(error)
+      });
+    }
+  }
+
+  throw lastError || new Error('Falha desconhecida no Tesseract.');
+}
+
+function computeSafeOcrScale(page) {
+  const baseViewport = page.getViewport({ scale: 1.0 });
+  const basePixels = Math.max(1, baseViewport.width * baseViewport.height);
+  const maxPixels = 8_000_000;
+  const desiredScale = 3.2;
+  const maxScaleByPixels = Math.sqrt(maxPixels / basePixels);
+  const safeScale = Math.max(1.6, Math.min(desiredScale, maxScaleByPixels));
+  return Number.isFinite(safeScale) ? safeScale : 2.4;
 }
 
 async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
@@ -277,7 +304,8 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 4.2 });
+      const scale = computeSafeOcrScale(page);
+      const viewport = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) continue;
@@ -299,6 +327,7 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
         const text = await recognizeCanvasForOcr(workCanvas, pageSegMode);
         attempts.push({
           label,
+          scale,
           pageSegMode,
           mode,
           chars: text.length,
@@ -331,6 +360,7 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
       const mergedPageText = mergeOcrTexts(text1, text2, text3, text4);
       console.log('[PDFtoArcgis][Tesseract] página processada', {
         page: pageNum,
+        scale,
         attempts,
         mergedChars: mergedPageText.length,
         mergedSignal: countCoordinateSignal(mergedPageText),
@@ -342,7 +372,10 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
     }
 
     return chunks.join('\n\n').trim();
-  } catch {
+  } catch (error) {
+    console.error('[PDFtoArcgis][Tesseract] falha geral no OCR', {
+      message: error?.message || String(error)
+    });
     return '';
   }
 }
