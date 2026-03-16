@@ -14,6 +14,7 @@ const USE_AZURE_AI = String(process.env.PDFTOARCGIS_USE_AZURE_AI || 'false').toL
 const http = require('http');
 const https = require('https');
 const { runLocalWorkspaceAI } = require('../local-ai/workspace-ai');
+const { runLocalPaddleOcr } = require('../local-ocr/paddle-ocr');
 
 module.exports = undefined;
 
@@ -1550,6 +1551,7 @@ module.exports = async function (context, req) {
   const useWorkspaceLocalAI = String(env.PDFTOARCGIS_USE_WORKSPACE_LOCAL_AI || 'true').toLowerCase() === 'true';
   const workspaceLocalAIOnly = String(env.PDFTOARCGIS_WORKSPACE_LOCAL_AI_ONLY || 'false').toLowerCase() === 'true';
   const allowAzureFallback = String(env.PDFTOARCGIS_ALLOW_AZURE_FALLBACK || 'true').toLowerCase() === 'true';
+  const useLocalPaddleOcr = String(env.PDFTOARCGIS_USE_LOCAL_PADDLE_OCR || 'false').toLowerCase() === 'true';
 
   const usesDirectChatEndpoint = /\/openai\/deployments\/.+\/chat\/completions/i.test(String(openAiConfig.endpoint || ''));
 
@@ -1613,17 +1615,6 @@ module.exports = async function (context, req) {
     }
   }
 
-  if (!USE_AZURE_AI && !localOcrText) {
-    context.res = {
-      status: 400,
-      headers: corsHeaders,
-      body: {
-        error: 'Fluxo sem Azure ativo: envie ocrText no payload para extração.'
-      }
-    };
-    return;
-  }
-
   if (USE_AZURE_AI && !localOcrText && !looksLikePdfBase64(normalizedPdfBase64)) {
     context.res = {
       status: 400,
@@ -1641,6 +1632,38 @@ module.exports = async function (context, req) {
       headers: corsHeaders,
       body: {
         error: 'Configuração Azure Document Intelligence incompleta. Defina endpoint e key.'
+      }
+    };
+    return;
+  }
+
+  if (!USE_AZURE_AI && !localOcrText && useLocalPaddleOcr && looksLikePdfBase64(normalizedPdfBase64)) {
+    try {
+      const paddleResult = await runLocalPaddleOcr({
+        pdfBase64: normalizedPdfBase64,
+        fileName,
+        totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0
+      });
+
+      localOcrText = String(paddleResult?.text || '').trim();
+      context.log('[pdf-to-geojson][OCR][PADDLE]', {
+        chars: localOcrText.length,
+        pages: Array.isArray(paddleResult?.pages) ? paddleResult.pages.length : 0,
+        engine: paddleResult?.engine || 'paddleocr-local'
+      });
+    } catch (paddleError) {
+      context.log.warn('[pdf-to-geojson][OCR][PADDLE] falhou, mantendo fluxo atual:', paddleError?.message || paddleError);
+    }
+  }
+
+  if (!USE_AZURE_AI && !localOcrText) {
+    context.res = {
+      status: 400,
+      headers: corsHeaders,
+      body: {
+        error: useLocalPaddleOcr
+          ? 'Fluxo sem Azure ativo: OCR indisponível. Envie ocrText no payload ou configure PaddleOCR local.'
+          : 'Fluxo sem Azure ativo: envie ocrText no payload para extração.'
       }
     };
     return;

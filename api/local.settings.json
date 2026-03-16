@@ -22,6 +22,11 @@
     "PDFTOARCGIS_LOCAL_AI_MODEL_PATH": "C:\\Users\\marco\\Documents\\Workspace\\Projetos_html\\Vetorizador\\V017\\Vetorizador-Javascript\\pdfspliter\\PDFtoArcgis\\models\\Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
     "PDFTOARCGIS_LOCAL_AI_TIMEOUT_MS": "240000",
     "PDFTOARCGIS_USE_LLM_EXTRACTION": "false",
-    "PDFTOARCGIS_LLM_ONLY_MODE": "false"
+    "PDFTOARCGIS_LLM_ONLY_MODE": "false",
+    "PDFTOARCGIS_USE_LOCAL_PADDLE_OCR": "true",
+    "PDFTOARCGIS_PADDLE_PYTHON_BIN": "C:\\Users\\marco\\Documents\\Workspace\\Projetos_html\\Vetorizador\\V017\\Vetorizador-Javascript\\.venv\\Scripts\\python.exe",
+    "PDFTOARCGIS_PADDLE_TIMEOUT_MS": "240000",
+    "PDFTOARCGIS_PADDLE_LANG": "pt",
+    "PDFTOARCGIS_PADDLE_SHOW_LOG": "false"
   }
 }

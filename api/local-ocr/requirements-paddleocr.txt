@@ -1,0 +1,5 @@
+paddleocr==2.9.1
+paddlepaddle==2.6.2
+pypdfium2==4.30.0
+numpy==1.26.4
+Pillow==10.4.0

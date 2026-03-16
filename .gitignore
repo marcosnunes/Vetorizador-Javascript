@@ -21,3 +21,16 @@ pdfspliter/PDFtoArcgis/testes/
 vetoriza/target/
 pdfspliter/PDFtoArcgis/models/
 pdfspliter/PDFtoArcgis/llama-cli/
+
+# Python virtual environments (local only — never commit)
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PaddleOCR temp/cache artefacts
+api/local-ocr/__pycache__/
+api/local-ocr/*.pyc
+api/local-ocr/paddle_ocr_tmp_*
