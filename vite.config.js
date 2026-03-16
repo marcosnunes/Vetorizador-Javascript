@@ -9,7 +9,14 @@ export default defineConfig({
   server: {
     port: 8080,
     open: true,
-    cors: true
+    cors: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:7072',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   },
   build: {
     outDir: 'dist',

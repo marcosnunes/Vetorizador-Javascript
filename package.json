@@ -6,6 +6,7 @@
     },
     "scripts": {
         "dev": "vite",
+        "dev:pdf-api": "node ./scripts/dev-pdf-api-server.cjs",
         "build": "vite build",
         "preview": "vite preview",
         "lint": "eslint . --ext .js",

@@ -14,10 +14,28 @@ function getPdfToArcgisConfig() {
   return (cfg && typeof cfg === 'object') ? cfg : {};
 }
 
-function getWorkspaceAiExtractorUrl() {
+const DEFAULT_REMOTE_PDFTOARCGIS_API_ORIGIN = 'https://jolly-pebble-0487d1a1e.6.azurestaticapps.net';
+
+function isLocalPdfToArcgisHost() {
+  const host = String(window.location.hostname || '').trim().toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function buildWorkspaceAiExtractorCandidates() {
   const cfg = getPdfToArcgisConfig();
-  const configured = String(cfg.workspaceAiExtractorUrl || '').trim();
-  return configured || '/api/pdf-to-geojson';
+  const configured = String(cfg.workspaceAiExtractorUrl || '').trim() || '/api/pdf-to-geojson';
+  const candidates = [configured];
+
+  if (isLocalPdfToArcgisHost() && /^\/api\//.test(configured)) {
+    const devOrigin = String(cfg.devApiOrigin || DEFAULT_REMOTE_PDFTOARCGIS_API_ORIGIN).trim().replace(/\/$/, '');
+    if (devOrigin) candidates.push(`${devOrigin}${configured}`);
+  }
+
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function getWorkspaceAiExtractorUrl() {
+  return buildWorkspaceAiExtractorCandidates()[0] || '/api/pdf-to-geojson';
 }
 
 const ENABLE_TOPOLOGY_VALIDATION = false;
@@ -53,7 +71,7 @@ function arrayBufferToBase64(buffer) {
 }
 
 async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = '', retryCount = 0, pdfBase64 = '') {
-  const route = getWorkspaceAiExtractorUrl();
+  const routes = buildWorkspaceAiExtractorCandidates();
   const cfg = getPdfToArcgisConfig();
   const maxRetries = Number.isFinite(Number(cfg.maxWorkspaceRetries))
     ? Math.max(0, Number(cfg.maxWorkspaceRetries))
@@ -61,6 +79,7 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
 
   console.log('[PDFtoArcgis][REQ] /api/pdf-to-geojson', {
     fileName,
+    routes,
     totalPagesHint,
     retryCount,
     ocrChars: String(ocrText || '').length,
@@ -68,57 +87,89 @@ async function callWorkspaceAiExtractor(fileName, totalPagesHint = 0, ocrText = 
     pdfBase64Chars: String(pdfBase64 || '').length
   });
 
-  const response = await fetch(route, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileName,
-      totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
-      ocrText: String(ocrText || '').slice(0, 120000),
-      pdfBase64: String(pdfBase64 || '')
-    })
-  });
+  let lastError = null;
 
-  const raw = await response.text().catch(() => '');
-  let payload = {};
-  if (raw) {
+  for (let routeIndex = 0; routeIndex < routes.length; routeIndex++) {
+    const route = routes[routeIndex];
     try {
-      payload = JSON.parse(raw);
-    } catch {
-      payload = { error: raw.slice(0, 600) };
+      const response = await fetch(route, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName,
+          totalPagesHint: Number.isFinite(Number(totalPagesHint)) ? Number(totalPagesHint) : 0,
+          ocrText: String(ocrText || '').slice(0, 120000),
+          pdfBase64: String(pdfBase64 || '')
+        })
+      });
+
+      const raw = await response.text().catch(() => '');
+      let payload = {};
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = { error: raw.slice(0, 600) };
+        }
+      }
+
+      if (!response.ok) {
+        console.warn('[PDFtoArcgis][RESP][ERROR]', {
+          route,
+          status: response.status,
+          rawPreview: String(raw || '').slice(0, 400)
+        });
+
+        if (response.status === 404 && routeIndex + 1 < routes.length) {
+          console.warn('[PDFtoArcgis][API] rota indisponivel, tentando fallback', {
+            from: route,
+            to: routes[routeIndex + 1]
+          });
+          continue;
+        }
+
+        const transient = new Set([429, 500, 503, 504]);
+        if (transient.has(response.status) && retryCount < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 1200 * Math.pow(2, retryCount)));
+          return callWorkspaceAiExtractor(fileName, totalPagesHint, ocrText, retryCount + 1, pdfBase64);
+        }
+      }
+
+      console.log('[PDFtoArcgis][RESP]', {
+        route,
+        status: response.status,
+        success: !!payload?.success,
+        sourcePattern: payload?.sourcePattern,
+        projectionKey: payload?.projectionKey,
+        extractedVertices: payload?.extractedVertices,
+        warningsCount: Array.isArray(payload?.warnings) ? payload.warnings.length : 0,
+        debug: payload?.debug || null
+      });
+
+      if (!response.ok || !payload?.success) {
+        const reason = payload?.error || `HTTP ${response.status}`;
+        if (payload?.ocrPreview) console.warn('[PDFtoArcgis] ocrPreview recebido da API:', payload.ocrPreview);
+        if (payload?.debug) console.warn('[PDFtoArcgis] debug recebido da API:', payload.debug);
+        const handledError = new Error(`Serviço de extração online indisponível: ${reason}`);
+        handledError.handledResponse = true;
+        throw handledError;
+      }
+
+      return payload;
+    } catch (error) {
+      lastError = error;
+      if (!error?.handledResponse && routeIndex + 1 < routes.length) {
+        console.warn('[PDFtoArcgis][API] falha de rede/rota, tentando fallback', {
+          route,
+          nextRoute: routes[routeIndex + 1],
+          message: error?.message || String(error)
+        });
+        continue;
+      }
     }
   }
 
-  if (!response.ok) {
-    console.warn('[PDFtoArcgis][RESP][ERROR]', {
-      status: response.status,
-      rawPreview: String(raw || '').slice(0, 400)
-    });
-    const transient = new Set([429, 500, 503, 504]);
-    if (transient.has(response.status) && retryCount < maxRetries) {
-      await new Promise((resolve) => setTimeout(resolve, 1200 * Math.pow(2, retryCount)));
-      return callWorkspaceAiExtractor(fileName, totalPagesHint, ocrText, retryCount + 1, pdfBase64);
-    }
-  }
-
-  console.log('[PDFtoArcgis][RESP]', {
-    status: response.status,
-    success: !!payload?.success,
-    sourcePattern: payload?.sourcePattern,
-    projectionKey: payload?.projectionKey,
-    extractedVertices: payload?.extractedVertices,
-    warningsCount: Array.isArray(payload?.warnings) ? payload.warnings.length : 0,
-    debug: payload?.debug || null
-  });
-
-  if (!response.ok || !payload?.success) {
-    const reason = payload?.error || `HTTP ${response.status}`;
-    if (payload?.ocrPreview) console.warn('[PDFtoArcgis] ocrPreview recebido da API:', payload.ocrPreview);
-    if (payload?.debug) console.warn('[PDFtoArcgis] debug recebido da API:', payload.debug);
-    throw new Error(`Serviço de extração online indisponível: ${reason}`);
-  }
-
-  return payload;
+  throw lastError || new Error('Serviço de extração online indisponível.');
 }
 
 async function inferPdfPageCount(arrayBuffer) {
@@ -158,7 +209,17 @@ async function extractPdfTextLocally(arrayBuffer, maxPages = 40) {
   }
 }
 
-function preprocessCanvasForOcr(canvas, ctx) {
+function cloneCanvasForOcr(sourceCanvas) {
+  const clone = document.createElement('canvas');
+  clone.width = sourceCanvas.width;
+  clone.height = sourceCanvas.height;
+  const cloneCtx = clone.getContext('2d', { willReadFrequently: true });
+  if (!cloneCtx) return null;
+  cloneCtx.drawImage(sourceCanvas, 0, 0);
+  return { canvas: clone, ctx: cloneCtx };
+}
+
+function preprocessCanvasForOcr(canvas, ctx, mode = 'binary') {
   try {
     const width = canvas.width;
     const height = canvas.height;
@@ -172,17 +233,35 @@ function preprocessCanvasForOcr(canvas, ctx) {
       const g = data[i + 1];
       const b = data[i + 2];
       const gray = Math.round((r * 0.299) + (g * 0.587) + (b * 0.114));
-      const boosted = Math.min(255, Math.max(0, (gray - 110) * 2));
-      const bin = boosted > 140 ? 255 : 0;
-      data[i] = bin;
-      data[i + 1] = bin;
-      data[i + 2] = bin;
+      const boosted = Math.min(255, Math.max(0, (gray - 92) * 2.6));
+      let out = gray;
+
+      if (mode === 'contrast') {
+        out = boosted;
+      } else if (mode === 'invert-binary') {
+        out = boosted > 138 ? 0 : 255;
+      } else {
+        out = boosted > 138 ? 255 : 0;
+      }
+
+      data[i] = out;
+      data[i + 1] = out;
+      data[i + 2] = out;
     }
 
     ctx.putImageData(img, 0, 0);
   } catch {
     // Mantem OCR mesmo se preprocessamento falhar.
   }
+}
+
+async function recognizeCanvasForOcr(canvas, pageSegMode) {
+  const result = await window.Tesseract.recognize(canvas.toDataURL('image/png'), 'por+eng', {
+    tessedit_pageseg_mode: String(pageSegMode),
+    preserve_interword_spaces: '1'
+  });
+
+  return String(result?.data?.text || '').trim();
 }
 
 async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
@@ -198,7 +277,7 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 3.2 });
+      const viewport = page.getViewport({ scale: 4.2 });
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) continue;
@@ -207,31 +286,52 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
       canvas.height = Math.floor(viewport.height);
       await page.render({ canvasContext: ctx, viewport }).promise;
 
-      // Passo 1: OCR em imagem original (preserva detalhes finos).
-      const pass1 = await window.Tesseract.recognize(canvas, 'por+eng', {
-        tessedit_pageseg_mode: '6',
-        preserve_interword_spaces: '1'
-      });
-      const text1 = String(pass1?.data?.text || '').trim();
+      const attempts = [];
+      const runAttempt = async (label, pageSegMode, mode = 'original') => {
+        let workCanvas = canvas;
+        if (mode !== 'original') {
+          const cloned = cloneCanvasForOcr(canvas);
+          if (!cloned) return '';
+          preprocessCanvasForOcr(cloned.canvas, cloned.ctx, mode);
+          workCanvas = cloned.canvas;
+        }
 
-      // Passo 2 (condicional): OCR em imagem binarizada quando sinal de coordenada estiver fraco.
-      let text2 = '';
-      if (!hasUtmCandidates(text1, 4)) {
-        preprocessCanvasForOcr(canvas, ctx);
-        const pass2 = await window.Tesseract.recognize(canvas, 'por+eng', {
-          tessedit_pageseg_mode: '11',
-          preserve_interword_spaces: '1'
+        const text = await recognizeCanvasForOcr(workCanvas, pageSegMode);
+        attempts.push({
+          label,
+          pageSegMode,
+          mode,
+          chars: text.length,
+          signal: countCoordinateSignal(text),
+          preview: text.slice(0, 180)
         });
-        text2 = String(pass2?.data?.text || '').trim();
+        return text;
+      };
+
+      const text1 = await runAttempt('orig-psm6', 6);
+      let mergedPartial = mergeOcrTexts(text1);
+
+      let text2 = '';
+      if (mergedPartial.length < 120 || !hasUtmCandidates(mergedPartial, 4)) {
+        text2 = await runAttempt('contrast-psm4', 4, 'contrast');
+        mergedPartial = mergeOcrTexts(text1, text2);
       }
 
-      const mergedPageText = mergeOcrTexts(text1, text2);
+      let text3 = '';
+      if (mergedPartial.length < 120 || !hasUtmCandidates(mergedPartial, 4)) {
+        text3 = await runAttempt('binary-psm11', 11, 'binary');
+        mergedPartial = mergeOcrTexts(text1, text2, text3);
+      }
+
+      let text4 = '';
+      if (mergedPartial.length < 120 || !hasUtmCandidates(mergedPartial, 4)) {
+        text4 = await runAttempt('invert-psm12', 12, 'invert-binary');
+      }
+
+      const mergedPageText = mergeOcrTexts(text1, text2, text3, text4);
       console.log('[PDFtoArcgis][Tesseract] página processada', {
         page: pageNum,
-        pass1Chars: text1.length,
-        pass1Signal: countCoordinateSignal(text1),
-        pass2Chars: text2.length,
-        pass2Signal: countCoordinateSignal(text2),
+        attempts,
         mergedChars: mergedPageText.length,
         mergedSignal: countCoordinateSignal(mergedPageText),
         mergedPreview: mergedPageText.slice(0, 240)
