@@ -291,6 +291,86 @@ function computeSafeOcrScale(page) {
   return Number.isFinite(safeScale) ? safeScale : 2.4;
 }
 
+function extractCanvasTile(sourceCanvas, tileX, tileY, cols, rows) {
+  const tileWidth = Math.floor(sourceCanvas.width / cols);
+  const tileHeight = Math.floor(sourceCanvas.height / rows);
+  const sx = tileX * tileWidth;
+  const sy = tileY * tileHeight;
+  const isLastCol = tileX === cols - 1;
+  const isLastRow = tileY === rows - 1;
+  const sw = isLastCol ? sourceCanvas.width - sx : tileWidth;
+  const sh = isLastRow ? sourceCanvas.height - sy : tileHeight;
+
+  if (sw <= 16 || sh <= 16) return null;
+
+  const tileCanvas = document.createElement('canvas');
+  tileCanvas.width = sw;
+  tileCanvas.height = sh;
+  const tileCtx = tileCanvas.getContext('2d', { willReadFrequently: true });
+  if (!tileCtx) return null;
+
+  tileCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  return { canvas: tileCanvas, ctx: tileCtx, sx, sy, sw, sh };
+}
+
+async function runTiledOcrFallback(baseCanvas) {
+  const fragments = [];
+  const attemptLogs = [];
+  const layouts = [
+    { cols: 2, rows: 2 },
+    { cols: 3, rows: 3 }
+  ];
+
+  for (const layout of layouts) {
+    for (let y = 0; y < layout.rows; y++) {
+      for (let x = 0; x < layout.cols; x++) {
+        const tile = extractCanvasTile(baseCanvas, x, y, layout.cols, layout.rows);
+        if (!tile) continue;
+
+        let textOrig = '';
+        let textContrast = '';
+        try {
+          textOrig = await recognizeCanvasForOcr(tile.canvas, 6);
+          const contrastClone = cloneCanvasForOcr(tile.canvas);
+          if (contrastClone) {
+            preprocessCanvasForOcr(contrastClone.canvas, contrastClone.ctx, 'contrast');
+            textContrast = await recognizeCanvasForOcr(contrastClone.canvas, 6);
+          }
+        } catch (error) {
+          attemptLogs.push({
+            tile: `${layout.cols}x${layout.rows}:${x},${y}`,
+            error: error?.message || String(error)
+          });
+          continue;
+        }
+
+        const merged = mergeOcrTexts(textOrig, textContrast);
+        const signal = countCoordinateSignal(merged);
+        attemptLogs.push({
+          tile: `${layout.cols}x${layout.rows}:${x},${y}`,
+          chars: merged.length,
+          signal,
+          preview: merged.slice(0, 120)
+        });
+
+        if (merged && (signal > 0 || merged.length > 40)) {
+          fragments.push(merged);
+        }
+      }
+    }
+
+    const mergedSoFar = mergeOcrTexts(...fragments);
+    if (hasUtmCandidates(mergedSoFar, 2)) {
+      break;
+    }
+  }
+
+  return {
+    text: mergeOcrTexts(...fragments),
+    attempts: attemptLogs
+  };
+}
+
 async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
   try {
     if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
@@ -357,11 +437,21 @@ async function extractPdfTextViaTesseract(arrayBuffer, maxPages = 20) {
         text4 = await runAttempt('invert-psm12', 12, 'invert-binary');
       }
 
-      const mergedPageText = mergeOcrTexts(text1, text2, text3, text4);
+      let mergedPageText = mergeOcrTexts(text1, text2, text3, text4);
+
+      let tiledFallback = { text: '', attempts: [] };
+      if (mergedPageText.length < 120 || !hasUtmCandidates(mergedPageText, 2)) {
+        tiledFallback = await runTiledOcrFallback(canvas);
+        mergedPageText = mergeOcrTexts(mergedPageText, tiledFallback.text);
+      }
+
       console.log('[PDFtoArcgis][Tesseract] página processada', {
         page: pageNum,
         scale,
         attempts,
+        tiledAttempts: tiledFallback.attempts,
+        tiledChars: tiledFallback.text.length,
+        tiledSignal: countCoordinateSignal(tiledFallback.text),
         mergedChars: mergedPageText.length,
         mergedSignal: countCoordinateSignal(mergedPageText),
         mergedPreview: mergedPageText.slice(0, 240)
@@ -594,18 +684,18 @@ function updateValidationUI(topology, corrections = []) {
   // Renderiza resumo de sucesso.
   if (topology.isValid && validationSuccess && validationDetails) {
     validationSuccess.style.display = "block";
-    
+
     const areaHa = (topology.area / 10000).toFixed(4);
     const areaM2 = topology.area.toFixed(2);
     const closedText = topology.closed ? "✓ Fechado" : "⚠ Não fechado";
-    
+
     validationDetails.innerHTML = `
       <strong>Área:</strong> ${areaHa} ha (${areaM2} m²)<br>
       <strong>Fechamento:</strong> ${closedText}<br>
       <strong>Orientação:</strong> Anti-horária (CCW) ✓<br>
       <strong>Auto-intersecções:</strong> ${topology.hasIntersections ? '❌ Sim' : '✓ Não'}
     `;
-    
+
     if (corrections.length > 0) {
       validationDetails.innerHTML += `<br><br><strong>Correções aplicadas:</strong><br>`;
       corrections.forEach(corr => {
@@ -896,7 +986,7 @@ function validatePolygonTopology(vertices, projectionKey) {
   // Auto-interseccao
   let hasIntersections = false;
   const intersectionPairs = [];
-  
+
   for (let i = 0; i < orderedVertices.length - 1; i++) {
     for (let j = i + 2; j < orderedVertices.length - 1; j++) {
       // Não verificar arestas adjacentes
@@ -958,7 +1048,7 @@ function validatePolygonTopology(vertices, projectionKey) {
     const v1 = orderedVertices[i];
     const v2 = orderedVertices[i + 1];
     const dist = Math.hypot(v2.north - v1.north, v2.east - v1.east);
-    
+
     if (dist > 10000) { // Segmentos > 10km são suspeitos
       warnings.push(`⚠️ Segmento ${i}→${i + 1} muito longo: ${(dist / 1000).toFixed(2)}km`);
     }
@@ -1646,7 +1736,7 @@ fileInput.addEventListener("change", async (event) => {
         ? Math.max(1, Number(cfg.maxTesseractPages))
         : 30;
       const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
-      console.log('[PDFtoArcgis] Tesseract (proativo) preview:', `[${(tesseractText||'').length} chars]`, (tesseractText||'').slice(0, 600));
+      console.log('[PDFtoArcgis] Tesseract (proativo) preview:', `[${(tesseractText || '').length} chars]`, (tesseractText || '').slice(0, 600));
       if (tesseractText && tesseractText.length > (extractedText || '').length) {
         extractedText = tesseractText;
       }
@@ -1695,9 +1785,9 @@ fileInput.addEventListener("change", async (event) => {
         ? Math.max(1, Number(cfg.maxTesseractPages))
         : 30;
       const tesseractText = await extractPdfTextViaTesseract(arrayBuffer, Math.min(totalPagesHint || maxTesseractPages, maxTesseractPages));
-      console.log('[PDFtoArcgis] Tesseract (retry) preview:', `[${(tesseractText||'').length} chars]`, (tesseractText||'').slice(0, 800));
+      console.log('[PDFtoArcgis] Tesseract (retry) preview:', `[${(tesseractText || '').length} chars]`, (tesseractText || '').slice(0, 800));
       const enhancedText = mergeOcrTexts(extractedText, tesseractText);
-      console.log('[PDFtoArcgis] Enhanced OCR (merged) preview:', `[${(enhancedText||'').length} chars]`, (enhancedText||'').slice(0, 600));
+      console.log('[PDFtoArcgis] Enhanced OCR (merged) preview:', `[${(enhancedText || '').length} chars]`, (enhancedText || '').slice(0, 600));
 
       if (!enhancedText || enhancedText.length < MIN_TEXT_LENGTH) {
         throw firstError;
@@ -1831,7 +1921,7 @@ saveToFolderBtn.onclick = async () => {
     const writeFile = async (name, data) => {
       try {
         logWrite(`[PDFtoArcgis] 📝 Gravando ${name}...`);
-        
+
         // Usar keepExistingData: false para sobrescrever se o arquivo já existe
         const fh = await handle.getFileHandle(name, { create: true });
         const w = await fh.createWritable({ keepExistingData: false });
@@ -1841,7 +1931,7 @@ saveToFolderBtn.onclick = async () => {
       } catch (err) {
         // Se o usuário cancelar, não mostrar erro
         if (err && err.name === "AbortError") return;
-        
+
         // Se falhar por estado inválido, indicar problema
         if (err && (err.name === "InvalidStateError" || err.message.includes("state cached"))) {
           logWrite("[PDFtoArcgis] ⚠️ Diretório desincronizado. Re-selecionando...");
@@ -1859,7 +1949,7 @@ saveToFolderBtn.onclick = async () => {
             throw new Error("Diretório permanentemente desincronizado. Selecione a pasta novamente.");
           }
         }
-        
+
         logWrite(`[PDFtoArcgis] ❌ Erro ao salvar ${name}: ${err.message}`);
         throw err;
       }
