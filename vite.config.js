@@ -52,7 +52,7 @@ export default defineConfig({
           {
             recursive: true,
             filter: (sourcePath) => {
-              const ignored = ['.git', '.github', '.venv', 'node_modules'];
+              const ignored = ['.git', '.github', '.venv', 'node_modules', 'models', 'llama-cli'];
               return !ignored.some((name) => new RegExp(`[\\\\/]${name}([\\\\/]|$)`).test(sourcePath));
             }
           }
